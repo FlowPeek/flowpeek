@@ -25,6 +25,10 @@ struct MenuBarContent: View {
         // The only other opener is the launch-time check, which now stops firing once the permission
         // question has an answer — so without this the wizard would be unreachable after dismissal.
         Button("menu.onboarding") { OnboardingCoordinator.shared.show() }
+        // The three gestures are the whole app, and a week later nobody remembers whether it was
+        // hold-Option or Option-drag. This is the way back to just the checklist and the practice
+        // page, without walking through setup again.
+        Button("menu.tutorial") { OnboardingCoordinator.shared.show(entry: .tutorial) }
         Button("menu.permission.refresh") { app.refreshPermission() }
         Divider()
         Button("menu.update") {

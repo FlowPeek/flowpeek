@@ -29,7 +29,23 @@ final class AppState: ObservableObject {
     @Published private(set) var hasPromotedPreview = false
     @Published private(set) var engineHealth: MermaidEngineHealth?
     /// Which of the three routes the user has exercised. Drives the onboarding tutorial.
-    @Published private(set) var tutorial = TutorialProgress()
+    ///
+    /// Written back on every change rather than at the end, because the tutorial is quit halfway
+    /// through: without this, a relaunch — including the one at login the setup flow just asked for
+    /// — hands the returning user three empty circles for gestures they have already done.
+    @Published private(set) var tutorial = TutorialProgress(
+        persisted: UserDefaults.standard.dictionary(forKey: AppState.tutorialProgressKey) as? [String: String] ?? [:]
+    ) {
+        didSet {
+            guard tutorial != oldValue else { return }
+            UserDefaults.standard.set(tutorial.persisted, forKey: AppState.tutorialProgressKey)
+        }
+    }
+    private static let tutorialProgressKey = "flowpeek.tutorial.progress"
+    /// Whether the tutorial's practice page is the thing the user is looking at. A selection
+    /// FlowPeek refused is only a missed lesson while that page is open; anywhere else it is the
+    /// user's own text, and this is what keeps `receive` from asking anything about it.
+    @Published private(set) var tutorialPracticeOpen = false
     /// The override written into this app's own defaults domain; applied on the next launch.
     @Published var language: AppLanguage = AppLanguage.storedOverride(
         bundleIdentifier: Bundle.main.bundleIdentifier
@@ -341,6 +357,17 @@ final class AppState: ObservableObject {
                 head=\(String(snapshot.text.prefix(80)), privacy: .private)
                 """
             )
+            // The partial drag: a selection that starts mid-diagram has lost the starter line
+            // detection needs, so no button appears and the tutorial row would sit at "not tried"
+            // for as long as the user keeps trying. Only for text off the practice page — a
+            // half-selected diagram in the user's own document is not the tutorial's business —
+            // and only while that lesson is still waiting, because this is the branch every
+            // ordinary selection in every application takes and nothing here may walk the text
+            // twice for a lesson that is already finished.
+            if isEnabled,
+               tutorial.shouldNoteMissedSelection(text: snapshot.text, practicePageOpen: tutorialPracticeOpen) {
+                tutorial.noteMissed(.selection)
+            }
             overlay.hide()
             lastDetection = nil
             return
@@ -407,6 +434,29 @@ final class AppState: ObservableObject {
 
     func resetTutorial() {
         tutorial.reset()
+        tutorialPracticeOpen = false
+    }
+
+    /// The practice page is open, so a rejected selection is worth a second look and a lesson that
+    /// has produced nothing is worth a nudge. Neither is true before it.
+    func notePracticePageOpened() {
+        tutorialPracticeOpen = true
+    }
+
+    /// The checklist has gone, so the lesson is over: a refused selection is the user's own text
+    /// again and `receive` goes back to asking nothing at all about it.
+    func notePracticePageClosed() {
+        tutorialPracticeOpen = false
+    }
+
+    /// The three switches the tutorial has to read to know whether a lesson can fire at all: the
+    /// menu bar's pause gates every route, and the other two gate one each.
+    var tutorialSwitches: TutorialProgress.Switches {
+        TutorialProgress.Switches(
+            detectionEnabled: isEnabled,
+            clipboardWatchEnabled: clipboardWatchEnabled,
+            ambientPeekEnabled: ambientPeekEnabled
+        )
     }
 
     func previewAmbient() {

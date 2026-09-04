@@ -67,6 +67,10 @@
 "settings.language.korean" = "한국어";
 "settings.language.relaunch" = "언어를 바꾸려면 FlowPeek을 다시 시작해야 합니다.";
 "settings.language.relaunch.action" = "지금 다시 시작";
+"settings.ambient" = "홀드해서 엿보기";
+"settings.ambient.description" = "Option을 누른 채 다이어그램을 가리키면 테두리가 생기고 ⌥Space로 엽니다. Option을 누르고 있는 동안, 포인터 아래만 읽습니다. 화면을 직접 그리는 앱—예를 들어 캔버스로 출력하는 터미널—은 읽을 텍스트를 노출하지 않으며, 그런 곳에서는 복사가 계속 동작합니다.";
+"ambient.hint.generic" = "머메이드";
+"ambient.hint.help" = "이 다이어그램 열기";
 "settings.clipboard" = "클립보드 감시";
 "settings.clipboard.description" = "선택 영역을 읽을 수 없는 앱—예를 들어 화면을 직접 그리는 터미널—에서 머메이드를 복사하면, 여는 단축키를 담은 작은 배지가 떠서 알려줍니다. 클립보드는 읽기만 하고 바꾸지 않으며, 내용을 저장하거나 기록하지 않습니다.";
 "preview.open-window" = "윈도우에서 열기";

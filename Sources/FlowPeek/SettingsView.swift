@@ -217,6 +217,32 @@ struct SettingsView: View {
 
             settingsCard {
                 HStack(alignment: .top, spacing: 14) {
+                    settingIcon("viewfinder", color: .pink)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 8) {
+                            Text("settings.ambient").font(.headline)
+                            Text("settings.experimental")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.pink)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.pink.opacity(0.12), in: Capsule())
+                        }
+                        Text("settings.ambient.description")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 14)
+                    Toggle("", isOn: $app.ambientPeekEnabled)
+                        .labelsHidden()
+                        .onChange(of: app.ambientPeekEnabled) { _, _ in app.applyEnabledState() }
+                }
+            }
+            .togglesOnTap($app.ambientPeekEnabled)
+
+            settingsCard {
+                HStack(alignment: .top, spacing: 14) {
                     settingIcon("power", color: .blue)
                     VStack(alignment: .leading, spacing: 5) {
                         Text("settings.launch-at-login").font(.headline)

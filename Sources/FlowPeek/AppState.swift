@@ -12,6 +12,8 @@ final class AppState: ObservableObject {
     @AppStorage("flowpeek.enabled") var isEnabled = true
     @AppStorage("flowpeek.onboardingComplete") var onboardingComplete = false
     @AppStorage("flowpeek.clipboard.enabled") var clipboardWatchEnabled = true
+    /// Experimental: hold Option to outline Mermaid under the pointer. Off until asked for.
+    @AppStorage("flowpeek.ambient.enabled") var ambientPeekEnabled = false
     @AppStorage("flowpeek.ai.enabled") var aiEnabled = false
     @AppStorage("flowpeek.ai.provider") var providerRawValue = AIProviderKind.openAI.rawValue
     @Published private(set) var accessibilityGranted = AXIsProcessTrusted()
@@ -28,6 +30,8 @@ final class AppState: ObservableObject {
     let overlay = SelectionOverlayCoordinator()
     let previews = PreviewCoordinator()
     let clipboard = ClipboardMonitor()
+    let ambient = AmbientPeekMonitor()
+    let highlight = AmbientHighlightCoordinator()
     let indicator = ClipboardIndicatorCoordinator()
     let shortcuts = ShortcutCenter()
     let updater = UpdaterService()
@@ -36,6 +40,8 @@ final class AppState: ObservableObject {
     private var lastDetection: (text: String, detection: MermaidDetection)?
     /// The most recent copied diagram, kept in memory only, replaced by the next copy.
     private var copied: MermaidSource?
+    /// The block the ambient outline is currently drawn around, in memory only.
+    private var ambientCandidate: AmbientCandidate?
 
     private init() {}
 
@@ -49,7 +55,14 @@ final class AppState: ObservableObject {
             return
         }
         if ProcessInfo.processInfo.arguments.contains("--settings-demo") {
-            shortcuts.handlers = [
+            ambient.onCandidate = { [weak self] candidate in self?.receiveAmbient(candidate) }
+        ambient.onDismiss = { [weak self] in
+            self?.highlight.hide()
+            self?.ambientCandidate = nil
+        }
+        ambient.onActivate = { [weak self] in self?.previewAmbient() }
+        highlight.onActivate = { [weak self] in self?.previewAmbient() }
+        shortcuts.handlers = [
                 .aiPrompt: { [weak self] in self?.presentAIPrompt() },
                 .previewClipboard: { [weak self] in self?.previewCopied() },
             ]
@@ -67,6 +80,13 @@ final class AppState: ObservableObject {
         overlay.onRender = { [weak self] snapshot in self?.render(snapshot) }
         clipboard.onMermaidCopied = { [weak self] copy in self?.receiveCopied(copy) }
         indicator.onActivate = { [weak self] in self?.previewCopied() }
+        ambient.onCandidate = { [weak self] candidate in self?.receiveAmbient(candidate) }
+        ambient.onDismiss = { [weak self] in
+            self?.highlight.hide()
+            self?.ambientCandidate = nil
+        }
+        ambient.onActivate = { [weak self] in self?.previewAmbient() }
+        highlight.onActivate = { [weak self] in self?.previewAmbient() }
         shortcuts.handlers = [
             .aiPrompt: { [weak self] in self?.presentAIPrompt() },
             .previewClipboard: { [weak self] in self?.previewCopied() },
@@ -96,8 +116,10 @@ final class AppState: ObservableObject {
     func stop() {
         selectionMonitor.stop()
         clipboard.stop()
+        ambient.stop()
         shortcuts.unregisterAll()
         indicator.hide()
+        highlight.hide()
         overlay.hide()
     }
 
@@ -114,9 +136,16 @@ final class AppState: ObservableObject {
         } else {
             clipboard.stop()
         }
+        // Ambient peek reads the accessibility tree, so it needs the same grant the overlay does.
+        if isEnabled && ambientPeekEnabled && accessibilityGranted {
+            ambient.start()
+        } else {
+            ambient.stop()
+        }
         if !isEnabled {
             overlay.hide()
             indicator.hide()
+            highlight.hide()
         }
     }
 
@@ -271,6 +300,41 @@ final class AppState: ObservableObject {
         previews.showQuick(
             document: DiagramDocument(title: String(localized: "diagram.clipboard-title"), source: copied)
         )
+    }
+
+    /// An outline is only ever drawn; opening the diagram still takes a deliberate key or click.
+    func receiveAmbient(_ candidate: AmbientCandidate) {
+        guard isEnabled, ambientPeekEnabled else { return }
+        ambientCandidate = candidate
+        highlight.show(candidate, shortcut: "⌥Space")
+        logger.debug(
+            """
+            ambient candidate: \(candidate.detection.diagramKeyword ?? "unknown", privacy: .public) \
+            in \(candidate.applicationName ?? "unknown", privacy: .public) \
+            box \(Int(candidate.bounds.width), privacy: .public)x\(Int(candidate.bounds.height), privacy: .public)
+            """
+        )
+    }
+
+    func previewAmbient() {
+        highlight.hide()
+        guard let candidate = ambientCandidate else { return }
+        ambientCandidate = nil
+        let title = String(localized: "preview.error.title")
+        if let engineHealth, !engineHealth.isUsable {
+            previews.showMessage(title: title, message: engineHealth.menuDescription ?? "")
+            return
+        }
+        do {
+            let source = try MermaidSource(rawValue: candidate.detection.extractedSource)
+            previews.showQuick(
+                document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source)
+            )
+        } catch let error as MermaidSource.ValidationError {
+            previews.showMessage(title: title, message: localizedUserMessage(error))
+        } catch {
+            previews.showMessage(title: title, message: error.localizedDescription)
+        }
     }
 
     func render(_ snapshot: SelectionSnapshot) {

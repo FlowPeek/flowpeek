@@ -67,6 +67,10 @@
 "settings.language.korean" = "한국어";
 "settings.language.relaunch" = "FlowPeek needs to restart to change language.";
 "settings.language.relaunch.action" = "Restart Now";
+"settings.ambient" = "Hold to peek";
+"settings.ambient.description" = "Hold Option and point at a diagram: FlowPeek outlines it and ⌥Space opens it. Only reads what is under the pointer, and only while Option is down. Apps that draw their own text — a terminal rendering to a canvas, for one — expose nothing to read; copying still works there.";
+"ambient.hint.generic" = "Mermaid";
+"ambient.hint.help" = "Open this diagram";
 "settings.clipboard" = "Watch the clipboard";
 "settings.clipboard.description" = "When you copy Mermaid from an app FlowPeek cannot read a selection from — a terminal that draws its own text, for instance — a small badge appears with the shortcut that opens it. The clipboard is only read, never changed, and its contents are never stored or logged.";
 "preview.open-window" = "Open in Window";

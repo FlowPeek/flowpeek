@@ -24,7 +24,10 @@ final class OnboardingCoordinator {
         window.styleMask = [.borderless, .closable, .fullSizeContentView]
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = true
+        // The content draws its own shadow inside `.padding`, so AppKit must not draw a second one:
+        // its shadow traces the whole window rect, which extends well beyond the visible card and
+        // reads as a rounded halo floating outside it.
+        window.hasShadow = false
         window.isMovableByWindowBackground = true
         window.animationBehavior = .documentWindow
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]

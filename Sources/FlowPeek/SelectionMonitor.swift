@@ -196,9 +196,10 @@ final class SelectionMonitor {
 ///
 /// One instance for the whole app, because both routes into a preview need the same processes warm
 /// and the switch is one shared boolean per target: a per-route memo would let the selection route
-/// turn a tree off while the ambient route still believed it was on. Both routes stop together --
-/// `AppState.applyEnabledState` starts and stops them from the same grant -- so releasing here on
-/// the selection monitor's stop cannot pull the tree out from under an ambient read.
+/// turn a tree off while the ambient route still believed it was on. The memo is only a way of not
+/// repeating one message, never a claim about who owns the switch -- `release()` is called when the
+/// selection monitor stops, which is not the same moment the ambient monitor stops, and each
+/// ambient read warms the app it is about to read for exactly that reason.
 @MainActor
 final class AccessibilityTreeWarmUp {
     static let shared = AccessibilityTreeWarmUp()
@@ -211,10 +212,14 @@ final class AccessibilityTreeWarmUp {
         let app = AXUIElementCreateApplication(pid)
         _ = AXUIElementSetMessagingTimeout(app, AccessibilitySelectionReader.messagingTimeout)
         let error = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        enabledProcesses.insert(pid)
         logger.debug(
             "AXManualAccessibility enabled for pid \(pid) -> \(AccessibilitySelectionReader.name(error), privacy: .public)"
         )
+        // Only a set that landed is remembered. A busy app answers this with a timeout, and
+        // memoising that would leave it showing a tree of empty groups for the rest of the
+        // process's life while both routes believed it was awake.
+        guard error == .success else { return }
+        enabledProcesses.insert(pid)
     }
 
     func forget(_ pid: pid_t) {

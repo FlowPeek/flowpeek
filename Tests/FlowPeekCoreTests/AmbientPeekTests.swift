@@ -219,6 +219,59 @@ final class AmbientPeekTests: XCTestCase {
         ))
     }
 
+    /// A block that holds two copies of the same diagram is cut at the second starter, and it is
+    /// the diagram the peek chord opens -- so refusing it on the size of everything around it turns
+    /// down something that renders perfectly well.
+    func testTheDiagramIsWeighedRatherThanTheRegionItCameOutOf() throws {
+        let half = "flowchart TD\n" + (0..<340).map { "  A\($0) --> B\($0)" }.joined(separator: "\n")
+        let document = "```mermaid\n\(half)\n\(half)\n```\n"
+        let slice = try XCTUnwrap(DocumentCaretSlicer.slice(document: document, caret: 20))
+        XCTAssertGreaterThan(slice.text.count, AmbientPeekPolicy.maximumCharacters)
+        XCTAssertLessThan(slice.detection.extractedSource.count, AmbientPeekPolicy.maximumCharacters)
+        XCTAssertNotNil(AmbientPeekPolicy.candidate(
+            slice: slice,
+            bounds: CGRect(x: 703, y: 219, width: 1078, height: 24),
+            screen: screen,
+            applicationName: "Code"
+        ))
+    }
+
+    // MARK: - Where the pointer has to be for the caret to answer
+
+    /// The focused element's rectangle is one line of text, so the pane around it is what says the
+    /// pointer is in the editor at all.
+    func testAPointerInsideTheEditorPaneLetsTheCaretAnswer() {
+        let line = CGRect(x: 703, y: 219, width: 1078, height: 18)
+        let pane = CGRect(x: 700, y: 100, width: 1100, height: 800)
+        XCTAssertTrue(AmbientPeekPolicy.caretAnchorFits(
+            pointer: CGPoint(x: 900, y: 400), focused: line, container: pane
+        ))
+        // On the caret's own line, with no pane to be had.
+        XCTAssertTrue(AmbientPeekPolicy.caretAnchorFits(
+            pointer: CGPoint(x: 900, y: 225), focused: line, container: nil
+        ))
+    }
+
+    /// The sidebar, the tab bar and the integrated terminal are the same process as the editor, and
+    /// the caret is in none of them: framing the editor's caret for a pointer parked there marks a
+    /// rectangle the pointer has never been over.
+    func testAPointerElsewhereInTheSameApplicationIsRefused() {
+        let line = CGRect(x: 703, y: 219, width: 1078, height: 18)
+        let pane = CGRect(x: 700, y: 100, width: 1100, height: 800)
+        for elsewhere in [CGPoint(x: 200, y: 400), CGPoint(x: 900, y: 60), CGPoint(x: 900, y: 950)] {
+            XCTAssertFalse(
+                AmbientPeekPolicy.caretAnchorFits(pointer: elsewhere, focused: line, container: pane),
+                "\(elsewhere)"
+            )
+        }
+    }
+
+    func testAnUnreadableFrameIsNoEvidenceAtAll() {
+        let pointer = CGPoint(x: 900, y: 400)
+        XCTAssertFalse(AmbientPeekPolicy.caretAnchorFits(pointer: pointer, focused: nil, container: nil))
+        XCTAssertFalse(AmbientPeekPolicy.caretAnchorFits(pointer: pointer, focused: .zero, container: .infinite))
+    }
+
     /// The caret's own line measured 1078x18, and `minimumSize` is 24 points tall, so without this
     /// every rectangle the editor offers is refused and no outline is ever drawn.
     func testALineHeightRectangleIsGrownAboutItsCentreUntilItCanBeDrawn() {

@@ -32,19 +32,34 @@ public struct CaretDiagramSlice: Equatable, Sendable {
 /// Pure, so the slicing can be tested without an accessibility target: a document, a caret offset
 /// and the detector are the whole input.
 public enum DocumentCaretSlicer {
+    /// How many characters the line split gets through between two readings of the clock.
+    private static let clockInterval = 4_096
+
     /// The diagram around `caret`, or nil when the caret is not in one.
     ///
     /// `caret` is a UTF-16 offset and is clamped into the document, so a stale offset from an
     /// editor that has since shortened its buffer reads as "at the end" rather than as nothing.
+    ///
+    /// `deadline` is the same wall clock the accessibility calls that fetched the document run
+    /// against. Slicing is the one part of a read that is not a message to another process, so
+    /// nothing else would ever interrupt it, and a read that runs out of clock here is reported as
+    /// unfinished exactly like one that ran out of clock mid-descent.
     public static func slice(
         document: String,
         caret: Int,
-        minimumConfidence: MermaidDetection.Confidence = AmbientPeekPolicy.minimumConfidence
+        minimumConfidence: MermaidDetection.Confidence = AmbientPeekPolicy.minimumConfidence,
+        before deadline: Date = .distantFuture
     ) -> CaretDiagramSlice? {
         guard !document.isEmpty else { return nil }
-        let lines = self.lines(of: document)
+        // Refused on length before a single character is examined: an editor hands over its whole
+        // buffer, the work below is linear in it, and a clock alone cannot keep a read cheap when
+        // it is re-run every debounce for as long as the modifier is held.
+        guard document.utf16.count <= AmbientPeekPolicy.maximumDocumentCharacters else { return nil }
+        guard Date() < deadline else { return nil }
+        guard let lines = self.lines(of: document, before: deadline) else { return nil }
         let clamped = min(max(caret, 0), lines[lines.count - 1].end)
         guard let region = region(containing: clamped, in: lines) else { return nil }
+        guard Date() < deadline else { return nil }
         let detection = MermaidDetector.detect(region.text)
         guard detection.confidence >= minimumConfidence else { return nil }
         return CaretDiagramSlice(text: region.text, detection: detection, range: region.range)
@@ -68,12 +83,20 @@ public enum DocumentCaretSlicer {
     /// Iterating over `Character`s is what makes CRLF free: Swift treats "\r\n" as a single
     /// character two code units wide, so a CRLF document yields exactly the same lines as an LF one
     /// and only the offsets differ -- which is the difference the caret is counted in.
-    private static func lines(of document: String) -> [Line] {
+    private static func lines(of document: String, before deadline: Date) -> [Line]? {
         var lines: [Line] = []
         var text = ""
         var start = 0
         var offset = 0
+        var sinceCheck = 0
         for character in document {
+            // Every few thousand characters rather than every one: reading the clock is itself work,
+            // and the point is to notice a deadline that has passed, not to time each character.
+            sinceCheck += 1
+            if sinceCheck >= Self.clockInterval {
+                guard Date() < deadline else { return nil }
+                sinceCheck = 0
+            }
             let width = character.unicodeScalars.reduce(0) { $0 + UTF16.width($1) }
             if character == "\n" || character == "\r\n" || character == "\r" {
                 lines.append(Line(text: text, start: start, contentEnd: offset, end: offset + width))
@@ -122,7 +145,48 @@ public enum DocumentCaretSlicer {
         // for it on purpose: the nearest block is not the block the user is in, and framing it
         // would open a diagram the caret was never near.
         guard !sawFence else { return nil }
+        // Nothing marks a fence-free document as code, so it has to say what it is on its own first
+        // line. Without that test every focused text area in every app is a diagram the moment its
+        // first line opens with a word mermaid also uses -- "graph of dependencies" is a note, and
+        // an outline around somebody's notes is worse than no outline at all.
+        guard let opening = firstContentLine(lines), MermaidDetector.declaresDiagram(opening) else { return nil }
         return region(lines, from: 0, to: lines.count - 1)
+    }
+
+    /// The first line that carries the document's own content: blank lines, `%%` comments,
+    /// `%%{init}%%` directives and front matter all belong to a diagram file and are scanned past,
+    /// the same way the detector's starter scan passes over them.
+    private static func firstContentLine(_ lines: [Line]) -> String? {
+        var index = 0
+        var insideDirective = false
+        var insideFrontMatter = false
+        while index < lines.count {
+            let line = lines[index].text.trimmingCharacters(in: .whitespaces)
+            index += 1
+            if insideDirective {
+                if line.contains("}%%") { insideDirective = false }
+                continue
+            }
+            if insideFrontMatter {
+                if line == "---" { insideFrontMatter = false }
+                continue
+            }
+            if line.isEmpty { continue }
+            if line.hasPrefix("%%{") {
+                insideDirective = !line.contains("}%%")
+                continue
+            }
+            if line.hasPrefix("%%") { continue }
+            // Only an opening delimiter: a closing one has already been consumed above, and a
+            // document whose first content line is a lone `---` and never closes is not front
+            // matter, so it falls through and is judged as the line it is.
+            if line == "---", lines.dropFirst(index).contains(where: { $0.text.trimmingCharacters(in: .whitespaces) == "---" }) {
+                insideFrontMatter = true
+                continue
+            }
+            return line
+        }
+        return nil
     }
 
     /// Trailing blank lines are dropped from what is handed on, but not from what counts as being

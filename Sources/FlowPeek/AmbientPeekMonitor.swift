@@ -176,7 +176,10 @@ final class AmbientPeekMonitor {
         //
         // The deadline is taken after it, not from `now`: this is one message sent once per app,
         // and charging it to a budget that exists to survive a wedged app would spend the budget on
-        // the setup and leave nothing for the read it enables.
+        // the setup and leave nothing for the read it enables. The price is that a first hold in an
+        // app that is not answering pays both timeouts -- 0.2 s for the set and 0.2 s for the read,
+        // where every later hold pays one -- and the backoff only counts the read half, so it takes
+        // three of those before the app is left alone for ten seconds.
         AccessibilityTreeWarmUp.shared.warmUp(pid)
 
         let outcome = read(at: pointer, in: application, deadline: Date() + AmbientPeekPolicy.readBudget)
@@ -304,15 +307,18 @@ final class AmbientPeekMonitor {
         }
         // Nothing under the pointer reads as a diagram. In an editor that is the normal answer
         // rather than a "no", so the caret gets one attempt on what is left of the same budget --
-        // but only while the pointer really is over that editor. The fallback reads the frontmost
-        // application's own focused document, and pointing at a Finder window with an editor
-        // frontmost would otherwise put an outline where the pointer has never been.
-        // `AXUIElementGetPid` is a local lookup rather than a message to the other process.
+        // but only while the pointer really is over that editor. This is the cheap half of that
+        // test: the element under the pointer has to belong to the application whose focused
+        // document is about to be read, or pointing at a Finder window with an editor frontmost
+        // would put an outline where the pointer has never been. `AXUIElementGetPid` is a local
+        // lookup rather than a message to the other process. The other half, that the pointer is
+        // over the editor rather than merely over the same application, needs the editor's own
+        // rectangle and so belongs to the read.
         var owner: pid_t = 0
         guard AXUIElementGetPid(hit, &owner) == .success, owner == application.processIdentifier else {
             return Date() < deadline ? .nothing : .abandoned
         }
-        return caretRead(in: application, screen: screen, flip: flip, frames: frames, deadline: deadline)
+        return caretRead(at: pointer, in: application, screen: screen, flip: flip, frames: frames, deadline: deadline)
     }
 
     /// The read the descent cannot do. VS Code's editor exposes the whole file as the focused
@@ -330,6 +336,7 @@ final class AmbientPeekMonitor {
     /// but with no newlines between block elements ("Introduction#Event Modeling (EM) is..."), which
     /// is worse than what the descent already gets there.
     private func caretRead(
+        at pointer: CGPoint,
         in application: NSRunningApplication,
         screen: CGSize,
         flip: CGFloat,
@@ -348,26 +355,61 @@ final class AmbientPeekMonitor {
               role == "AXTextArea" || role == "AXTextField" else {
             return Date() < deadline ? .nothing : .abandoned
         }
+
+        // Geometry before content, because the same two rectangles answer both questions this read
+        // has: whether the pointer is over this editor at all, and where the outline may go once
+        // the diagram is found. Neither is read speculatively -- a read that gets past the gate
+        // needs both, and one that does not was going to be refused anyway.
+        let line = rect(focused, "AXFrame", before: deadline)
+            .map { ScreenGeometry.axToAppKit($0, flipReference: flip) }
+        let pane = parent(of: focused, before: deadline)
+            .flatMap { rect($0, "AXFrame", before: deadline) }
+            .map { ScreenGeometry.axToAppKit($0, flipReference: flip) }
+        guard AmbientPeekPolicy.caretAnchorFits(pointer: pointer, focused: line, container: pane) else {
+            return Date() < deadline ? .nothing : .abandoned
+        }
+
+        // How long the document is, before it is copied. The value arrives as one string across
+        // IPC and the slice that follows is not an accessibility message, so neither the messaging
+        // timeout nor the deadline can keep either of them small -- one attribute that answers with
+        // a number can, and it costs the same single message the read was going to spend anyway. An
+        // editor that will not answer it is still bounded, by the slicer's own cap, but pays for
+        // the copy before it is turned down.
+        if let length = number(focused, kAXNumberOfCharactersAttribute as String, before: deadline),
+           length > AmbientPeekPolicy.maximumDocumentCharacters {
+            return .nothing
+        }
         // Without a selection range there is no anchor at all: the pointer cannot be placed, so a
         // document that will not say where its caret is has no position to slice around.
         guard let document = string(focused, kAXValueAttribute as String, before: deadline),
               !document.isEmpty,
               let selected = range(focused, kAXSelectedTextRangeAttribute as String, before: deadline),
-              let slice = DocumentCaretSlicer.slice(document: document, caret: selected.location) else {
+              let slice = DocumentCaretSlicer.slice(
+                  document: document,
+                  caret: selected.location,
+                  before: deadline
+              ) else {
             return Date() < deadline ? .nothing : .abandoned
         }
 
-        for axFrame in outlineFrames(of: focused, hasSelection: selected.length > 0, before: deadline) {
-            let bounds = AmbientPeekPolicy.grownToMinimum(ScreenGeometry.axToAppKit(axFrame, flipReference: flip))
+        for bounds in outlineBounds(
+            of: focused,
+            line: line,
+            pane: pane,
+            hasSelection: selected.length > 0,
+            flip: flip,
+            before: deadline
+        ) {
+            let grown = AmbientPeekPolicy.grownToMinimum(bounds)
             // Same refusal as the climb: the highlight declines to draw a sliver, and the monitor
             // must not believe an outline is showing when none was drawn -- the peek chord would
             // then open a diagram nobody framed.
-            guard let visible = ScreenGeometry.clip(bounds, screenFrames: frames),
+            guard let visible = ScreenGeometry.clip(grown, screenFrames: frames),
                   visible.width >= AmbientPeekPolicy.minimumSize.width,
                   visible.height >= AmbientPeekPolicy.minimumSize.height else { continue }
             guard let candidate = AmbientPeekPolicy.candidate(
                 slice: slice,
-                bounds: bounds,
+                bounds: grown,
                 screen: screen,
                 applicationName: application.localizedName
             ) else { continue }
@@ -384,24 +426,37 @@ final class AmbientPeekMonitor {
         return Date() < deadline ? .nothing : .abandoned
     }
 
-    /// Where the caret's outline can go, best first.
+    /// Where the caret's outline can go, best first, in AppKit coordinates.
     ///
     /// The selected marker range's bounds is the only geometry VS Code answers with -- measured
     /// 185x68 at (703,167) for a 31-character selection -- and it is asked for only when something
-    /// is actually selected, which is the case it was measured in. Then the focused element's own
-    /// frame, which is the caret's line (1078x18 at (703,219)), and then the element above it, the
-    /// editor's rectangle. None of the three is the diagram's own box; no attribute reports that.
-    private func outlineFrames(of focused: AXUIElement, hasSelection: Bool, before deadline: Date) -> [CGRect] {
-        var frames: [CGRect] = []
+    /// is actually selected, which is the case it was measured in and the only case where it is the
+    /// best of the three. Then the focused element's own frame, which is the caret's line (1078x18
+    /// at (703,219)), and then the pane around it, the editor's rectangle. Both of those were
+    /// already read to place the pointer, so this spends one more message only when it is the one
+    /// that wins. None of the three is the diagram's own box; no attribute reports that.
+    private func outlineBounds(
+        of focused: AXUIElement,
+        line: CGRect?,
+        pane: CGRect?,
+        hasSelection: Bool,
+        flip: CGFloat,
+        before deadline: Date
+    ) -> [CGRect] {
+        var bounds: [CGRect] = []
         if hasSelection,
            let markers = attribute(focused, "AXSelectedTextMarkerRange", before: deadline),
-           let bounds = rect(focused, parameterized: "AXBoundsForTextMarkerRange", argument: markers, before: deadline) {
-            frames.append(bounds)
+           let selection = rect(
+               focused,
+               parameterized: "AXBoundsForTextMarkerRange",
+               argument: markers,
+               before: deadline
+           ) {
+            bounds.append(ScreenGeometry.axToAppKit(selection, flipReference: flip))
         }
-        if let frame = rect(focused, "AXFrame", before: deadline) { frames.append(frame) }
-        if let parent = parent(of: focused, before: deadline),
-           let frame = rect(parent, "AXFrame", before: deadline) { frames.append(frame) }
-        return frames
+        if let line { bounds.append(line) }
+        if let pane { bounds.append(pane) }
+        return bounds
     }
 
     /// Rebuilds lines from the pieces' own frames. Joining every piece with a newline splits a
@@ -496,6 +551,13 @@ final class AmbientPeekMonitor {
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
         if let text = value as? String { return text }
         return (value as? NSAttributedString)?.string
+    }
+
+    /// `AXNumberOfCharacters` arrives as a `CFNumber`, and is the one way to ask how big a
+    /// document is without asking for the document.
+    private func number(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> Int? {
+        guard let value = self.attribute(element, attribute, before: deadline) else { return nil }
+        return (value as? NSNumber)?.intValue
     }
 
     private func rect(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CGRect? {

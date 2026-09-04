@@ -190,6 +190,83 @@ final class DocumentCaretSliceTests: XCTestCase {
         }
     }
 
+    func testAFenceFreeFileMayOpenWithFrontMatterACommentOrADirective() throws {
+        let documents = [
+            "---\ntitle: Shipping\n---\n\(flowchart)\n",
+            "%% drawn for the runbook\n\(flowchart)\n",
+            "%%{init: {'theme': 'dark'}}%%\n\(flowchart)\n"
+        ]
+        for document in documents {
+            let caret = offset(of: "A[Start]", in: document)
+            let slice = try XCTUnwrap(DocumentCaretSlicer.slice(document: document, caret: caret), document)
+            XCTAssertTrue(slice.detection.extractedSource.hasSuffix("A[Start] --> B[End]"), document)
+        }
+    }
+
+    /// Prose is not a diagram because it opens with a word one of them uses. Every line here is
+    /// something somebody might have in a scratch buffer, and every one of them detects as a
+    /// diagram on its own -- the first line has to read as a declaration, not merely as a match.
+    func testAFenceFreeDocumentThatOnlyOpensWithADiagramWordFindsNothing() {
+        let openings = [
+            "graph of dependencies",
+            "timeline of the migration",
+            "pie in the sky planning",
+            "info about the build",
+            "block by block we shipped it",
+            "erDiagram is what we need here"
+        ]
+        for opening in openings {
+            let document = "\(opening)\nsecond line of prose\nthird line\n"
+            XCTAssertGreaterThanOrEqual(
+                MermaidDetector.detect(document).confidence, .likely,
+                "\(opening) was expected to fool the detector on its own"
+            )
+            for caret in [0, 8, (document as NSString).length] {
+                XCTAssertNil(
+                    DocumentCaretSlicer.slice(document: document, caret: caret),
+                    "\(opening) at caret \(caret)"
+                )
+            }
+        }
+    }
+
+    /// The declaration line is where the fence-free route gets its evidence, so the forms mermaid
+    /// itself accepts there all have to pass.
+    func testEveryShapeOfDeclarationLineIsAccepted() {
+        for opening in ["flowchart LR", "graph TD;", "gitGraph TB:", "pie showData", "pie title Answers",
+                        "sequenceDiagram", "erDiagram", "stateDiagram-v2", "requirementDiagram",
+                        "xychart-beta horizontal", "C4Context title Banking"] {
+            XCTAssertTrue(MermaidDetector.declaresDiagram(opening), opening)
+        }
+        for prose in ["graph of dependencies", "pie in the sky", "About the sequenceDiagram", ""] {
+            XCTAssertFalse(MermaidDetector.declaresDiagram(prose), prose)
+        }
+    }
+
+    // MARK: - What one read is allowed to cost
+
+    /// An editor hands over its whole buffer and the split below it is linear in that, so the size
+    /// is refused before any of the work is done: a 900 KB buffer measured 74.9 ms of it, on the
+    /// main actor, repeated for as long as the modifier is held.
+    func testADocumentTooBigToSliceIsRefusedOutright() {
+        let padding = String(repeating: "prose about the diagram\n", count: 4_000)
+        let document = "```mermaid\n\(flowchart)\n```\n\(padding)"
+        XCTAssertGreaterThan((document as NSString).length, AmbientPeekPolicy.maximumDocumentCharacters)
+        XCTAssertNil(DocumentCaretSlicer.slice(document: document, caret: 20))
+        // The same document under the cap still slices, so it is the size that refused it.
+        let shorter = "```mermaid\n\(flowchart)\n```\n"
+        XCTAssertNotNil(DocumentCaretSlicer.slice(document: shorter, caret: 20))
+    }
+
+    /// The slice runs on the same clock as the accessibility calls that fetched the document, so a
+    /// budget that is already spent stops it -- and the monitor reports that as an unfinished read
+    /// rather than as "no diagram here".
+    func testADeadlineThatHasPassedStopsTheSlice() {
+        let document = "```mermaid\n\(flowchart)\n```\n"
+        XCTAssertNil(DocumentCaretSlicer.slice(document: document, caret: 20, before: Date.distantPast))
+        XCTAssertNotNil(DocumentCaretSlicer.slice(document: document, caret: 20, before: Date() + 60))
+    }
+
     func testAnUntaggedFenceIsStillWorthReading() throws {
         let document = "Intro\n\n```\n\(flowchart)\n```\n"
         let caret = offset(of: "A[Start]", in: document)

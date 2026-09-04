@@ -195,6 +195,10 @@ private struct AmbientHighlightView: View {
                 }
                 Text(model.shortcut)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    // The bar is only as wide as the outline, and the outline can be the 80-point
+                    // floor. The shortcut is the one thing the hint exists to show, so it takes its
+                    // width first and the keyword beside it truncates instead.
+                    .layoutPriority(1)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))

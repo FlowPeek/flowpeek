@@ -67,6 +67,16 @@ public enum AmbientPeekPolicy {
     /// outlining it would frame the entire page.
     public static let maximumCharacters = 8_000
 
+    /// The most document a caret read will slice, in UTF-16 code units.
+    ///
+    /// Slicing is the one part of a read that is not an accessibility message, and a deadline can
+    /// only cut that work short, never keep it small -- while the work itself recurs every
+    /// `debounce` for as long as the modifier is held. A cap is what bounds it by construction: a
+    /// diagram file at this size measures 22.3 ms in release, the same order as the 19-31 ms
+    /// descent this route stands in for, where a fence-free 900 KB document measured 74.9 ms. A
+    /// 2000-line file measured 30031 characters, so the editors this exists for are well inside it.
+    public static let maximumDocumentCharacters = 64_000
+
     public static func shouldRead(
         pointer: CGPoint,
         lastPointer: CGPoint?,
@@ -157,7 +167,13 @@ public enum AmbientPeekPolicy {
         screen: CGSize,
         applicationName: String?
     ) -> AmbientCandidate? {
-        guard slice.text.count <= maximumCharacters else { return nil }
+        // Measured against the diagram rather than the region it came out of. The region carries
+        // whatever the detector cut away -- the fences, and everything after the point where a
+        // second copy of the same starter began -- and refusing a block on the size of the text
+        // around it turns down a diagram the peek chord would have opened perfectly well.
+        // `maximumCharacters` exists to stop a whole document being treated as one diagram, so the
+        // diagram is the thing to weigh; the region's size is bounded by the slicer's own cap.
+        guard slice.detection.extractedSource.count <= maximumCharacters else { return nil }
         guard isPlausible(bounds: bounds, screen: screen) else { return nil }
         guard slice.detection.confidence >= minimumConfidence else { return nil }
         return AmbientCandidate(
@@ -167,6 +183,23 @@ public enum AmbientPeekPolicy {
             applicationName: applicationName,
             anchor: .caret
         )
+    }
+
+    /// Whether the focused document may answer for a pointer that landed somewhere in the same
+    /// application. Both rectangles are the focused element's own frame and the pane around it, in
+    /// AppKit coordinates.
+    ///
+    /// Belonging to the frontmost process is not evidence of anything: a sidebar, a tab bar, an
+    /// integrated terminal and a second editor group are all the same process, and the focused
+    /// caret is nowhere near any of them. Pointing at one of those and having the *other* pane's
+    /// caret framed is worse than no outline at all, because the frame then marks a rectangle the
+    /// pointer has never been over. Neither frame readable means no evidence either way, and the
+    /// answer there is no.
+    public static func caretAnchorFits(pointer: CGPoint, focused: CGRect?, container: CGRect?) -> Bool {
+        [focused, container]
+            .compactMap { $0 }
+            .filter { ScreenGeometry.isUsable($0) }
+            .contains { $0.contains(pointer) }
     }
 
     /// Grows a rectangle about its centre until it is at least big enough to draw.

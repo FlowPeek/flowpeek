@@ -14,20 +14,26 @@ The version in the tag becomes `CFBundleShortVersionString`; the workflow run nu
 
 ## One-time setup
 
-The workflow needs six or seven repository secrets. Set them with `gh secret set`, which prompts for
-the value rather than taking it on the command line, so nothing lands in your shell history.
+The workflow needs four or five repository secrets. `TAP_DEPLOY_KEY` is already set — see
+[Tap access](#tap-access). The rest need values only you can produce; set them with `gh secret set`,
+which reads from stdin rather than the command line, so nothing lands in your shell history.
 
 ### Signing
 
-FlowPeek is signed with `Developer ID Application: KANG SEUNGHYUN (F7WUT95TT6)`. Export it from
-Keychain Access (right-click the certificate → Export → `.p12`, set a password), then:
+FlowPeek is signed with `Developer ID Application: KANG SEUNGHYUN (F7WUT95TT6)`. One command does
+the whole thing:
 
 ```sh
-base64 -i FlowPeek-DeveloperID.p12 | gh secret set MACOS_CERTIFICATE_P12 --repo FlowPeek/flowpeek
-gh secret set MACOS_CERTIFICATE_PASSWORD --repo FlowPeek/flowpeek   # the .p12 export password
+zsh Scripts/upload_signing_secrets.sh
 ```
 
-The runner imports this into a throwaway keychain that is destroyed with the job.
+It exports the identity, checks that the archive really imports as a Developer ID identity, uploads
+it as `MACOS_CERTIFICATE_P12`, and uploads a freshly generated export password as
+`MACOS_CERTIFICATE_PASSWORD`. Everything lives in a private temp directory that is removed on exit.
+
+macOS raises a GUI approval sheet for the private key, which is why this step cannot be scripted for
+you: choose **Allow** when it appears. The runner imports the archive into a throwaway keychain that
+is destroyed with the job.
 
 ### Notarization
 
@@ -54,15 +60,25 @@ gh secret set NOTARY_TEAM_ID  --repo FlowPeek/flowpeek   # F7WUT95TT6
 
 ### Tap access
 
-`GITHUB_TOKEN` cannot write to another repository, so pushing the cask needs a token that can.
-Create a fine-grained personal access token scoped to `FlowPeek/homebrew-tap` with
-**Contents: Read and write**, then:
+**Already done.** `GITHUB_TOKEN` cannot write to another repository, so the cask is pushed with an
+ed25519 deploy key that is scoped to `FlowPeek/homebrew-tap` alone — narrower than a personal access
+token, which would carry write access to everything the author can reach.
+
+The public half is registered on the tap with write access; the private half is the
+`TAP_DEPLOY_KEY` secret. Both read and write were verified against the live repository before the
+key was stored. To rotate it:
 
 ```sh
-gh secret set TAP_TOKEN --repo FlowPeek/flowpeek
+ssh-keygen -t ed25519 -N "" -C "flowpeek-release@github-actions" -f /tmp/tap_key
+gh api -X POST /repos/FlowPeek/homebrew-tap/keys \
+  -f title="flowpeek release workflow" -f key="$(cat /tmp/tap_key.pub)" -F read_only=false
+gh secret set TAP_DEPLOY_KEY --repo FlowPeek/flowpeek < /tmp/tap_key
+rm -f /tmp/tap_key /tmp/tap_key.pub
+# then delete the superseded key id listed by:
+gh api /repos/FlowPeek/homebrew-tap/keys --jq '.[] | "\(.id)  \(.title)"'
 ```
 
-If `TAP_TOKEN` is missing the release still publishes; only the tap update is skipped, with a
+If `TAP_DEPLOY_KEY` is missing the release still publishes; only the tap update is skipped, with a
 warning in the job log.
 
 ## What the workflow checks before it publishes

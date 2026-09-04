@@ -236,21 +236,35 @@ jobs:
 
       - name: Point the Homebrew tap at the new build
         env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
           VERSION: ${{ steps.version.outputs.version }}
           SHA256: ${{ steps.dmg.outputs.sha256 }}
         run: |
           set -euo pipefail
-          if [ -z "${TAP_TOKEN:-}" ]; then
-            echo "::warning::TAP_TOKEN is not set, so the tap was not updated. The release itself is published."
+          if [ -z "${TAP_DEPLOY_KEY:-}" ]; then
+            echo "::warning::TAP_DEPLOY_KEY is not set, so the tap was not updated. The release itself is published."
             exit 0
           fi
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/FlowPeek/homebrew-tap.git" "$RUNNER_TEMP/tap"
+          # A deploy key scoped to the tap alone, rather than a personal access token that would
+          # carry write access to everything the author can reach.
+          key="$RUNNER_TEMP/tap_deploy_key"
+          printf '%s\n' "$TAP_DEPLOY_KEY" > "$key"
+          chmod 600 "$key"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:FlowPeek/homebrew-tap.git "$RUNNER_TEMP/tap"
           cd "$RUNNER_TEMP/tap"
           cask="Casks/flowpeek.rb"
           /usr/bin/sed -i '' -E "s/^  version \".*\"$/  version \"${VERSION}\"/" "$cask"
           /usr/bin/sed -i '' -E "s/^  sha256 \".*\"$/  sha256 \"${SHA256}\"/" "$cask"
+          # A no-op here means the cask did not actually change, which would silently ship a stale sha.
+          if git diff --quiet -- "$cask"; then
+            echo "::error::$cask was not modified. Check that its version and sha256 lines are quoted." >&2
+            git diff --stat >&2
+            exit 1
+          fi
+          grep -E "^  (version|sha256) " "$cask"
           git -c user.name="flowpeek-release" -c user.email="release@flowpeek.invalid" \
             commit -am "flowpeek ${VERSION}"
           git push
+          rm -f "$key"
           echo "Tap updated to ${VERSION}."

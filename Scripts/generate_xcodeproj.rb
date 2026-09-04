@@ -10,6 +10,9 @@ require "xcodeproj"
 DEPLOYMENT_TARGET = "14.0"
 SWIFT_VERSION = "6.0"
 DEVELOPMENT_TEAM = "F7WUT95TT6"
+# Defaults for a local build. The release workflow overrides both from the pushed tag.
+MARKETING_VERSION = "0.1.0"
+CURRENT_PROJECT_VERSION = "1"
 BUNDLE_ID = "com.selenehyun.FlowPeek"
 # Carried by SPM's `.process("Resources")` rule, not by the app bundle.
 EXCLUDED_RESOURCES = ["placeholder.txt", ".DS_Store"].freeze
@@ -153,6 +156,8 @@ app.build_configurations.each do |configuration|
     "CODE_SIGN_STYLE" => "Automatic",
     "DEVELOPMENT_TEAM" => DEVELOPMENT_TEAM,
     "ENABLE_APP_SANDBOX" => "NO",
+    "MARKETING_VERSION" => MARKETING_VERSION,
+    "CURRENT_PROJECT_VERSION" => CURRENT_PROJECT_VERSION,
     # The hosted test bundle is a second signature loaded into the app, which library
     # validation under the hardened runtime refuses. Release keeps it on.
     "ENABLE_HARDENED_RUNTIME" => configuration.name == "Debug" ? "NO" : "YES",

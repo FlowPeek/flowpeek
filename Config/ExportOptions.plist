@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>developer-id</string>
+    <key>teamID</key>
+    <string>F7WUT95TT6</string>
+    <key>signingStyle</key>
+    <string>manual</string>
+    <key>signingCertificate</key>
+    <string>Developer ID Application</string>
+    <!-- Sparkle is the only embedded framework and is already Developer ID signed upstream; it is
+         re-signed with this identity during export so the whole bundle shares one team. -->
+    <key>stripSwiftSymbols</key>
+    <true/>
+</dict>
+</plist>

@@ -2,6 +2,16 @@
 
 FlowPeek is a native macOS menu-bar app that recognizes selected Mermaid source in browsers and desktop apps, places a small action beside the selection, and renders it in a Quick Look–style preview. An experimental `⌥⌘M` workflow can use selected text as context for OpenAI, Claude, or Gemini to create a diagram.
 
+## Install
+
+```sh
+brew install --cask flowpeek/tap/flowpeek
+```
+
+FlowPeek asks for Accessibility permission on first launch and requests nothing else. Releases are
+built, signed and notarized by `.github/workflows/release.yml` on every `v*` tag; see
+[docs/RELEASING.md](docs/RELEASING.md).
+
 ## Requirements
 
 - macOS 14 or later (Apple Silicon and Intel)

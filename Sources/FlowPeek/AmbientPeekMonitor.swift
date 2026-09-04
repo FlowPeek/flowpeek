@@ -22,6 +22,9 @@ final class AmbientPeekMonitor {
     /// Space means the peek chord can never be mistaken for typing a space.
     static let modifier: NSEvent.ModifierFlags = .option
     static let peekKeyCode: UInt16 = 49
+    /// Compared against these alone: caps lock, the function flag and the numeric-pad flag ride
+    /// along on real events and would break an equality test against the whole mask.
+    private static let significantModifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
 
     private static let descentNodeLimit = 400
     private static let descentDepthLimit = 12
@@ -44,7 +47,7 @@ final class AmbientPeekMonitor {
     func start() {
         guard flagsMonitor == nil else { return }
         flagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
-            let engaged = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == Self.modifier
+            let engaged = event.modifierFlags.intersection(Self.significantModifiers) == Self.modifier
             Task { @MainActor in self?.setEngaged(engaged) }
         }
         moveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
@@ -52,7 +55,7 @@ final class AmbientPeekMonitor {
         }
         keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             let isPeek = event.keyCode == Self.peekKeyCode
-                && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == Self.modifier
+                && event.modifierFlags.intersection(Self.significantModifiers) == Self.modifier
             Task { @MainActor in if isPeek { self?.activate() } }
         }
         logger.info("ambient peek armed")
@@ -88,7 +91,10 @@ final class AmbientPeekMonitor {
 
     private func activate() {
         guard isEngaged, showing else { return }
-        retire()
+        // Deliberately not `retire()`: that fires onDismiss, whose handler drops the candidate, and
+        // the activation then had nothing left to open. The outline is dismissed by whoever handles
+        // the activation, which needs the candidate first.
+        showing = false
         onActivate?()
     }
 

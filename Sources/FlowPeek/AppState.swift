@@ -57,14 +57,7 @@ final class AppState: ObservableObject {
             return
         }
         if ProcessInfo.processInfo.arguments.contains("--settings-demo") {
-            ambient.onCandidate = { [weak self] candidate in self?.receiveAmbient(candidate) }
-        ambient.onDismiss = { [weak self] in
-            self?.highlight.hide()
-            self?.ambientCandidate = nil
-        }
-        ambient.onActivate = { [weak self] in self?.previewAmbient() }
-        highlight.onActivate = { [weak self] in self?.previewAmbient() }
-        shortcuts.handlers = [
+            shortcuts.handlers = [
                 .aiPrompt: { [weak self] in self?.presentAIPrompt() },
                 .previewClipboard: { [weak self] in self?.previewCopied() },
             ]

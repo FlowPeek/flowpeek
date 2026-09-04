@@ -318,6 +318,13 @@ final class MermaidRendererTests: XCTestCase {
         // even with htmlLabels off, so deleting them drew boxes with no text in them at all.
         XCTAssertFalse(banned.contains("foreignObject"), "<foreignObject> must be sanitised, not deleted")
         XCTAssertTrue(source.contains("var LABEL_TAGS"), "the label allow-list is missing")
+
+        // mermaid throws its own "svg element not in render tree" whenever a measured line of text
+        // reports a 0x0 box, which WebKit does for the zero-width space mermaid uses to stand in for
+        // a blank line. Without this patch every diagram containing a blank line fails to render.
+        XCTAssertTrue(source.contains("proto.getBBox = function"), "the getBBox measurement patch is gone")
+        XCTAssertTrue(source.contains("getBBox:emptyText"), "the empty-text substitution is no longer reported")
+        XCTAssertTrue(source.contains("measurementFallbacks"), "measurement substitutions must reach Swift")
         XCTAssertTrue(
             source.contains("root.querySelectorAll(\"foreignObject\")"),
             "the scrub must walk into every <foreignObject>"

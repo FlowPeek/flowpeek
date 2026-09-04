@@ -8,6 +8,44 @@
   var MAX_MESSAGE = 2000;
   var SECURE_KEYS = ["htmlLabels", "theme", "themeVariables", "themeCSS", "fontFamily", "altFontFamily", "layout", "look"];
 
+  // mermaid measures a line of text by appending an <svg><text> to <body> and reading getBBox(),
+  // and treats a 0x0 answer as fatal: `if (b.width === 0 && b.height === 0) throw new Error("svg
+  // element not in render tree")` -- mermaid's own throw, not WebKit's. For an empty line mermaid
+  // measures its placeholder, a zero-width space, and WebKit answers 0x0 where Blink answers the
+  // line box height. So every diagram with a blank line failed here while drawing correctly on
+  // mermaid.ai; eventmodeling's data blocks were only the case that reached us. Measured: the
+  // element is <text>, textContent "\u200b", font 16px sans-serif, attached to <body>.
+  //
+  // The fix reports the em height for text that genuinely has no visible glyphs, which is what
+  // Blink reports and what mermaid's layout expects. Every substitution is named so it stays
+  // visible from Swift rather than silently reshaping a diagram.
+  var measurementFallbacks = [];
+  function noteFallback(name) {
+    if (measurementFallbacks.indexOf(name) === -1) measurementFallbacks.push(name);
+  }
+  (function patchMeasurement() {
+    var proto = window.SVGGraphicsElement && window.SVGGraphicsElement.prototype;
+    if (!proto || typeof proto.getBBox !== "function" || proto.__flowpeekBBox) return;
+    var native = proto.getBBox;
+    proto.getBBox = function () {
+      var box;
+      try {
+        box = native.apply(this, arguments);
+      } catch (e) {
+        // WebKit also throws outright for an element with no renderer; Blink returns zeros.
+        noteFallback("getBBox:threw");
+        return { x: 0, y: 0, width: 0, height: 0 };
+      }
+      if (!box || box.width !== 0 || box.height !== 0) return box;
+      if (String(this.tagName).toLowerCase() !== "text" || !this.isConnected) return box;
+      var size = parseFloat(getComputedStyle(this).fontSize);
+      if (!(size > 0)) return box;
+      noteFallback("getBBox:emptyText");
+      return { x: box.x, y: box.y, width: 0, height: size };
+    };
+    proto.__flowpeekBBox = true;
+  })();
+
   var cspViolations = [];
   document.addEventListener("securitypolicyviolation", function (e) {
     if (cspViolations.length >= 64) return;
@@ -156,6 +194,7 @@
     diagram.replaceChildren();
     clearGeometry();
     var t0 = now();
+    measurementFallbacks = [];
     var wipeMeasure = function () {
       var m = document.getElementById("measure");
       if (m) m.replaceChildren();
@@ -203,6 +242,7 @@
         scrubbed: scrubbed,
         svg: live.outerHTML,
         durationMS: Math.round(now() - t0),
+        measurementFallbacks: measurementFallbacks.slice(),
         engineVersion: engineVersion()
       });
     } catch (e) {

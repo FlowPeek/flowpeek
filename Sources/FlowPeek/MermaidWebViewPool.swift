@@ -25,6 +25,11 @@ final class MermaidEngineView: NSObject, MermaidRendering {
     /// pinch inside the diagram and a click on the zoom button converge on the same number.
     var onViewportChange: ((Double) -> Void)?
 
+    /// Raised when this view can never render again -- a dead WebContent process, a failed
+    /// navigation. Whoever is showing the view has to hear about it even when no render is in
+    /// flight, or an open preview keeps a rendered status over a page that no longer exists.
+    var onFatal: ((MermaidRenderError) -> Void)?
+
     private let viewport: MermaidViewportBridge
 
     private let policy = MermaidWebPolicy()
@@ -141,6 +146,12 @@ final class MermaidEngineView: NSObject, MermaidRendering {
     /// them at their natural size.
     func fitToStage() { command(MermaidEnginePage.fitInvocation, [:]) }
 
+    /// Scrolls the stage by a pixel delta, for the arrow keys: the page has no focusable element,
+    /// so it can never receive a key event of its own.
+    func pan(dx: Double, dy: Double) {
+        command(MermaidEnginePage.panInvocation, ["dx": dx, "dy": dy])
+    }
+
     private func command(_ body: String, _ arguments: [String: Any]) {
         Task { [weak self] in
             guard let self else { return }
@@ -180,6 +191,10 @@ final class MermaidEngineView: NSObject, MermaidRendering {
 
     func dispose() {
         onViewportChange = nil
+        // Before the `markFailed` at the end of this method: disposal is itself a fatal transition,
+        // and reporting it would call back into an owner that is deliberately throwing this view
+        // away -- which is how a replacement turns into a loop.
+        onFatal = nil
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: MermaidEnginePage.viewportMessageName,
             contentWorld: MermaidEngineAssets.world
@@ -276,6 +291,10 @@ final class MermaidEngineView: NSObject, MermaidRendering {
         waiters.removeAll()
         pending.forEach { $0.resume(throwing: error) }
         logger.error("engine view failed: \(error.localizedDescription, privacy: .public)")
+        // After the waiters: a render already in flight wins through its own failure path, which
+        // knows the source and can quote it, and the owner then sees a `.rendering` status and
+        // leaves this one alone.
+        onFatal?(error)
     }
 
     private func poison(_ error: MermaidRenderError) {
@@ -345,6 +364,9 @@ final class MermaidWebViewPool {
         }
         view.clear()
         view.onViewportChange = nil
+        // A pooled view must carry nothing of its last owner: a stale callback here would report a
+        // later death to a view model whose surface has been closed for minutes.
+        view.onFatal = nil
         view.setScale(1)
         idle.append(view)
     }

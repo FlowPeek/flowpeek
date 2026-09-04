@@ -235,6 +235,33 @@ final class MermaidDetectorTests: XCTestCase {
         }
     }
 
+    func testE07RawInputOverTheCeilingIsNotExaminedAtAll() {
+        let ceiling = MermaidDetector.maximumInputCharacters
+        let overSized = "graph TD\nA-->B\n" + String(repeating: "x", count: ceiling)
+        XCTAssertGreaterThan(overSized.utf16.count, ceiling)
+        let detection = MermaidDetector.detect(overSized)
+        XCTAssertEqual(detection.confidence, MermaidDetection.Confidence.none)
+        XCTAssertEqual(detection.extractedSource, "")
+        XCTAssertNil(detection.diagramKeyword)
+        XCTAssertEqual(detection.droppedPrefixLines, 0)
+
+        // One code unit under the ceiling is still examined, so the cap cannot be off by one.
+        let allowed = "graph TD\nA-->B\n" + String(repeating: "x", count: ceiling - 15)
+        XCTAssertEqual(allowed.utf16.count, ceiling)
+        XCTAssertGreaterThanOrEqual(MermaidDetector.detect(allowed).confidence, .likely)
+    }
+
+    /// Detection is linear in the input and runs on the main actor, so select-all in a log file used
+    /// to freeze the app for the length of a scan whose answer could only ever be "too large".
+    /// Uncapped, this input measured 1.1 s; the ceiling turns it into a length comparison.
+    func testE08SelectAllInALogFileReturnsImmediately() {
+        let log = String(repeating: "2026-09-04 19:44:14 INFO  request completed in 12 ms\n", count: 380_000)
+        XCTAssertGreaterThan(log.utf16.count, 20_000_000)
+        let start = Date()
+        XCTAssertEqual(MermaidDetector.detect(log).confidence, MermaidDetection.Confidence.none)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.3)
+    }
+
     func testE06LongArrowsAreNoLongerBilledTwice() throws {
         let source = "flowchart TD\n" + String(repeating: "  A ----> B\n", count: 300)
         let detection = MermaidDetector.detect(source)

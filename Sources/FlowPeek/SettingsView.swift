@@ -33,6 +33,16 @@ struct SettingsView: View {
     @State private var relaunchPrompt: RelaunchPrompt?
     let close: () -> Void
 
+    /// The card's own copy names the chord that opens an outlined diagram, and that chord is
+    /// rebindable on the next tab along, so it is read from the store rather than spelled out in
+    /// the catalogue. `shortcuts` is observed, so a rebind rewrites this sentence immediately.
+    private var ambientDescription: String {
+        String(
+            format: String(localized: "settings.ambient.description"),
+            shortcuts.shortcuts[.ambientPeek].display
+        )
+    }
+
     var body: some View {
         ZStack {
             FlowPeekGlassBackground()
@@ -254,7 +264,7 @@ struct SettingsView: View {
                                 .padding(.vertical, 3)
                                 .background(Color.pink.opacity(0.12), in: Capsule())
                         }
-                        Text("settings.ambient.description")
+                        Text(verbatim: ambientDescription)
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -262,7 +272,7 @@ struct SettingsView: View {
                     Spacer(minLength: 14)
                     Toggle("settings.ambient", isOn: $app.ambientPeekEnabled)
                         .labelsHidden()
-                        .accessibilityHint(Text("settings.ambient.description"))
+                        .accessibilityHint(Text(verbatim: ambientDescription))
                         .onChange(of: app.ambientPeekEnabled) { _, _ in app.applyEnabledState() }
                 }
                 // The preference stays writable while the grant is missing: `applyEnabledState()`

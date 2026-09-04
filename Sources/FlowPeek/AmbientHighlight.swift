@@ -18,37 +18,47 @@ final class AmbientHighlightCoordinator {
     private var model = AmbientHighlightModel()
 
     func show(_ candidate: AmbientCandidate, shortcut: String) {
+        // A block scrolled half past the bottom of the display, or simply taller than it, is clipped
+        // to what is on screen. Moving the panel instead — which is what keeping a whole window
+        // visible would do — drew the frame around unrelated text further up the page.
+        guard let outline = ScreenGeometry.clip(
+            candidate.bounds.insetBy(dx: -Self.inset, dy: -Self.inset),
+            screenFrames: NSScreen.screens.map(\.frame)
+        ), outline.width >= AmbientPeekPolicy.minimumSize.width,
+              outline.height >= AmbientPeekPolicy.minimumSize.height else {
+            hide()
+            return
+        }
+
         model.keyword = candidate.detection.diagramKeyword
         model.shortcut = shortcut
 
-        let outline = candidate.bounds.insetBy(dx: -Self.inset, dy: -Self.inset)
         let chrome = Self.hintBarHeight + Self.gap
         let panel = panel ?? makePanel()
 
         // AppKit's y grows upward while a VStack lays its first child out at the top, so the panel
         // has to extend *above* the block and the outline row has to be exactly the block's height.
         // Extending below instead pushed the outline down by the height of the hint.
-        let hintFitsAbove = fits(
-            top: outline.maxY + chrome,
-            on: ScreenGeometry.visibleFrame(containing: outline.origin, visibleFrames: visibleFrames())
-        )
-        model.hintOnTop = hintFitsAbove
+        let placement = self.placement(for: outline, chrome: chrome)
+        model.placement = placement
         model.outlineHeight = outline.height
 
-        let origin = CGPoint(x: outline.minX, y: hintFitsAbove ? outline.minY : outline.minY - chrome)
-        let size = CGSize(width: outline.width, height: outline.height + chrome)
-        panel.setFrame(
-            CGRect(
-                origin: ScreenGeometry.clamp(
-                    origin: origin,
-                    size: size,
-                    visibleFrames: visibleFrames(),
-                    inset: 2
-                ),
-                size: size
-            ),
-            display: false
-        )
+        // Whatever the hint does, the outline row keeps the block's own rectangle: the panel grows
+        // away from it, never over it.
+        let origin: CGPoint
+        let size: CGSize
+        switch placement {
+        case .above:
+            origin = outline.origin
+            size = CGSize(width: outline.width, height: outline.height + chrome)
+        case .below:
+            origin = CGPoint(x: outline.minX, y: outline.minY - chrome)
+            size = CGSize(width: outline.width, height: outline.height + chrome)
+        case .inside:
+            origin = outline.origin
+            size = outline.size
+        }
+        panel.setFrame(CGRect(origin: origin, size: size), display: false)
 
         if !panel.isVisible {
             panel.alphaValue = 0
@@ -70,11 +80,17 @@ final class AmbientHighlightCoordinator {
         }
     }
 
-    private func visibleFrames() -> [CGRect] { NSScreen.screens.map(\.visibleFrame) }
-
-    private func fits(top: CGFloat, on screen: CGRect?) -> Bool {
-        guard let screen else { return true }
-        return top <= screen.maxY
+    /// Where the hint can go without displacing the outline. A block that fills the display's height
+    /// leaves room for neither bar, so the last case puts the hint inside the frame rather than
+    /// letting it push the outline off the text.
+    private func placement(for outline: CGRect, chrome: CGFloat) -> AmbientHighlightModel.Placement {
+        guard let screen = ScreenGeometry.visibleFrame(
+            containing: CGPoint(x: outline.midX, y: outline.midY),
+            visibleFrames: NSScreen.screens.map(\.visibleFrame)
+        ) else { return .above }
+        if outline.maxY + chrome <= screen.maxY { return .above }
+        if outline.minY - chrome >= screen.minY { return .below }
+        return .inside
     }
 
     private func makePanel() -> NSPanel {
@@ -108,11 +124,18 @@ final class AmbientHighlightCoordinator {
 
 @MainActor
 final class AmbientHighlightModel: ObservableObject {
+    /// Where the hint sits relative to the outline. `inside` is for a block that reaches both edges
+    /// of the display: there is nowhere to put a bar without moving the frame off the text.
+    enum Placement {
+        case above
+        case below
+        case inside
+    }
+
     @Published var keyword: String?
     @Published var shortcut = ""
     @Published var outlineHeight: CGFloat = 0
-    /// False when the block is near the top of the display and the hint has to go underneath.
-    @Published var hintOnTop = true
+    @Published var placement: Placement = .above
 }
 
 private struct AmbientHighlightView: View {
@@ -122,18 +145,21 @@ private struct AmbientHighlightView: View {
     let activate: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: gap) {
-            if model.hintOnTop {
-                hint
-                outline
-            } else {
-                outline
-                hint
-            }
+        switch model.placement {
+        case .above:
+            stack { hint; outline }
+        case .below:
+            stack { outline; hint }
+        case .inside:
+            outline.overlay(alignment: .topLeading) { hint }
         }
-        // Pinned, not centred: a centred stack would spread the slack evenly and shift the outline
-        // off the text by half the hint's height.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func stack(@ViewBuilder _ content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: gap, content: content)
+            // Pinned, not centred: a centred stack would spread the slack evenly and shift the
+            // outline off the text by half the hint's height.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var outline: some View {

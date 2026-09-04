@@ -163,11 +163,15 @@ public struct FlowPeekShortcut: Equatable, Hashable, Codable, Sendable {
 public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
     case previewClipboard
     case aiPrompt
+    case ambientPeek
 
     public var defaultShortcut: FlowPeekShortcut {
         switch self {
         case .previewClipboard: FlowPeekShortcut(keyCode: 0x2E, modifiers: [.command, .option, .shift])
         case .aiPrompt: FlowPeekShortcut(keyCode: 0x2E, modifiers: [.command, .option])
+        // The same virtual key the ambient monitor watched for: ⌥Space, now registered so macOS
+        // hands it to FlowPeek instead of also typing a non-breaking space into the app underneath.
+        case .ambientPeek: FlowPeekShortcut(keyCode: 0x31, modifiers: [.option])
         }
     }
 
@@ -176,6 +180,17 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         switch self {
         case .aiPrompt: 1
         case .previewClipboard: 2
+        case .ambientPeek: 3
+        }
+    }
+
+    /// True for a chord that must only be claimed while its feature is running. A registered hot key
+    /// is consumed system-wide, and ⌥Space is a character the user can still want to type, so it
+    /// stays with the frontmost app until the ambient experiment is actually on.
+    public var registersOnlyWhenActive: Bool {
+        switch self {
+        case .previewClipboard, .aiPrompt: false
+        case .ambientPeek: true
         }
     }
 
@@ -183,6 +198,7 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         switch self {
         case .previewClipboard: "shortcut.preview-clipboard"
         case .aiPrompt: "shortcut.ai-prompt"
+        case .ambientPeek: "shortcut.ambient-peek"
         }
     }
 
@@ -190,6 +206,7 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         switch self {
         case .previewClipboard: "shortcut.preview-clipboard.detail"
         case .aiPrompt: "shortcut.ai-prompt.detail"
+        case .ambientPeek: "shortcut.ambient-peek.detail"
         }
     }
 
@@ -199,6 +216,7 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         switch self {
         case .previewClipboard: "shortcut.inactive.clipboard"
         case .aiPrompt: "shortcut.inactive.ai"
+        case .ambientPeek: "shortcut.inactive.ambient"
         }
     }
 }

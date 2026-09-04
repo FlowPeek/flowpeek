@@ -23,6 +23,10 @@ final class AppState: ObservableObject {
     @Published private(set) var accessibilityNeedsRepair = false
     @Published private(set) var permissionRecoveryError: String?
     @Published private(set) var lastSelection: SelectionSnapshot?
+    /// Whether the menu bar should offer the way back to a preview window. A promoted preview is
+    /// borderless: it has no Dock icon and no entry in the Window menu, so once another app is in
+    /// front of it there was nothing left that could raise it again.
+    @Published private(set) var hasPromotedPreview = false
     @Published private(set) var engineHealth: MermaidEngineHealth?
     /// Which of the three routes the user has exercised. Drives the onboarding tutorial.
     @Published private(set) var tutorial = TutorialProgress()
@@ -56,7 +60,11 @@ final class AppState: ObservableObject {
     /// The block the ambient outline is currently drawn around, in memory only.
     private var ambientCandidate: AmbientCandidate?
 
-    private init() {}
+    private init() {
+        // Wired here rather than in `start()`: a preview can be promoted from the demo arguments and
+        // from the AI window, neither of which goes through the monitors that `start()` arms.
+        previews.onPromotedChange = { [weak self] hasWindow in self?.hasPromotedPreview = hasWindow }
+    }
 
     func start() {
         #if DEBUG
@@ -81,7 +89,7 @@ final class AppState: ObservableObject {
         selectionMonitor.onSelection = { [weak self] snapshot in
             self?.receive(snapshot)
         }
-        selectionMonitor.onDismiss = { [weak self] in self?.overlay.hide() }
+        selectionMonitor.onDismiss = { [weak self] in self?.forgetSelection() }
         selectionMonitor.isPointOnOverlay = { [weak self] point in self?.overlay.contains(point) ?? false }
         overlay.onRender = { [weak self] snapshot in self?.render(snapshot) }
         clipboard.onMermaidCopied = { [weak self] copy in self?.receiveCopied(copy) }
@@ -96,6 +104,7 @@ final class AppState: ObservableObject {
         shortcuts.handlers = [
             .aiPrompt: { [weak self] in self?.presentAIPrompt() },
             .previewClipboard: { [weak self] in self?.previewCopied() },
+            .ambientPeek: { [weak self] in self?.ambient.activate() },
         ]
         startEngine()
         // Registers the hot keys as well, and only the ones whose feature is on — which is why there
@@ -128,7 +137,7 @@ final class AppState: ObservableObject {
         shortcuts.unregisterAll()
         indicator.hide()
         highlight.hide()
-        overlay.hide()
+        forgetSelection()
     }
 
     func applyEnabledState() {
@@ -145,7 +154,8 @@ final class AppState: ObservableObject {
             clipboard.stop()
         }
         // Ambient peek reads the accessibility tree, so it needs the same grant the overlay does.
-        if isEnabled && ambientPeekEnabled && accessibilityGranted {
+        let ambientRunning = isEnabled && ambientPeekEnabled && accessibilityGranted
+        if ambientRunning {
             ambient.start()
         } else {
             ambient.stop()
@@ -157,11 +167,15 @@ final class AppState: ObservableObject {
         }
         // Also the one place that claims and releases the global hot keys: a registered hot key is
         // taken from every other app, so a shortcut whose feature is switched off must not hold one.
+        // ⌥Space matters most here — it is a character the user can still want to type, so it stays
+        // with the frontmost app until an outline can actually appear.
         shortcuts.setActiveActions(
             ShortcutActivationPolicy.activeActions(
                 isEnabled: isEnabled,
                 clipboardWatchEnabled: clipboardWatchEnabled,
-                aiEnabled: aiEnabled
+                aiEnabled: aiEnabled,
+                ambientPeekEnabled: ambientPeekEnabled,
+                accessibilityGranted: accessibilityGranted
             )
         )
     }
@@ -219,14 +233,18 @@ final class AppState: ObservableObject {
     }
 
     func handle(_ command: AppCommand) {
-        AppCommandRouter(showSettings: {
-            SettingsWindowCoordinator.shared.show()
-        }).handle(command)
+        AppCommandRouter(
+            showSettings: { SettingsWindowCoordinator.shared.show() },
+            revealPreview: { [weak self] in self?.previews.revealPromoted() }
+        ).handle(command)
     }
 
     func relaunchAfterPermissionChange() {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
+        // This copy is still running when the new one finishes launching, and the single-instance
+        // guard would otherwise have the new copy stand aside for a copy that is about to exit.
+        configuration.arguments = [SingleInstanceGuard.replacementArgument]
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { application, _ in
             guard application != nil else { NSSound.beep(); return }
             Task { @MainActor in NSApp.terminate(nil) }
@@ -289,11 +307,28 @@ final class AppState: ObservableObject {
     }
     #endif
 
+    /// The overlay is going away and so is the copy of the user's text behind it. `lastSelection` is
+    /// their own writing — a whole document, when they pressed ⌘A — and `lastDetection` carries a
+    /// normalized second copy of it; both used to sit in memory until the next selection replaced
+    /// them, which for someone who selects once and then works elsewhere is the rest of the session.
+    private func forgetSelection() {
+        overlay.hide()
+        lastSelection = nil
+        lastDetection = nil
+    }
+
     func receive(_ snapshot: SelectionSnapshot) {
         previews.selectionDidChange()
+        // Select-all in a log file or a long document arrives here. Nothing that large can become a
+        // diagram, and keeping it would hold megabytes of the user's text for the rest of the
+        // session, so it is dropped before it is examined or stored.
+        guard snapshot.text.utf16.count <= MermaidDetector.maximumInputCharacters else {
+            forgetSelection()
+            logger.debug("selection ignored: \(snapshot.text.utf16.count, privacy: .public) code units")
+            return
+        }
         lastSelection = snapshot
         let detection = MermaidDetector.detect(snapshot.text)
-        lastDetection = (snapshot.text, detection)
         guard isEnabled, detection.confidence >= .likely else {
             logger.debug(
                 """
@@ -306,8 +341,12 @@ final class AppState: ObservableObject {
                 """
             )
             overlay.hide()
+            lastDetection = nil
             return
         }
+        // Stored only past the guard: its one reader is the overlay button, which exists only for a
+        // selection that got this far, and the detection carries a normalized copy of the whole text.
+        lastDetection = (snapshot.text, detection)
         tutorial.noteDetected(.selection)
         overlay.show(for: snapshot)
     }
@@ -347,7 +386,7 @@ final class AppState: ObservableObject {
         guard isEnabled, ambientPeekEnabled else { return }
         ambientCandidate = candidate
         tutorial.noteDetected(.ambient)
-        highlight.show(candidate, shortcut: "⌥Space")
+        highlight.show(candidate, shortcut: shortcuts.shortcuts[.ambientPeek].display)
         logger.debug(
             """
             ambient candidate: \(candidate.detection.diagramKeyword ?? "unknown", privacy: .public) \
@@ -483,6 +522,6 @@ final class AppState: ObservableObject {
             permissionDeclined = false
         }
         if becameGranted && isEnabled { selectionMonitor.restart() }
-        if becameRevoked { selectionMonitor.stop(); overlay.hide() }
+        if becameRevoked { selectionMonitor.stop(); forgetSelection() }
     }
 }

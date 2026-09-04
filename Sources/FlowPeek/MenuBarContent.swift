@@ -12,6 +12,13 @@ struct MenuBarContent: View {
         Toggle(String(localized: app.isEnabled ? "menu.detection.on" : "menu.detection.paused"), isOn: $app.isEnabled)
             .onChange(of: app.isEnabled) { _, _ in app.applyEnabledState() }
         Divider()
+        // Only while there is one to go back to. A promoted preview is borderless, so it has no
+        // Dock icon and no entry in the Window menu: once another app covered it there was nothing
+        // that could raise it again.
+        if app.hasPromotedPreview {
+            Button("menu.preview.reveal") { app.handle(.revealPreview) }
+            Divider()
+        }
         Button("menu.settings") {
             app.handle(.showSettings)
         }

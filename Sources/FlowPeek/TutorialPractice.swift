@@ -31,9 +31,12 @@ enum TutorialPractice {
     /// `lessons` is what the page teaches. Without the Accessibility grant that is the clipboard
     /// step alone: printing "a small button appears beside it" for a drag that can never raise one
     /// turns the practice page into evidence that the app is broken.
-    static func open(lessons: [TutorialProgress.Lesson] = TutorialProgress.Lesson.allCases) {
+    static func open(
+        lessons: [TutorialProgress.Lesson] = TutorialProgress.Lesson.allCases,
+        peekShortcut: String
+    ) {
         do {
-            let url = try write(lessons: lessons)
+            let url = try write(lessons: lessons, peekShortcut: peekShortcut)
             if !NSWorkspace.shared.open(url) {
                 logger.error("no application accepted \(url.lastPathComponent, privacy: .public)")
                 NSSound.beep()
@@ -44,7 +47,7 @@ enum TutorialPractice {
         }
     }
 
-    private static func write(lessons: [TutorialProgress.Lesson]) throws -> URL {
+    private static func write(lessons: [TutorialProgress.Lesson], peekShortcut: String) throws -> URL {
         let directory = try FileManager.default.url(
             for: .cachesDirectory,
             in: .userDomainMask,
@@ -53,17 +56,17 @@ enum TutorialPractice {
         ).appendingPathComponent(Bundle.main.bundleIdentifier ?? "FlowPeek", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("practice.html")
-        try html(lessons: lessons).write(to: url, atomically: true, encoding: .utf8)
+        try html(lessons: lessons, peekShortcut: peekShortcut).write(to: url, atomically: true, encoding: .utf8)
         return url
     }
 
-    private static func html(lessons: [TutorialProgress.Lesson]) -> String {
+    private static func html(lessons: [TutorialProgress.Lesson], peekShortcut: String) -> String {
         // Localized through the app catalogue so the practice page speaks the same language as the
         // onboarding window it was opened from.
         let title = String(localized: "tutorial.page.title")
         let intro = String(localized: "tutorial.page.intro")
         let steps = lessons
-            .map { "<li>\(escape(String(localized: $0.detailKey)))</li>" }
+            .map { "<li>\(escape($0.detail(peekShortcut: peekShortcut)))</li>" }
             .joined(separator: "\n    ")
         let closing = String(localized: lessons.count > 1 ? "tutorial.page.closing" : "tutorial.page.closing.one")
 

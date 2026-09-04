@@ -45,10 +45,17 @@ public struct PreviewKeyStroke: Equatable, Sendable {
 ///
 /// - No Command combination is bound. ⌘C there would still be delivered to the application the
 ///   user is actually typing in, and FlowPeek would overwrite the clipboard they just filled.
-/// - Only the unmodified viewport keys are bound, and only ones whose worst case is that a
-///   transient preview panel zooms while the user meant to type elsewhere.
+/// - Only Escape is answered from the global monitor. The viewport keys are unmodified characters,
+///   so while somebody else's window is frontmost they belong to whatever the user is typing into:
+///   answering them there means a `-` typed into an editor also zooms a panel floating over it,
+///   with nothing on screen to explain why. They are answered only once the panel itself is the
+///   key window, where the local monitor sees them and can consume them.
 public enum PreviewKeyBinding {
     public enum Surface: Sendable {
+        /// The quick panel while somebody else's window is frontmost: keys are merely observed, and
+        /// an observer cannot take a key away from the application it was meant for.
+        case observedPanel
+        /// The quick panel once it is the key window, so its keys arrive and can be consumed.
         case panel
         case window
     }
@@ -80,8 +87,14 @@ public enum PreviewKeyBinding {
         // Option is the ambient-peek hold and Control belongs to whatever the user is doing
         // elsewhere; neither ever means a preview command.
         guard !stroke.option, !stroke.control else { return nil }
+        // Escape first, because it is the only thing an observer may answer.
+        if surface == .observedPanel {
+            return stroke.keyCode == Key.escape && stroke.isUnmodified ? .close : nil
+        }
         if let pan = pan(for: stroke) { return pan }
         switch surface {
+        case .observedPanel:
+            return nil
         case .panel:
             guard stroke.keyCode != Key.escape else { return stroke.isUnmodified ? .close : nil }
             guard !stroke.command else { return nil }

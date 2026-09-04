@@ -32,10 +32,23 @@ public enum ClipboardPreviewPolicy {
             // the remembered copy is still the best answer to the key that was pressed.
             return fallback(hasCachedDiagram)
         } catch let error as MermaidSource.ValidationError {
+            // A size complaint is only true if a diagram is what was copied. The length limits are
+            // checked before the syntax is looked at, so a novel on the pasteboard comes back as
+            // "too large" -- and telling somebody their *diagram* is too big sends them looking for
+            // a fault in a diagram they never copied. The detector reads from the first lines, so a
+            // prefix settles the question without walking the whole paste.
+            guard looksLikeADiagram(pasteboardText) else { return fallback(hasCachedDiagram) }
             return .refused(error)
         } catch {
             return fallback(hasCachedDiagram)
         }
+    }
+
+    /// Enough to reach a starter line and its first statements; the detector looks no further.
+    private static let probeCharacters = 4000
+
+    private static func looksLikeADiagram(_ text: String) -> Bool {
+        MermaidSource.looksLikeMermaid(String(text.prefix(probeCharacters)))
     }
 
     private static func fallback(_ hasCachedDiagram: Bool) -> Decision {

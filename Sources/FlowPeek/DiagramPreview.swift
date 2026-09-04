@@ -915,22 +915,22 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         // application the user is typing in, and FlowPeek would overwrite the clipboard behind it.
         if let global = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown], handler: { [weak self] event in
             let stroke = PreviewKeyStroke(event)
-            Task { @MainActor in self?.handlePanelKey(stroke) }
+            Task { @MainActor in self?.handlePanelKey(stroke, surface: .observedPanel) }
         }) { dismissMonitors.append(global) }
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.keyDown], handler: { [weak self] event in
             guard let self else { return event }
             // A save panel or an alert of ours is key: its own Escape must cancel it, not close the
             // preview underneath it.
             guard event.window == nil || event.window === self.quickPanel else { return event }
-            return self.handlePanelKey(PreviewKeyStroke(event)) ? nil : event
+            return self.handlePanelKey(PreviewKeyStroke(event), surface: .panel) ? nil : event
         }) { dismissMonitors.append(local) }
     }
 
     /// Escape closes either kind of quick surface; everything else needs a diagram to act on.
     @discardableResult
-    private func handlePanelKey(_ stroke: PreviewKeyStroke) -> Bool {
+    private func handlePanelKey(_ stroke: PreviewKeyStroke, surface: PreviewKeyBinding.Surface) -> Bool {
         guard quickPanel != nil,
-              let command = PreviewKeyBinding.command(for: stroke, surface: .panel) else { return false }
+              let command = PreviewKeyBinding.command(for: stroke, surface: surface) else { return false }
         if command == .close {
             trace("escape dismiss")
             closeQuick()

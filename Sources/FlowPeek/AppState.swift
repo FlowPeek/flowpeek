@@ -9,16 +9,44 @@ import SwiftUI
 final class AppState: ObservableObject {
     static let shared = AppState()
 
-    @AppStorage("flowpeek.enabled") var isEnabled = true
-    @AppStorage("flowpeek.onboardingComplete") var onboardingComplete = false
+    // Remembered settings, published rather than stored in `@AppStorage`.
+    //
+    // `@AppStorage` is a `DynamicProperty`: SwiftUI installs its update mechanism for members it
+    // can reach from a `View`, and never for a property of a class. Inside an `ObservableObject` it
+    // therefore reads and writes the store correctly and announces nothing at all -- so a row that
+    // renders `isEnabled` only ever redrew by accident, when something else in the same turn
+    // happened to move. Every switch here drives at least one surface somewhere else: pausing
+    // detection from the menu has to grey the tutorial's rows, granting the permission has to clear
+    // the warning from the icon, and enabling the experiment has to make its checklist row live.
+    //
+    // So they are `@Published`, persisted on change, and re-read when the store changes underneath
+    // us -- a view of its own may own the same key, and `defaults write` is how the experimental
+    // switch gets turned on for testing.
+    @Published var isEnabled = Defaults.bool(.enabled, default: true) {
+        didSet { Defaults.set(isEnabled, .enabled) }
+    }
+    @Published var onboardingComplete = Defaults.bool(.onboardingComplete, default: false) {
+        didSet { Defaults.set(onboardingComplete, .onboardingComplete) }
+    }
     /// The user was offered Accessibility and said no. Remembered so the answer is not asked for
     /// again at every launch; cleared the moment the grant arrives.
-    @AppStorage("flowpeek.permission.declined") var permissionDeclined = false
-    @AppStorage("flowpeek.clipboard.enabled") var clipboardWatchEnabled = true
+    @Published var permissionDeclined = Defaults.bool(.permissionDeclined, default: false) {
+        didSet { Defaults.set(permissionDeclined, .permissionDeclined) }
+    }
+    @Published var clipboardWatchEnabled = Defaults.bool(.clipboardEnabled, default: true) {
+        didSet { Defaults.set(clipboardWatchEnabled, .clipboardEnabled) }
+    }
     /// Experimental: hold Option to outline Mermaid under the pointer. Off until asked for.
-    @AppStorage("flowpeek.ambient.enabled") var ambientPeekEnabled = false
-    @AppStorage("flowpeek.ai.enabled") var aiEnabled = false
-    @AppStorage("flowpeek.ai.provider") var providerRawValue = AIProviderKind.openAI.rawValue
+    @Published var ambientPeekEnabled = Defaults.bool(.ambientEnabled, default: false) {
+        didSet { Defaults.set(ambientPeekEnabled, .ambientEnabled) }
+    }
+    @Published var aiEnabled = Defaults.bool(.aiEnabled, default: false) {
+        didSet { Defaults.set(aiEnabled, .aiEnabled) }
+    }
+    @Published var providerRawValue = Defaults.string(.aiProvider, default: AIProviderKind.openAI.rawValue) {
+        didSet { Defaults.set(providerRawValue, .aiProvider) }
+    }
+    private var defaultsObserver: (any NSObjectProtocol)?
     @Published private(set) var accessibilityGranted = AXIsProcessTrusted()
     @Published private(set) var accessibilityNeedsRepair = false
     @Published private(set) var permissionRecoveryError: String?
@@ -91,6 +119,71 @@ final class AppState: ObservableObject {
         // Wired here rather than in `start()`: a preview can be promoted from the demo arguments and
         // from the AI window, neither of which goes through the monitors that `start()` arms.
         previews.onPromotedChange = { [weak self] hasWindow in self?.hasPromotedPreview = hasWindow }
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.adoptStoredSettings() }
+        }
+    }
+
+    // Isolated so the observer can be read on the actor that owns it. The singleton outlives the
+    // process in practice; this is here so the type is correct rather than because it runs.
+    isolated deinit {
+        if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
+    }
+
+    /// Pulls anything that changed the store from outside back into the published values.
+    ///
+    /// Each assignment is guarded on a real difference: the notification fires for our own writes
+    /// too, and re-assigning an equal value would publish a change on every keystroke that touches
+    /// any default in the process.
+    private func adoptStoredSettings() {
+        let enabled = Defaults.bool(.enabled, default: true)
+        if enabled != isEnabled { isEnabled = enabled }
+        let onboarded = Defaults.bool(.onboardingComplete, default: false)
+        if onboarded != onboardingComplete { onboardingComplete = onboarded }
+        let declined = Defaults.bool(.permissionDeclined, default: false)
+        if declined != permissionDeclined { permissionDeclined = declined }
+        let clipboard = Defaults.bool(.clipboardEnabled, default: true)
+        if clipboard != clipboardWatchEnabled { clipboardWatchEnabled = clipboard }
+        let ambient = Defaults.bool(.ambientEnabled, default: false)
+        if ambient != ambientPeekEnabled { ambientPeekEnabled = ambient }
+        let ai = Defaults.bool(.aiEnabled, default: false)
+        if ai != aiEnabled { aiEnabled = ai }
+        let provider = Defaults.string(.aiProvider, default: AIProviderKind.openAI.rawValue)
+        if provider != providerRawValue { providerRawValue = provider }
+    }
+
+    /// The defaults keys these settings live under, named once so a view that owns the same key and
+    /// this class cannot drift apart.
+    enum Defaults {
+        enum Key: String {
+            case enabled = "flowpeek.enabled"
+            case onboardingComplete = "flowpeek.onboardingComplete"
+            case permissionDeclined = "flowpeek.permission.declined"
+            case clipboardEnabled = "flowpeek.clipboard.enabled"
+            case ambientEnabled = "flowpeek.ambient.enabled"
+            case aiEnabled = "flowpeek.ai.enabled"
+            case aiProvider = "flowpeek.ai.provider"
+        }
+
+        static func bool(_ key: Key, default fallback: Bool) -> Bool {
+            UserDefaults.standard.object(forKey: key.rawValue) as? Bool ?? fallback
+        }
+
+        static func string(_ key: Key, default fallback: String) -> String {
+            UserDefaults.standard.string(forKey: key.rawValue) ?? fallback
+        }
+
+        static func set(_ value: Bool, _ key: Key) {
+            UserDefaults.standard.set(value, forKey: key.rawValue)
+        }
+
+        static func set(_ value: String, _ key: Key) {
+            UserDefaults.standard.set(value, forKey: key.rawValue)
+        }
     }
 
     func start() {
@@ -559,7 +652,10 @@ final class AppState: ObservableObject {
 
     func resetTutorial() {
         tutorial.reset()
-        tutorialPracticeOpen = false
+        // Deliberately leaves `tutorialPracticeOpen` alone. Starting the checklist over closes
+        // neither the checklist nor the browser tab, and clearing it here switched off the two
+        // things that make a fresh attempt legible -- the second look at a refused selection and
+        // the nudge on a row that has produced nothing -- until the page was opened again.
     }
 
     /// The practice page is open, so a rejected selection is worth a second look and a lesson that

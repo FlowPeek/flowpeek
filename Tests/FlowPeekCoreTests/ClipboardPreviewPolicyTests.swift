@@ -76,11 +76,23 @@ final class ClipboardPreviewPolicyTests: XCTestCase {
     /// Past the detector's own ceiling nothing is examined at all, so the answer can only be the
     /// size — and it still has to be the size rather than silence.
     func testTextTooLargeToEvenExamineStillReportsTheSize() {
-        let vast = String(repeating: "a", count: MermaidDetector.maximumInputCharacters + 1)
+        let vast = "flowchart TD\n  A --> B\n"
+            + String(repeating: "  B --> C\n", count: MermaidDetector.maximumInputCharacters / 10)
+        XCTAssertGreaterThan(vast.utf16.count, MermaidDetector.maximumInputCharacters)
         guard case .refused(.tooLarge) = ClipboardPreviewPolicy.decide(
             pasteboardText: vast,
             hasCachedDiagram: true
-        ) else { return XCTFail("an unexaminable pasteboard fell through to the cache") }
+        ) else { return XCTFail("an unexaminable diagram fell through to the cache") }
+    }
+
+    /// The same size, without a diagram in it. Nothing was copied that a size complaint could be
+    /// about, so the remembered copy is still the best answer to the key that was pressed.
+    func testTextTooLargeToExamineThatIsNotADiagramFallsBack() {
+        let vast = String(repeating: "a", count: MermaidDetector.maximumInputCharacters + 1)
+        XCTAssertEqual(
+            ClipboardPreviewPolicy.decide(pasteboardText: vast, hasCachedDiagram: true),
+            .previewCached
+        )
     }
 
     /// A line no renderer will take is a shape complaint, not an absence: the same reporting the
@@ -91,5 +103,30 @@ final class ClipboardPreviewPolicyTests: XCTestCase {
             pasteboardText: oneVastLine,
             hasCachedDiagram: false
         ) else { return XCTFail("a line over the limit was reported as nothing to preview") }
+    }
+
+    /// The length limits are checked before the syntax is, so a large paste of ordinary text used to
+    /// come back as an oversized *diagram* -- and the remembered copy was suppressed for it.
+    func testAHugePasteOfProseIsNotReportedAsAnOversizedDiagram() {
+        let prose = String(repeating: "The quick brown fox jumps over the lazy dog. ", count: 4000)
+        XCTAssertGreaterThan(prose.utf16.count, 100_000)
+        XCTAssertEqual(
+            ClipboardPreviewPolicy.decide(pasteboardText: prose, hasCachedDiagram: true),
+            .previewCached
+        )
+        XCTAssertEqual(
+            ClipboardPreviewPolicy.decide(pasteboardText: prose, hasCachedDiagram: false),
+            .nothingToPreview
+        )
+    }
+
+    /// A diagram that really is too big still has to say so, rather than quietly opening something
+    /// else the user did not ask for.
+    func testAHugeDiagramIsStillRefusedOutLoud() {
+        let huge = "flowchart TD\n" + (0..<9000).map { "  N\($0)[Node \($0)] --> N\($0 + 1)" }.joined(separator: "\n")
+        XCTAssertGreaterThan(huge.utf16.count, 100_000)
+        guard case .refused = ClipboardPreviewPolicy.decide(pasteboardText: huge, hasCachedDiagram: true) else {
+            return XCTFail("an oversized diagram must be refused, not replaced by the remembered copy")
+        }
     }
 }

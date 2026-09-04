@@ -134,4 +134,36 @@ final class PreviewKeyBindingTests: XCTestCase {
         XCTAssertNil(panel(Code.a))
         XCTAssertNil(window(Code.a, command: true))
     }
+
+    // MARK: - What an observer may answer
+
+    /// While somebody else's window is frontmost the panel's keys are only observed, and an
+    /// observer cannot take a key away from the application it was meant for. Answering an
+    /// unmodified character there means a `-` typed into an editor also zooms a panel floating over
+    /// it, with nothing on screen to explain why.
+    func testAnObservedPanelAnswersEscapeAndNothingElse() {
+        XCTAssertEqual(
+            PreviewKeyBinding.command(for: PreviewKeyStroke(keyCode: 53), surface: .observedPanel),
+            .close
+        )
+        for keyCode: UInt16 in [24, 27, 29, 18, 69, 78, 82, 83, 123, 124, 125, 126] {
+            XCTAssertNil(
+                PreviewKeyBinding.command(for: PreviewKeyStroke(keyCode: keyCode), surface: .observedPanel),
+                "key \(keyCode) must not be answered while it belongs to another application"
+            )
+        }
+    }
+
+    /// Once the panel is the key window the same keys arrive properly and can be consumed, so the
+    /// viewport is driveable from the keyboard there.
+    func testTheKeyPanelStillAnswersTheViewportKeys() {
+        XCTAssertEqual(PreviewKeyBinding.command(for: PreviewKeyStroke(keyCode: 24), surface: .panel), .zoomIn)
+        XCTAssertEqual(PreviewKeyBinding.command(for: PreviewKeyStroke(keyCode: 27), surface: .panel), .zoomOut)
+        XCTAssertEqual(PreviewKeyBinding.command(for: PreviewKeyStroke(keyCode: 29), surface: .panel), .fit)
+        XCTAssertEqual(PreviewKeyBinding.command(for: PreviewKeyStroke(keyCode: 18), surface: .panel), .actualSize)
+        XCTAssertEqual(
+            PreviewKeyBinding.command(for: PreviewKeyStroke(keyCode: 123), surface: .panel),
+            .pan(dx: -PreviewKeyBinding.panStep, dy: 0)
+        )
+    }
 }

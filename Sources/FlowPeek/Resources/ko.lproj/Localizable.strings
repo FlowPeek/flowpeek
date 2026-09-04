@@ -14,6 +14,8 @@
 "onboarding.permission.message" = "다이어그램 복사는 권한이 필요하지 않습니다. 다른 앱에서 드래그한 텍스트 옆에 버튼까지 띄우려면 그 선택 영역을 읽을 권한이 필요합니다. 그 밖의 것은 읽지 않고, 아무것도 이 Mac 밖으로 나가지 않습니다.";
 "tutorial.title" = "세 가지 모두 해보기";
 "tutorial.message" = "FlowPeek에 닿는 길은 세 가지입니다. 연습 페이지를 열고 실제로 한 번씩 써보세요 — 해낸 만큼 체크가 채워집니다.";
+"tutorial.title.one" = "복사로 해보기";
+"tutorial.message.one" = "복사는 권한 없이도 쓸 수 있는 길입니다. 연습 페이지를 열고 실제로 한 번 써보세요 — 해내면 체크가 채워집니다.";
 "tutorial.open-page" = "연습 페이지 열기";
 "tutorial.skip" = "그냥 마치기";
 "tutorial.page.title" = "FlowPeek 연습";
@@ -84,6 +86,7 @@
 "shortcut.inactive.clipboard" = "일반 탭에서 ‘클립보드 감시’를 켜야 사용할 수 있습니다.";
 "shortcut.inactive.ai" = "AI 탭에서 AI 다이어그램 생성을 켜야 사용할 수 있습니다.";
 "shortcut.inactive.ambient" = "일반 탭에서 ‘홀드해서 엿보기’를 켜고 접근성 권한을 허용해야 사용할 수 있습니다.";
+"shortcut.inactive.paused" = "감지가 일시 정지 상태입니다. FlowPeek 메뉴에서 다시 켜야 사용할 수 있습니다.";
 "shortcut.error.no-modifier" = "전역 단축키에는 Command·Option·Control 중 하나 이상이 필요합니다.";
 "shortcut.error.reserved" = "%@은(는) macOS가 선점한 조합입니다.";
 "shortcut.error.already-used" = "이미 ‘%@’에 지정되어 있습니다.";

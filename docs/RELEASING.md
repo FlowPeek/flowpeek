@@ -95,8 +95,10 @@ Each of these fails the run rather than shipping something broken:
   is how a source file ends up compiling under SPM and silently vanishing from the shipping app.
 - **The exported app really contains** `AppIcon.icns`, `Assets.car`, `mermaid.min.js`,
   `flowpeek-glue.js` and both `.lproj` directories.
-- **`codesign --verify --deep --strict` and `spctl --assess`**, from `Scripts/notarize_dmg.sh`,
-  before and after stapling.
+- **`codesign --verify --deep --strict`** before notarization, then **`spctl --assess`** on both the
+  stapled app and the stapled DMG afterwards. `Scripts/notarize_dmg.sh` notarizes and staples the
+  app *before* packaging it: a DMG's ticket stays with the DMG, and Homebrew copies the app out, so
+  an unstapled app would need the online notary check on every first launch.
 
 ## Verifying a release by hand
 

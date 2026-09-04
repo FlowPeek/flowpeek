@@ -3,7 +3,23 @@
 # Regenerates FlowPeek.xcodeproj from the on-disk layout so the shipping app cannot
 # diverge from what SPM compiles. Everything is discovered recursively and sorted, and
 # UUIDs are derived from the object graph, so two runs produce a byte-identical
-# project.pbxproj.
+# project.pbxproj -- for one gem version.
+#
+# `predictabilize_uuids` derives different identifiers across xcodeproj releases, so the version is
+# activated explicitly rather than left to whichever copy Rubygems happens to pick. Without this a
+# machine with two versions installed silently regenerates every UUID, and the release workflow
+# rejects a project that is otherwise identical.
+XCODEPROJ_VERSION = "1.28.1"
+begin
+  gem "xcodeproj", XCODEPROJ_VERSION
+rescue Gem::LoadError
+  abort <<~MESSAGE
+    xcodeproj #{XCODEPROJ_VERSION} is required to generate a project that matches the one in git.
+    Install it with:
+
+      gem install xcodeproj -v #{XCODEPROJ_VERSION}
+  MESSAGE
+end
 
 require "xcodeproj"
 

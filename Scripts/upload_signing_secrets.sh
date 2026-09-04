@@ -100,6 +100,25 @@ count=$(print -r -- "$contents" | grep -c '"' || true)
 print "\nThe archive contains $count signing identity/identities:"
 print -r -- "$contents"
 
+if [[ "$count" -eq 0 ]]; then
+  # An identity is a certificate *plus* its private key. Exporting from Keychain Access's
+  # "Certificates" category yields the certificate alone, which imports cleanly and is then useless
+  # for signing -- so name that case instead of reporting a bare count.
+  certificates=$(security find-certificate -a "$verify" 2>/dev/null | grep -c "keychain:" || true)
+  keys=$(security find-key -t private "$verify" 2>/dev/null | grep -c "." || true)
+  print -u2 "\nRefusing to upload: the archive holds no signing identity."
+  print -u2 "  certificates in it: $certificates"
+  print -u2 "  private keys in it: $keys"
+  if [[ "$certificates" -gt 0 && "$keys" -eq 0 ]]; then
+    print -u2 ""
+    print -u2 "It carries the certificate but not its private key, so nothing can sign with it."
+    print -u2 "In Keychain Access, switch the left sidebar to \"My Certificates\" -- not"
+    print -u2 "\"Certificates\" -- select \"Developer ID Application: ... ($EXPECTED_TEAM)\", then"
+    print -u2 "File > Export Items > Personal Information Exchange (.p12). Only the My Certificates"
+    print -u2 "row bundles the key. A key-bearing .p12 is usually 2.5-4 KB; yours is $(stat -f%z "$archive") bytes."
+  fi
+  exit 1
+fi
 if [[ "$count" -ne 1 ]]; then
   print -u2 "\nRefusing to upload: exactly one identity is required, found $count."
   print -u2 "Export only the certificate for team $EXPECTED_TEAM and re-run with FLOWPEEK_P12=..."

@@ -5,6 +5,7 @@
 "menu.onboarding" = "Welcome & Tutorial…";
 "menu.status.ready" = "Ready — watching for diagrams";
 "menu.status.paused" = "Paused — nothing is being watched";
+"menu.status.nothing-watched" = "Nothing is being watched — Accessibility and the clipboard watch are both off";
 "menu.status.permission" = "Accessibility is off — selecting and pointing cannot work";
 "menu.status.engine" = "The diagram engine cannot draw anything right now";
 "menu.engine.checking" = "Checking the diagram engine…";
@@ -82,7 +83,9 @@
 "diagram.clipboard-title" = "Copied Diagram";
 "clipboard.empty.title" = "Nothing to Preview";
 "clipboard.empty.message" = "There is no Mermaid diagram on the clipboard right now. Copy one and press %@ again — or start with FlowPeek's own sample.";
+"clipboard.empty.message.no-shortcut" = "There is no Mermaid diagram on the clipboard right now. Copy one and choose “%@” again — or start with FlowPeek's own sample.";
 "clipboard.empty.copy-sample" = "Copy a Sample Diagram";
+"clipboard.error.title" = "Cannot Preview the Copied Diagram";
 "settings.shortcuts" = "Shortcuts";
 "settings.shortcuts.description" = "Assign the keys that reach FlowPeek from anywhere.";
 "settings.shortcuts.note" = "Global shortcuts need at least one of Command, Option, or Control, and win over the app you are working in.";

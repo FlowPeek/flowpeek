@@ -5,6 +5,7 @@
 "menu.onboarding" = "환영 및 튜토리얼…";
 "menu.status.ready" = "준비됨 — 다이어그램을 감시하는 중";
 "menu.status.paused" = "일시 정지 — 아무것도 감시하지 않음";
+"menu.status.nothing-watched" = "아무것도 감시하지 않음 — 접근성과 클립보드 감시가 모두 꺼져 있음";
 "menu.status.permission" = "접근성이 꺼져 있음 — 선택과 포인터 감지가 동작할 수 없음";
 "menu.status.engine" = "지금은 다이어그램 엔진이 아무것도 그릴 수 없음";
 "menu.engine.checking" = "다이어그램 엔진 확인 중…";
@@ -82,7 +83,9 @@
 "diagram.clipboard-title" = "복사한 다이어그램";
 "clipboard.empty.title" = "미리 볼 것이 없음";
 "clipboard.empty.message" = "지금 클립보드에는 Mermaid 다이어그램이 없습니다. 하나를 복사한 뒤 %@를 다시 누르거나, FlowPeek의 샘플로 시작해 보세요.";
+"clipboard.empty.message.no-shortcut" = "지금 클립보드에는 Mermaid 다이어그램이 없습니다. 하나를 복사한 뒤 ‘%@’를 다시 선택하거나, FlowPeek의 샘플로 시작해 보세요.";
 "clipboard.empty.copy-sample" = "샘플 다이어그램 복사";
+"clipboard.error.title" = "복사한 다이어그램을 미리 볼 수 없습니다";
 "settings.shortcuts" = "단축키";
 "settings.shortcuts.description" = "어디서든 FlowPeek에 닿는 키를 직접 지정합니다.";
 "settings.shortcuts.note" = "전역 단축키에는 Command·Option·Control 중 하나 이상이 필요하며, 작업 중인 앱보다 우선합니다.";

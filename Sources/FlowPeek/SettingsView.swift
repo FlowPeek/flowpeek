@@ -3,7 +3,9 @@ import FlowPeekCore
 import SwiftUI
 
 struct SettingsView: View {
-    private enum SettingsSection: String, CaseIterable {
+    /// Not private: the menu bar's "Change Shortcuts…" row opens this window on a named pane, and
+    /// the pane it wants is the whole point of that row.
+    enum SettingsSection: String, CaseIterable {
         case general
         case shortcuts
         case ai
@@ -29,9 +31,14 @@ struct SettingsView: View {
     /// The centre is its own observable object, so reading it through `app` would never redraw: the
     /// dimmed rows and the AI card's shortcut would keep naming the previous state.
     @ObservedObject private var shortcuts = AppState.shared.shortcuts
-    @State private var selection = SettingsSection.general
+    @State private var selection: SettingsSection
     @State private var relaunchPrompt: RelaunchPrompt?
     let close: () -> Void
+
+    init(section: SettingsSection = .general, close: @escaping () -> Void) {
+        _selection = State(initialValue: section)
+        self.close = close
+    }
 
     /// The card's own copy names the chord that opens an outlined diagram, and that chord is
     /// rebindable on the next tab along, so it is read from the store rather than spelled out in

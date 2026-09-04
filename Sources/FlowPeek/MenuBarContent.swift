@@ -16,7 +16,7 @@ struct MenuBarContent: View {
             // Said here even when the icon stays calm because the user declined the switch: the
             // menu is where someone can find out what that costs and change their mind, and it is
             // the place to say it without turning the icon into a permanent nag.
-            if app.menuBarStatus != .permissionMissing {
+            if !statusLineCoversPermission {
                 Text("menu.status.permission")
             }
             Button("permission.open-settings") { app.openAccessibilitySettings() }
@@ -37,7 +37,10 @@ struct MenuBarContent: View {
         // here, and until now the red line saying so lived in the Shortcuts pane alone.
         if !app.shortcuts.unavailableActions.isEmpty {
             Text("menu.shortcuts.unavailable")
-            Button("menu.shortcuts.fix") { app.handle(.showSettings) }
+            // Straight to the pane that holds the field, the way the tutorial's own buttons open the
+            // step they are about: this row exists to fix a combination, and `handle(.showSettings)`
+            // would land the user on General with nothing on it about shortcuts.
+            Button("menu.shortcuts.fix") { SettingsWindowCoordinator.shared.show(section: .shortcuts) }
         }
         Divider()
         // The only mouse-reachable door to the clipboard route once the badge has faded, and the
@@ -78,10 +81,19 @@ struct MenuBarContent: View {
         case .engineBroken: app.engineHealth?.menuDescription ?? String(localized: "menu.status.engine")
         case .permissionMissing: String(localized: "menu.status.permission")
         case .paused: String(localized: "menu.status.paused")
+        // Names both switches, because either one turns detection back on and the icon cannot say
+        // which is which.
+        case .nothingWatched: String(localized: "menu.status.nothing-watched")
         // Said out loud even when nothing is wrong: "is it working?" was unanswerable anywhere in
         // the app, and a menu that only speaks up about problems cannot answer it either.
         case .armed: String(localized: "menu.status.ready")
         }
+    }
+
+    /// Whether the line above has already said that Accessibility is off, so the extra row for the
+    /// decliner does not repeat it back to them.
+    private var statusLineCoversPermission: Bool {
+        app.menuBarStatus == .permissionMissing || app.menuBarStatus == .nothingWatched
     }
 
     /// The engine's complaint, unless the status row above is already carrying it — which it is
@@ -96,9 +108,8 @@ struct MenuBarContent: View {
     /// one there would promise a key that is not registered.
     private var clipboardTitle: String {
         let title = String(localized: "menu.preview-clipboard")
-        guard app.shortcuts.activeActions.contains(.previewClipboard),
-              !app.shortcuts.unavailableActions.contains(.previewClipboard) else { return title }
-        return title + "  " + app.shortcuts.shortcuts[.previewClipboard].display
+        guard let chord = app.clipboardShortcutDisplay else { return title }
+        return title + "  " + chord
     }
 }
 

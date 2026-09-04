@@ -62,6 +62,14 @@ final class ClipboardMonitor {
         return text
     }
 
+    /// The one thing FlowPeek ever puts on the pasteboard, and it goes through the same pasteboard
+    /// the reads use: written to `NSPasteboard.general` directly it would land where an injected
+    /// pasteboard cannot see it, and `currentText()` would report the clipboard as still empty.
+    func write(_ text: String) {
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
     /// Exposed for tests and for the "check now" path; safe to call at any time.
     func poll() {
         let changeCount = pasteboard.changeCount

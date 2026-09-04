@@ -203,7 +203,8 @@ final class AppState: ObservableObject {
             engineUsable: engineHealth?.isUsable ?? true,
             accessibilityGranted: accessibilityGranted,
             permissionDeclined: permissionDeclined,
-            isEnabled: isEnabled
+            isEnabled: isEnabled,
+            clipboardWatchEnabled: clipboardWatchEnabled
         )
         // Assigned only when it moves: this also runs from the permission poll, and `@Published`
         // republishes an identical value, which would redraw the status item on a timer.
@@ -211,15 +212,32 @@ final class AppState: ObservableObject {
         menuBarStatus = resolved
     }
 
-    /// Three seconds while the grant is missing, ten while it holds. Someone standing in System
-    /// Settings waiting for the switch to take effect notices three; a revocation is rare enough
-    /// that hearing about it within ten is what matters, and `AXIsProcessTrusted()` still goes out
-    /// to the TCC daemon, so the idle case gets the cheaper cadence.
+    /// The two things an answer to the permission question moves that nothing else would notice:
+    /// `permissionDeclined` is `@AppStorage`, which publishes nothing from inside a class, so the
+    /// icon would keep the state before the click until the next poll — and the cadence of that
+    /// poll is itself a question about whether an answer is still outstanding.
+    func permissionAnswerDidChange() {
+        refreshMenuBarStatus()
+        schedulePermissionPoll()
+    }
+
+    /// Three seconds while the permission question is still open, ten once it has an answer.
+    /// Someone standing in System Settings waiting for the switch to take effect notices three; a
+    /// revocation is rare enough that hearing about it within ten is what matters, and
+    /// `AXIsProcessTrusted()` still goes out to the TCC daemon, so the idle case gets the cheaper
+    /// cadence.
     private static let ungrantedPollInterval: TimeInterval = 3
     private static let grantedPollInterval: TimeInterval = 10
 
+    /// A decline is an answer. Someone who said "continue without it" and works from the clipboard
+    /// is not waiting for a switch to take effect, so they get the idle cadence for the life of the
+    /// process rather than a tccd round-trip on the main actor every three seconds.
+    var permissionPollInterval: TimeInterval {
+        accessibilityGranted || permissionDeclined ? Self.grantedPollInterval : Self.ungrantedPollInterval
+    }
+
     private func schedulePermissionPoll() {
-        let interval = accessibilityGranted ? Self.grantedPollInterval : Self.ungrantedPollInterval
+        let interval = permissionPollInterval
         if let existing = permissionPollTimer, existing.timeInterval == interval { return }
         permissionPollTimer?.invalidate()
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
@@ -429,20 +447,48 @@ final class AppState: ObservableObject {
             showCopied(source)
         case .previewCached:
             if let copied { showCopied(copied) }
+        case .refused(let error):
+            // The same specific sentence every other route gives for the same input. Reported here
+            // rather than opening the remembered copy, which would answer the key with a different
+            // diagram under the same title and say nothing about the one on the pasteboard.
+            previews.showMessage(
+                title: String(localized: "clipboard.error.title"),
+                message: localizedUserMessage(error)
+            )
         case .nothingToPreview:
             // Saying nothing is what the user reads as a broken app, and a panel that only
             // explains itself is a dead end, so it also offers something to press the key against.
             previews.showMessage(
                 title: String(localized: "clipboard.empty.title"),
-                message: String(
-                    format: String(localized: "clipboard.empty.message"),
-                    shortcuts.shortcuts[.previewClipboard].display
-                ),
+                message: emptyClipboardMessage,
                 action: (title: String(localized: "clipboard.empty.copy-sample"), handler: { [weak self] in
                     self?.copySampleDiagram()
                 })
             )
         }
+    }
+
+    /// The combination that opens this route, or `nil` while nothing holds one. A dormant or
+    /// clashing action has no registered hot key, so naming its stored chord would advertise a key
+    /// that goes nowhere — and this panel is reachable from a menu row that is always enabled.
+    var clipboardShortcutDisplay: String? {
+        guard shortcuts.activeActions.contains(.previewClipboard),
+              !shortcuts.unavailableActions.contains(.previewClipboard) else { return nil }
+        return shortcuts.shortcuts[.previewClipboard].display
+    }
+
+    /// Two sentences rather than one with an empty slot: the chord is rendered from the store when
+    /// there is one to render, and the version without it names the menu row instead — from the
+    /// same catalogue key the menu draws, so the panel cannot send the user looking for a command
+    /// under a name nothing in the menu uses.
+    private var emptyClipboardMessage: String {
+        guard let chord = clipboardShortcutDisplay else {
+            return String(
+                format: String(localized: "clipboard.empty.message.no-shortcut"),
+                String(localized: "menu.preview-clipboard")
+            )
+        }
+        return String(format: String(localized: "clipboard.empty.message"), chord)
     }
 
     private func showCopied(_ source: MermaidSource) {
@@ -456,9 +502,7 @@ final class AppState: ObservableObject {
     /// now opens something. Writing it also bumps `changeCount`, so the badge fires too — which is
     /// exactly what a real copy looks like.
     private func copySampleDiagram() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(TutorialPractice.sample, forType: .string)
+        clipboard.write(TutorialPractice.sample)
         previewCopied()
     }
 
@@ -603,7 +647,10 @@ final class AppState: ObservableObject {
         SMAppService.openSystemSettingsLoginItems()
     }
 
-    private func updateAccessibilityState(_ granted: Bool) {
+    /// The single reaction to the grant moving, in either direction. Not private: taking the grant
+    /// away and giving it back is otherwise only possible from System Settings, and this is the path
+    /// a revoke has to survive.
+    func updateAccessibilityState(_ granted: Bool) {
         let changed = granted != accessibilityGranted
         // Every assignment here is guarded, because this now runs from a timer: `@Published`
         // republishes an identical value and `@AppStorage` writes the defaults again, so an
@@ -615,8 +662,8 @@ final class AppState: ObservableObject {
             // the full offer back rather than being silently treated as still-declined.
             if permissionDeclined { permissionDeclined = false }
         }
-        // Cheap, and it also picks up a decline recorded elsewhere: `permissionDeclined` is
-        // `@AppStorage`, which publishes nothing, so the poll is what keeps the icon honest.
+        // Unconditional, because the verdict can move while `changed` does not: clearing a decline
+        // the moment the grant arrives is exactly that case.
         refreshMenuBarStatus()
         guard changed else { return }
         // Both AX monitors install global event monitors while trusted and keep them after the

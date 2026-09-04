@@ -351,6 +351,7 @@ struct OnboardingView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         Button("permission.turn-on") {
                             app.permissionDeclined = false
+                            app.permissionAnswerDidChange()
                             step = .permission
                         }
                         .controlSize(.small)
@@ -480,6 +481,10 @@ struct OnboardingView: View {
     /// worth asking, and the clipboard lesson still works.
     private func decline() {
         app.permissionDeclined = true
+        // The icon and the poll both key off this answer, and it is the user's own click: leaning on
+        // the next poll to notice would leave the warning triangle up for as long as three seconds
+        // after they chose to live without the grant.
+        app.permissionAnswerDidChange()
         step = .launch
     }
 

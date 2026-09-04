@@ -138,10 +138,12 @@
 "settings.language.relaunch.action" = "Restart Now";
 "settings.language.relaunch.title" = "Restart FlowPeek to change language?";
 "settings.ambient" = "Hold to peek";
-"settings.ambient.description" = "Hold Option and point at a diagram: FlowPeek outlines it and %@ opens it. Only reads what is under the pointer, and only while Option is down. Apps that draw their own text — a terminal rendering to a canvas, for one — expose nothing to read; copying still works there.";
+"settings.ambient.description" = "Hold Option and point at a diagram: FlowPeek outlines it and %@ opens it. Only reads while Option is down: what is under the pointer, and in an editor that exposes nothing there — VS Code and other Electron apps — the document it has open, anchored on the text cursor. Apps that draw their own text — a terminal rendering to a canvas, for one — expose nothing to read; copying still works there.";
 "settings.ambient.needs-permission" = "Needs Accessibility permission before it can see anything.";
 "ambient.hint.generic" = "Mermaid";
 "ambient.hint.help" = "Open this diagram";
+"ambient.hint.caret" = "at the cursor";
+"ambient.hint.help.caret" = "Opens the diagram the text cursor is in. The outline marks the cursor, not the block.";
 "settings.clipboard" = "Watch the clipboard";
 "settings.clipboard.description" = "When you copy Mermaid from an app FlowPeek cannot read a selection from — a terminal that draws its own text, for instance — a small badge appears with the shortcut that opens it. The clipboard is only read, never changed, and its contents are never stored or logged.";
 "preview.open-window" = "Open in Window";

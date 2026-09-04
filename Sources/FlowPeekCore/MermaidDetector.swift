@@ -99,6 +99,37 @@ public enum MermaidDetector {
     /// Convenience gate used by `AppState.receive`.
     public static func looksLikeMermaid(_ raw: String) -> Bool { detect(raw).confidence >= .likely }
 
+    /// Whether a line *declares* a diagram rather than merely opening with a word one of them uses.
+    ///
+    /// The starter scan is a prefix match, which is the right call for text that arrived inside a
+    /// fence or under the pointer: something already marked as code is a diagram, and the only
+    /// question left is which one. Text that nothing vouches for is a different question, and the
+    /// same prefix match answers it wrongly -- "graph of dependencies", "timeline of the migration",
+    /// "pie in the sky planning", "info about the build", "block by block we shipped it" and
+    /// "erDiagram is what we need here" all read as diagrams, and an ordinary note then gets an
+    /// outline. mermaid's own grammar allows very little on a declaration line: the keyword by
+    /// itself, a flow direction, a title, `showData`, or an axis orientation. Anything else after
+    /// the first word is prose.
+    public static func declaresDiagram(_ line: String) -> Bool {
+        let line = trimmed(line)
+        let keyword = line.prefix { !$0.isWhitespace }
+        guard match(String(keyword)) != nil else { return false }
+        let rest = line.dropFirst(keyword.count).trimmingCharacters(in: .whitespaces)
+        guard !rest.isEmpty else { return true }
+        // Statement punctuation belongs to the grammar, not to the word: `graph TD;` and
+        // `gitGraph LR:` are both declarations.
+        let tail = String(rest.prefix { !$0.isWhitespace })
+            .trimmingCharacters(in: CharacterSet(charactersIn: ":;,"))
+            .lowercased()
+        return declarationTails.contains(tail)
+    }
+
+    /// Everything mermaid 11.17.2 accepts after the keyword on the same line: the flowchart and
+    /// gitGraph directions, a title, pie's one flag, and xychart's orientation.
+    private static let declarationTails: Set<String> = [
+        "tb", "td", "bt", "rl", "lr", "title", "showdata", "horizontal", "vertical"
+    ]
+
     // MARK: - Stage 1, normalisation
 
     public static func normalize(_ raw: String) -> String {

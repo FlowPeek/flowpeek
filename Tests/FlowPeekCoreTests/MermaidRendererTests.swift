@@ -306,11 +306,22 @@ final class MermaidRendererTests: XCTestCase {
         XCTAssertFalse(source.contains("suppressErrors:"), "parse() must throw so the message reaches Swift")
         XCTAssertTrue(source.contains("await mm.parse(p.source);"), "parse() must be called with no options object")
 
-        // <style> must survive the scrub — removing it collapses the whole theme.
-        let scrubList = try XCTUnwrap(source.range(of: "root.querySelectorAll(\"script,"))
-        let line = source[scrubList.lowerBound...].prefix(while: { $0 != "\n" })
-        XCTAssertFalse(line.contains("style,"), "the scrub must never remove <style>")
-        XCTAssertTrue(line.contains("foreignObject"))
+        // The scrub's delete list is the security boundary, so its shape is asserted directly.
+        let bannedStart = try XCTUnwrap(source.range(of: "var BANNED ="))
+        let banned = source[bannedStart.upperBound...].prefix(while: { $0 != ";" })
+        for needle in ["script", "iframe", "object", "embed", "link", "meta", "base", "image", "img", "form", "input"] {
+            XCTAssertTrue(banned.contains(needle), "the scrub must delete <\(needle)>")
+        }
+        // Removing <style> would collapse the whole theme; mermaid ships it inside the SVG.
+        XCTAssertFalse(banned.contains("style"), "the scrub must never remove <style>")
+        // <foreignObject> is sanitised, never deleted: eventmodeling emits every node label as one
+        // even with htmlLabels off, so deleting them drew boxes with no text in them at all.
+        XCTAssertFalse(banned.contains("foreignObject"), "<foreignObject> must be sanitised, not deleted")
+        XCTAssertTrue(source.contains("var LABEL_TAGS"), "the label allow-list is missing")
+        XCTAssertTrue(
+            source.contains("root.querySelectorAll(\"foreignObject\")"),
+            "the scrub must walk into every <foreignObject>"
+        )
 
         for code in MermaidGlueCode.allCases {
             XCTAssertTrue(source.contains("\"\(code.rawValue)\""), "the glue never emits code \(code.rawValue)")

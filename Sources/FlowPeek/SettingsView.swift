@@ -378,12 +378,7 @@ struct SettingsView: View {
                     settingIcon("wand.and.stars", color: .purple)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("settings.ai.enabled").font(.headline)
-                        Text(String(
-                            format: String(localized: "settings.ai.shortcut"),
-                            shortcuts.shortcuts[.aiPrompt].display
-                        ))
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                        AIShortcutLabel(center: app.shortcuts)
                     }
                     Spacer()
                     Toggle("settings.ai.enabled", isOn: $app.aiEnabled)
@@ -415,6 +410,24 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
+        }
+    }
+
+    /// Its own view so it observes the centre directly: `app.shortcuts` is a nested
+    /// ObservableObject, and a rebind on the Shortcuts tab publishes there, not through AppState.
+    private struct AIShortcutLabel: View {
+        @ObservedObject var center: ShortcutCenter
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: String(
+                    format: String(localized: "settings.ai.shortcut"),
+                    center.shortcuts[.aiPrompt].display
+                ))
+                Text("settings.ai.keychain")
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
         }
     }
 

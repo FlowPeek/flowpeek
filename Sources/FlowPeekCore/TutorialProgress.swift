@@ -49,24 +49,21 @@ public struct TutorialProgress: Equatable, Sendable {
             return String(format: text, peekShortcut)
         }
 
-        /// Whether the gesture can fire at all right now. Pointing is an experiment that ships off,
-        /// and a row waiting forever for a gesture nothing is listening for is indistinguishable
-        /// from a row the user simply has not tried yet.
-        public func canFire(ambientPeekEnabled: Bool) -> Bool {
-            self == .ambient ? ambientPeekEnabled : true
+        /// Which switch, if any, stops this gesture from firing right now. A row waiting forever for
+        /// a gesture nothing is listening for is indistinguishable from a row the user simply has
+        /// not tried yet, and the pause is answered first because it covers all three routes:
+        /// somebody told only about the pointing experiment turns that on and still sees nothing.
+        public func blocker(_ switches: Switches) -> Blocker? {
+            guard switches.detectionEnabled else { return .detectionPaused }
+            switch self {
+            case .selection: return nil
+            case .clipboard: return switches.clipboardWatchEnabled ? nil : .clipboardWatchOff
+            case .ambient: return switches.ambientPeekEnabled ? nil : .ambientPeekOff
+            }
         }
 
-        /// What the practice page prints in place of the instructions when the gesture cannot fire.
-        /// The page has no switch on it, so the sentence has to say where the switch is.
-        public var switchedOffDetailKey: String.LocalizationValue? {
-            self == .ambient ? "tutorial.ambient.blocked" : nil
-        }
-
-        /// What the checklist row says instead. Shorter than the page's version because the row
-        /// carries the button itself.
-        public var switchedOffReasonKey: String.LocalizationValue? {
-            self == .ambient ? "tutorial.ambient.switched-off" : nil
-        }
+        /// Whether the gesture can fire at all right now.
+        public func canFire(_ switches: Switches) -> Bool { blocker(switches) == nil }
 
         /// What to say when the gesture was tried and FlowPeek could not use what it got.
         ///
@@ -98,6 +95,70 @@ public struct TutorialProgress: Equatable, Sendable {
         /// button never appears — is worse than not offering it at all.
         public static func available(accessibilityGranted: Bool) -> [Self] {
             accessibilityGranted ? allCases : allCases.filter { !requiringAccessibility.contains($0) }
+        }
+    }
+
+    /// The switches that decide whether the three gestures are being watched for at all. There are
+    /// three of them and they live in three different places — the menu bar's pause, the clipboard
+    /// watch in Settings, and the pointing experiment — so the tutorial has to read all three or it
+    /// tells a stopped user to go and make a gesture nothing is listening for.
+    public struct Switches: Equatable, Sendable {
+        public var detectionEnabled: Bool
+        public var clipboardWatchEnabled: Bool
+        public var ambientPeekEnabled: Bool
+
+        public init(
+            detectionEnabled: Bool = true,
+            clipboardWatchEnabled: Bool = true,
+            ambientPeekEnabled: Bool = true
+        ) {
+            self.detectionEnabled = detectionEnabled
+            self.clipboardWatchEnabled = clipboardWatchEnabled
+            self.ambientPeekEnabled = ambientPeekEnabled
+        }
+    }
+
+    /// Which switch is in the way. Named rather than a bare "off", because each one is somewhere
+    /// else and the sentence has to say where: the pause is in the menu bar, the clipboard watch is
+    /// in Settings, and the pointing experiment has its own button on the checklist.
+    public enum Blocker: String, CaseIterable, Equatable, Sendable {
+        case detectionPaused
+        case clipboardWatchOff
+        case ambientPeekOff
+
+        /// What the checklist row says. Shorter than the page's version, because the row sits next
+        /// to a badge that already reads as switched off.
+        public var reasonKey: String.LocalizationValue {
+            switch self {
+            case .detectionPaused: "tutorial.paused.switched-off"
+            case .clipboardWatchOff: "tutorial.clipboard.switched-off"
+            case .ambientPeekOff: "tutorial.ambient.switched-off"
+            }
+        }
+
+        /// What the practice page prints in place of the instructions. The page carries no switches,
+        /// so each of these sentences has to name the place the switch actually is.
+        public var detailKey: String.LocalizationValue {
+            switch self {
+            case .detectionPaused: "tutorial.paused.blocked"
+            case .clipboardWatchOff: "tutorial.clipboard.blocked"
+            case .ambientPeekOff: "tutorial.ambient.blocked"
+            }
+        }
+
+        /// The label of the button the checklist offers for the one switch it can throw itself.
+        public static let enableButtonTitleKey: String.LocalizationValue = "tutorial.ambient.enable"
+
+        /// Whether the sentence has to be given that label. Written out in the catalogue instead,
+        /// the page starts naming a control that no longer exists the moment the button is reworded
+        /// — the same drift the peek chord's placeholder exists to prevent.
+        public var namesEnableButton: Bool { self == .ambientPeekOff }
+
+        /// The page's sentence, with the button's own label written into it where one is named.
+        public var detail: String {
+            let text = String(localized: detailKey)
+            guard namesEnableButton else { return text }
+            return String(format: text, String(localized: Self.enableButtonTitleKey))
         }
     }
 
@@ -182,6 +243,19 @@ public struct TutorialProgress: Equatable, Sendable {
         states[lesson] = .detected
     }
 
+    /// Whether a selection FlowPeek refused is worth looking at as a missed drag.
+    ///
+    /// This is asked on the main actor for every selection FlowPeek rejects, in every application,
+    /// so the free questions come first and the one that walks the text comes last: the lesson has
+    /// to still be waiting on that gesture, the page it talks about has to be on screen, and only
+    /// then is it worth asking whether the text is that page's diagram. Without the order, an
+    /// ordinary select-all pays for a second normalize and a scan it can never need — on top of the
+    /// detection that has already run.
+    public func shouldNoteMissedSelection(text: String, practicePageOpen: Bool) -> Bool {
+        guard practicePageOpen, self[.selection] == .waiting else { return false }
+        return TutorialSample.appearsIn(text)
+    }
+
     /// Records that the user tried and FlowPeek refused what it was given. Only ever promotes out of
     /// `waiting`: a lesson already noticed or already passed has nothing to complain about, and a
     /// second sloppy drag must not take a tick away.
@@ -227,12 +301,20 @@ public enum TutorialSample {
       B -- hold Option --> C
     """
 
+    /// The size beyond which the answer is no without looking. A drag across the practice block is
+    /// a fragment of a five-line diagram, at worst with a line of the page's own prose caught at
+    /// either end; a whole document is not that, and normalizing one to find out costs more than
+    /// the detection that has just rejected it — measured at 164 ms for a select-all at the
+    /// detector's own million-code-unit ceiling, against 40 ms for the detection itself.
+    public static let maximumMatchableCharacters = text.utf16.count * 4
+
     /// Matched line by line against the body, because the case worth catching is the partial drag:
     /// a selection that starts mid-diagram has lost the `flowchart TD` line detection needs, so
     /// whole-block equality would miss every failure this exists to explain. The starter line is
     /// not a signal on its own — it is two common words that appear in every flowchart on the web,
     /// and a stray match would have the tutorial comment on the user's own documents.
     public static func appearsIn(_ raw: String) -> Bool {
+        guard raw.utf16.count <= maximumMatchableCharacters else { return false }
         let haystack = MermaidDetector.normalize(raw)
         guard !haystack.isEmpty else { return false }
         return bodyLines.contains { haystack.contains($0) }

@@ -31,7 +31,7 @@
 "tutorial.ambient.enable" = "Turn On This Experiment";
 "tutorial.restart" = "Start Over";
 "tutorial.page.intro.blocked" = "This is a real page in your own browser. The gestures below behave exactly as they will from now on — except the ones marked as switched off.";
-"tutorial.page.hint" = "Click the block once to select all of it — or drag from its first line downwards. A selection that starts lower down has lost the line FlowPeek reads first.";
+"tutorial.page.hint" = "Click the block once — or focus it and press Return — to select all of it. If you drag instead, start from its first line: a selection that starts lower down has lost the line FlowPeek reads first.";
 "tutorial.state.waiting" = "Not tried yet";
 "tutorial.state.detected" = "FlowPeek saw it — now open it";
 "tutorial.state.missed" = "Tried, but FlowPeek could not read it";
@@ -42,7 +42,11 @@
 "tutorial.nudge.clipboard" = "No copy seen yet. Select the block on the practice page and press Command-C.";
 "tutorial.nudge.ambient" = "Nothing outlined yet. Hold Option down and keep it down while the pointer moves over the block.";
 "tutorial.ambient.switched-off" = "This one is an experiment and starts switched off, so nothing is watching for it yet.";
-"tutorial.ambient.blocked" = "Not switched on yet — press “Turn On This Experiment” in the FlowPeek window at the edge of your screen, then open this page again.";
+"tutorial.ambient.blocked" = "Not switched on yet — press “%@” in the FlowPeek window at the edge of your screen, then open this page again.";
+"tutorial.paused.switched-off" = "Detection is paused, so nothing is watching for any of the three. The switch is the first item in the FlowPeek menu bar menu.";
+"tutorial.paused.blocked" = "Detection is paused, so this will not happen yet — the switch is the first item in the FlowPeek menu bar menu. Turn it back on, then open this page again.";
+"tutorial.clipboard.switched-off" = "Clipboard watching is switched off, so a copy goes unnoticed. Turn on “Watch the clipboard” in Settings, under General.";
+"tutorial.clipboard.blocked" = "Clipboard watching is switched off — turn on “Watch the clipboard” in Settings, under General, then open this page again.";
 "onboarding.launch.title" = "Ready When You Are";
 "onboarding.launch.message" = "FlowPeek lives in the menu bar and does nothing until you select or copy a diagram. Start it at login so it is already there.";
 "onboarding.launch.toggle" = "Open at login";

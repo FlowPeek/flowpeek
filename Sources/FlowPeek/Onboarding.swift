@@ -15,10 +15,17 @@ enum OnboardingEntry {
 final class OnboardingCoordinator {
     static let shared = OnboardingCoordinator()
     private var window: NSWindow?
+    /// Which door the window on screen was opened by. The menu offers two — setup and the tutorial
+    /// — and they are different destinations: fronting the wizard when the user asked for the
+    /// checklist reads as a menu item that does nothing.
+    private var openEntry: OnboardingEntry?
     private var spaceObserver: NSObjectProtocol?
 
     func show(entry: OnboardingEntry = .setup) {
-        if let window { window.makeKeyAndOrderFront(nil); return }
+        if let window, openEntry == entry { window.makeKeyAndOrderFront(nil); return }
+        // The step is @State inside the view, so there is no way to push a new destination into a
+        // window that is already up; it is rebuilt instead.
+        if window != nil { closeWindow() }
         let view = OnboardingView(
             entry: entry,
             completion: { [weak self] in
@@ -54,6 +61,7 @@ final class OnboardingCoordinator {
         // observer calling orderFrontRegardless() on the dismissed card at the next Space switch.
         window.onCancel = { [weak self] in self?.closeWindow() }
         self.window = window
+        openEntry = entry
         spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil,
@@ -87,8 +95,13 @@ final class OnboardingCoordinator {
         // launch, so "I'll decide later" still works and only "I decided" sticks.
         let app = AppState.shared
         if app.accessibilityGranted || app.permissionDeclined { app.onboardingComplete = true }
+        // The checklist is what made a refused selection worth a second look; with it gone, the
+        // rejected branch of `receive` — which every ordinary selection in every app takes — has
+        // nothing left to ask.
+        app.notePracticePageClosed()
         window?.close()
         window = nil
+        openEntry = nil
         if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
         spaceObserver = nil
     }
@@ -143,10 +156,6 @@ struct OnboardingView: View {
     @EnvironmentObject private var app: AppState
     @State private var step: Step
     @State private var permissionFlow = AccessibilityPermissionFlow(isGranted: false)
-    /// Whether the practice page has been opened from here. The nudges are only honest once it has:
-    /// before that, a lesson that has produced nothing has produced nothing because the text it
-    /// talks about is not on screen yet.
-    @State private var openedPracticePage = false
     @State private var nudge = false
     private let entry: OnboardingEntry
     let completion: () -> Void
@@ -350,11 +359,11 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(availableLessons) { lesson in
                 let state = app.tutorial[lesson]
-                let canFire = lesson.canFire(ambientPeekEnabled: app.ambientPeekEnabled)
+                let blocker = lesson.blocker(app.tutorialSwitches)
                 // Progress outlives the switch: somebody who passed this lesson and later turned
                 // the experiment back off has still passed it, and hiding the tick behind an "off"
                 // badge would tell them otherwise.
-                let blocked = !canFire && state != .done
+                let blocked = blocker != nil && state != .done
                 HStack(alignment: .top, spacing: 12) {
                     // The badge carries the row's state for VoiceOver, which cannot see a stroke
                     // colour: the lesson is its label and waiting/noticed/missed/done its value.
@@ -372,7 +381,9 @@ struct OnboardingView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        if !canFire, let reason = lesson.switchedOffReasonKey {
+                        // On the tick's own terms: a finished lesson keeps its checkmark, so it
+                        // must not also carry a line saying nothing is watching for it.
+                        if blocked, let reason = blocker?.reasonKey {
                             Text(String(localized: reason))
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
@@ -386,20 +397,23 @@ struct OnboardingView: View {
                                 .foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if nudge, canFire, state == .waiting {
+                        if nudge, blocker == nil, state == .waiting {
                             Label(String(localized: lesson.nudgeKey), systemImage: "questionmark.circle")
                                 .font(.footnote)
                                 .foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if lesson == .ambient, !app.ambientPeekEnabled {
+                        if blocked, blocker == .ambientPeekOff {
                             // Prominent because it is not an aside: nothing in this row can happen
-                            // until it is pressed.
-                            Button("tutorial.ambient.enable") {
+                            // until it is pressed. Offered only where the reason line above it
+                            // appears — the experiment is the switch actually in the way, and the
+                            // row still has something left to do. With detection paused, turning
+                            // the experiment on changes nothing the user can see.
+                            Button(String(localized: TutorialProgress.Blocker.enableButtonTitleKey)) {
                                 app.enableAmbientPeek()
                                 // The page already in the browser still carries the sentence saying
                                 // this route is off, and that sentence is now wrong.
-                                if openedPracticePage { openPracticePage() }
+                                if app.tutorialPracticeOpen { openPracticePage() }
                             }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
@@ -442,12 +456,16 @@ struct OnboardingView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22)))
         .animation(.snappy, value: app.tutorial)
-        .task(id: openedPracticePage) {
-            guard openedPracticePage else { return }
+        .task(id: app.tutorialPracticeOpen) {
+            guard app.tutorialPracticeOpen else { return }
             // Long enough that somebody working through the page in order finishes before it
             // appears, short enough to catch somebody sitting in front of a page where nothing
             // happened and no longer sure whether to try again.
             try? await Task.sleep(for: .seconds(45))
+            // A cancelled sleep throws, and leaving this step cancels it — including by the route
+            // this very card offers, the button into the permission wizard. Without this, coming
+            // back finds every waiting row already nudged two seconds in.
+            guard !Task.isCancelled else { return }
             nudge = true
         }
         .onChange(of: app.tutorial) { previous, current in announce(previous, current) }
@@ -488,11 +506,18 @@ struct OnboardingView: View {
     /// "The ticks fill in as you go" is the card's whole promise, and a tick filling in is silent:
     /// VoiceOver re-reads a row only if the user navigates back to it, and by then they have already
     /// had to guess whether the gesture worked.
+    ///
+    /// Only while FlowPeek is frontmost and has a key window to post from. The tick usually fills in
+    /// while the browser is in front — the drag and the copy both happen over there — and VoiceOver
+    /// does not surface an announcement from a background application, so posting one there would
+    /// be a claim this card cannot keep. The badge's own label and value carry the change instead,
+    /// read out when the user comes back to the row.
     private func announce(_ previous: TutorialProgress, _ current: TutorialProgress) {
+        guard NSApp.isActive, let window = NSApp.keyWindow else { return }
         guard let changed = availableLessons.first(where: { previous[$0] != current[$0] }) else { return }
         let sentence = "\(String(localized: changed.titleKey)): \(String(localized: current[changed].titleKey))"
         NSAccessibility.post(
-            element: NSApp.keyWindow ?? NSApp as Any,
+            element: window,
             notification: .announcementRequested,
             userInfo: [
                 .announcement: sentence,
@@ -558,26 +583,24 @@ struct OnboardingView: View {
                         .controlSize(.large)
                 case .tutorial:
                     HStack(spacing: 10) {
-                        // Only once there is something to clear. Progress outlives the window now,
-                        // so a returning user meets their own ticks and needs a way to mean "I want
-                        // to practise this again" rather than reading a finished list.
-                        if app.tutorial != TutorialProgress() {
+                        // Only on a revisit, and only once there is something to clear. Progress
+                        // outlives the window now, so a returning user meets their own ticks and
+                        // needs a way to mean "I want to practise this again" rather than reading a
+                        // finished list; during setup the same list is being filled in for the
+                        // first time and the footer already has three buttons.
+                        if isRevisit, app.tutorial != TutorialProgress() {
                             Button("tutorial.restart") {
                                 app.resetTutorial()
                                 nudge = false
-                                openedPracticePage = false
                             }
                             .controlSize(.large)
                         }
-                        Button("tutorial.open-page") {
-                            // Get out of the way first: this window floats, and it was sitting
-                            // squarely on top of the page the user has to drag across.
-                            stepAside()
-                            openPracticePage()
-                        }
+                        Button("tutorial.open-page") { openPracticePage() }
                             .controlSize(.large)
-                        // A recap must not re-run the completion write, and "Finish Anyway" is
-                        // nonsense addressed to somebody who finished setup days ago.
+                        // "Finish Anyway" is nonsense addressed to somebody who finished setup days
+                        // ago; a recap just closes. Closing still settles `onboardingComplete` the
+                        // way every other dismissal does, which for a returning user is a write of
+                        // the value it already had.
                         if isRevisit {
                             Button("common.close") { close() }
                                 .buttonStyle(.borderedProminent)
@@ -636,11 +659,14 @@ struct OnboardingView: View {
     /// the pointing experiment is on. A second copy of that argument list is how the page and this
     /// checklist end up describing two different sets of gestures.
     private func openPracticePage() {
-        openedPracticePage = true
+        // Get out of the way first: this window floats, and it was sitting squarely on top of the
+        // page the user has to drag across.
+        stepAside()
+        app.notePracticePageOpened()
         TutorialPractice.open(
             lessons: availableLessons,
             peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display,
-            ambientEnabled: app.ambientPeekEnabled
+            switches: app.tutorialSwitches
         )
     }
 

@@ -234,26 +234,109 @@ final class TutorialProgressTests: XCTestCase {
         }
     }
 
-    /// Pointing ships switched off, so its row is listed but cannot progress. A row waiting forever
-    /// for a gesture nothing is listening for is indistinguishable from one nobody has tried.
-    func testOnlyPointingCanBeListedAndStillUnableToFire() {
+    func testWithEverySwitchOnNothingIsBlocked() {
         for lesson in TutorialProgress.Lesson.allCases {
-            XCTAssertTrue(lesson.canFire(ambientPeekEnabled: true))
-            XCTAssertEqual(
-                lesson.canFire(ambientPeekEnabled: false),
-                lesson != .ambient,
-                "\(lesson.rawValue) disagrees with the experiment switch"
-            )
+            XCTAssertNil(lesson.blocker(TutorialProgress.Switches()), lesson.rawValue)
+            XCTAssertTrue(lesson.canFire(TutorialProgress.Switches()))
         }
     }
 
-    /// Both surfaces — the checklist row and the practice page — take their switched-off wording from
-    /// the enum, so they cannot drift back into describing a gesture that cannot happen.
-    func testTheSwitchedOffWordingExistsExactlyWhereAGestureCanBeBlocked() {
+    /// The pause in the menu bar gates all three routes, so a paused user must not be told to go and
+    /// make a gesture nothing is listening for — whatever the other two switches say.
+    func testThePauseStopsEveryLessonNoMatterWhatElseIsOn() {
+        let paused = TutorialProgress.Switches(detectionEnabled: false)
         for lesson in TutorialProgress.Lesson.allCases {
-            let blockable = !lesson.canFire(ambientPeekEnabled: false)
-            XCTAssertEqual(lesson.switchedOffDetailKey != nil, blockable, lesson.rawValue)
-            XCTAssertEqual(lesson.switchedOffReasonKey != nil, blockable, lesson.rawValue)
+            XCTAssertEqual(lesson.blocker(paused), .detectionPaused, lesson.rawValue)
+            XCTAssertFalse(lesson.canFire(paused))
+        }
+    }
+
+    /// Answered before the per-route switches, because somebody told only about the pointing
+    /// experiment turns that on, sees nothing, and has been sent to the wrong switch.
+    func testThePauseIsReportedAheadOfARouteItAlsoBlocks() {
+        let both = TutorialProgress.Switches(detectionEnabled: false, ambientPeekEnabled: false)
+        XCTAssertEqual(TutorialProgress.Lesson.ambient.blocker(both), .detectionPaused)
+    }
+
+    /// Each of the other two switches gates one route only, and the drag has no switch of its own
+    /// beyond the pause.
+    func testTheClipboardWatchAndThePointingExperimentBlockTheirOwnLessonAlone() {
+        let noClipboard = TutorialProgress.Switches(clipboardWatchEnabled: false)
+        let noAmbient = TutorialProgress.Switches(ambientPeekEnabled: false)
+        for lesson in TutorialProgress.Lesson.allCases {
+            XCTAssertEqual(
+                lesson.blocker(noClipboard),
+                lesson == .clipboard ? .clipboardWatchOff : nil,
+                "\(lesson.rawValue) disagrees with the clipboard watch"
+            )
+            XCTAssertEqual(
+                lesson.blocker(noAmbient),
+                lesson == .ambient ? .ambientPeekOff : nil,
+                "\(lesson.rawValue) disagrees with the experiment switch"
+            )
+        }
+        XCTAssertNil(TutorialProgress.Lesson.selection.blocker(
+            TutorialProgress.Switches(clipboardWatchEnabled: false, ambientPeekEnabled: false)
+        ))
+    }
+
+    /// Every switch that can be in the way has to be able to say so on both surfaces — the checklist
+    /// row and the practice page — and say something different on each, or one of them is a row that
+    /// reads as switched off with no word about which switch.
+    func testEverySwitchThatCanBlockALessonHasItsOwnWordingForBothSurfaces() {
+        let reachable = Set(
+            TutorialProgress.Lesson.allCases.flatMap { lesson in
+                Self.everySwitchCombination.compactMap { lesson.blocker($0) }
+            }
+        )
+        XCTAssertEqual(reachable, Set(TutorialProgress.Blocker.allCases))
+
+        let reasons = Set(TutorialProgress.Blocker.allCases.map { Self.key($0.reasonKey) })
+        let details = Set(TutorialProgress.Blocker.allCases.map { Self.key($0.detailKey) })
+        XCTAssertEqual(reasons.count, TutorialProgress.Blocker.allCases.count)
+        XCTAssertEqual(details.count, TutorialProgress.Blocker.allCases.count)
+        XCTAssertTrue(reasons.isDisjoint(with: details))
+    }
+
+    /// The checklist can throw exactly one of the three switches itself; the other two live
+    /// somewhere else and the sentence has to say where rather than offer a button that is not there.
+    func testOnlyTheExperimentSwitchIsTheOneTheChecklistCanThrow() {
+        for blocker in TutorialProgress.Blocker.allCases {
+            XCTAssertEqual(blocker.namesEnableButton, blocker == .ambientPeekOff, blocker.rawValue)
+        }
+    }
+
+    /// The one sentence that names that button takes it as an argument. Written out in the
+    /// catalogue, the page starts naming a control that no longer exists the moment the button is
+    /// reworded — and nothing in the app would notice.
+    func testTheSentenceNamingTheEnableButtonIsGivenItsLabelInBothCatalogs() throws {
+        let key = Self.key(TutorialProgress.Blocker.ambientPeekOff.detailKey)
+        let label = Self.key(TutorialProgress.Blocker.enableButtonTitleKey)
+        for language in ["en", "ko"] {
+            let contents = try String(contentsOf: Self.catalog(language), encoding: .utf8)
+            let line = try XCTUnwrap(
+                contents.components(separatedBy: "\n").first { $0.hasPrefix("\"\(key)\" = ") },
+                "\(language).lproj is missing \(key)"
+            )
+            XCTAssertTrue(line.contains("%@"), "\(language).lproj: \(key) has to be given the button's label")
+            let button = try XCTUnwrap(
+                contents.components(separatedBy: "\n").first { $0.hasPrefix("\"\(label)\" = ") }
+            )
+            let words = button.components(separatedBy: "\"")
+            let title = try XCTUnwrap(words.dropLast().last)
+            XCTAssertFalse(line.contains(title), "\(language).lproj: \(key) spells the button's label out")
+        }
+    }
+
+    private static let everySwitchCombination: [TutorialProgress.Switches] = [false, true].flatMap { paused in
+        [false, true].flatMap { clipboard in
+            [false, true].map { ambient in
+                TutorialProgress.Switches(
+                    detectionEnabled: paused,
+                    clipboardWatchEnabled: clipboard,
+                    ambientPeekEnabled: ambient
+                )
+            }
         }
     }
 
@@ -270,8 +353,10 @@ final class TutorialProgressTests: XCTestCase {
         keys += [TutorialProgress.State.waiting, .detected, .missed, .done].map { Self.key($0.titleKey) }
         keys += TutorialProgress.Lesson.allCases.map { Self.key($0.nudgeKey) }
         keys += TutorialProgress.Lesson.allCases.compactMap { $0.missedKey }.map(Self.key)
-        keys += TutorialProgress.Lesson.allCases.compactMap { $0.switchedOffDetailKey }.map(Self.key)
-        keys += TutorialProgress.Lesson.allCases.compactMap { $0.switchedOffReasonKey }.map(Self.key)
+        keys += TutorialProgress.Blocker.allCases.map { Self.key($0.reasonKey) }
+        keys += TutorialProgress.Blocker.allCases.map { Self.key($0.detailKey) }
+        keys += [Self.key(TutorialProgress.Blocker.enableButtonTitleKey)]
+        keys += ["tutorial.page.intro", "tutorial.page.intro.blocked"]
         for language in ["en", "ko"] {
             let contents = try String(contentsOf: Self.catalog(language), encoding: .utf8)
             for key in keys {
@@ -304,6 +389,62 @@ final class TutorialProgressTests: XCTestCase {
     /// the text came from.
     func testTheStarterLineAloneIsNotEvidenceOfThePracticePage() {
         XCTAssertFalse(TutorialSample.appearsIn("flowchart TD"))
+    }
+
+    /// A whole document is not a fragment of a five-line block, and normalizing one to establish
+    /// that costs more than the detection that has just rejected it.
+    func testAnythingFarLargerThanTheBlockIsAnsweredWithoutBeingWalked() {
+        let padding = String(repeating: "x", count: TutorialSample.maximumMatchableCharacters)
+        XCTAssertFalse(TutorialSample.appearsIn(TutorialSample.text + padding))
+        XCTAssertTrue(TutorialSample.appearsIn(TutorialSample.text))
+    }
+
+    // MARK: - What a rejected selection is worth asking about
+
+    /// Asked on the main actor for every selection FlowPeek rejects, in every application. The two
+    /// free questions come first, so an ordinary select-all never pays for the scan.
+    func testARejectedSelectionIsOnlyExaminedWhileThePracticePageIsOpen() {
+        let progress = TutorialProgress()
+        XCTAssertFalse(
+            progress.shouldNoteMissedSelection(text: TutorialSample.text, practicePageOpen: false)
+        )
+        XCTAssertTrue(
+            progress.shouldNoteMissedSelection(text: TutorialSample.text, practicePageOpen: true)
+        )
+    }
+
+    /// A lesson that has already got further has nothing to complain about, and this is the branch
+    /// every ordinary selection takes — so it must stop asking the moment the row is settled.
+    func testALessonPastWaitingAsksNothingOfTheText() {
+        for state in [TutorialProgress.State.detected, .missed, .done] {
+            let progress = TutorialProgress(states: [.selection: state])
+            XCTAssertFalse(
+                progress.shouldNoteMissedSelection(text: TutorialSample.text, practicePageOpen: true),
+                "a \(state.rawValue) row still walks the selection"
+            )
+        }
+    }
+
+    /// The user's own half-dragged diagram is not a failed lesson, even with the page open.
+    func testUnrelatedTextIsStillNotAMissWithThePageOpen() {
+        let progress = TutorialProgress()
+        XCTAssertFalse(
+            progress.shouldNoteMissedSelection(
+                text: "flowchart TD\n  X[Their own thing] --> Y[Also theirs]",
+                practicePageOpen: true
+            )
+        )
+    }
+
+    /// The partial drag, end to end: refused by detection, recognised as the practice page's own
+    /// diagram, recorded as a miss so the row can say which part to change.
+    func testThePartialDragOffThePracticePageBecomesAMiss() {
+        var progress = TutorialProgress()
+        let dragged = "B -- overlay button --> C[Preview]\n  B -- badge --> C"
+        XCTAssertTrue(progress.shouldNoteMissedSelection(text: dragged, practicePageOpen: true))
+        progress.noteMissed(.selection)
+        XCTAssertEqual(progress[.selection], .missed)
+        XCTAssertFalse(progress.shouldNoteMissedSelection(text: dragged, practicePageOpen: true))
     }
 
     /// `String.LocalizationValue` keeps its key private and interpolating one yields the whole

@@ -22,15 +22,16 @@ enum TutorialPractice {
     ///
     /// `lessons` is what the page teaches. Without the Accessibility grant that is the clipboard
     /// step alone: printing "a small button appears beside it" for a drag that can never raise one
-    /// turns the practice page into evidence that the app is broken. `ambientEnabled` is the same
-    /// argument one switch further in — pointing ships off, and the page cannot offer the switch.
+    /// turns the practice page into evidence that the app is broken. `switches` is the same argument
+    /// one layer further in — a paused or half-switched-off FlowPeek is listening for fewer of the
+    /// three than the page would otherwise promise, and the page carries no switches of its own.
     static func open(
         lessons: [TutorialProgress.Lesson] = TutorialProgress.Lesson.allCases,
         peekShortcut: String,
-        ambientEnabled: Bool
+        switches: TutorialProgress.Switches
     ) {
         do {
-            let url = try write(lessons: lessons, peekShortcut: peekShortcut, ambientEnabled: ambientEnabled)
+            let url = try write(lessons: lessons, peekShortcut: peekShortcut, switches: switches)
             if !NSWorkspace.shared.open(url) {
                 logger.error("no application accepted \(url.lastPathComponent, privacy: .public)")
                 NSSound.beep()
@@ -44,7 +45,7 @@ enum TutorialPractice {
     private static func write(
         lessons: [TutorialProgress.Lesson],
         peekShortcut: String,
-        ambientEnabled: Bool
+        switches: TutorialProgress.Switches
     ) throws -> URL {
         let directory = try FileManager.default.url(
             for: .cachesDirectory,
@@ -54,7 +55,7 @@ enum TutorialPractice {
         ).appendingPathComponent(Bundle.main.bundleIdentifier ?? "FlowPeek", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("practice.html")
-        try html(lessons: lessons, peekShortcut: peekShortcut, ambientEnabled: ambientEnabled)
+        try html(lessons: lessons, peekShortcut: peekShortcut, switches: switches)
             .write(to: url, atomically: true, encoding: .utf8)
         return url
     }
@@ -62,25 +63,40 @@ enum TutorialPractice {
     private static func html(
         lessons: [TutorialProgress.Lesson],
         peekShortcut: String,
-        ambientEnabled: Bool
+        switches: TutorialProgress.Switches
     ) -> String {
         // Localized through the app catalogue so the practice page speaks the same language as the
         // onboarding window it was opened from.
         let title = String(localized: "tutorial.page.title")
-        let blocked = lessons.filter { !$0.canFire(ambientPeekEnabled: ambientEnabled) }
+        // Each blocked lesson prints the switch that is in the way rather than an instruction it
+        // cannot follow, and the switch is named because none of them is on this page.
+        let blockers = lessons.reduce(into: [TutorialProgress.Lesson: TutorialProgress.Blocker]()) { result, lesson in
+            if let blocker = lesson.blocker(switches) { result[lesson] = blocker }
+        }
         // "Every gesture below behaves exactly as it will from now on" is a lie the moment one of
         // them is switched off, and it is the sentence the reader trusts when nothing happens.
-        let intro = String(localized: blocked.isEmpty ? "tutorial.page.intro" : "tutorial.page.intro.blocked")
+        let intro = String(localized: blockers.isEmpty ? "tutorial.page.intro" : "tutorial.page.intro.blocked")
         let hint = String(localized: "tutorial.page.hint")
         let steps = lessons
             .map { lesson in
-                if blocked.contains(lesson), let switchedOff = lesson.switchedOffDetailKey {
-                    return "<li class=\"locked\">\(escape(String(localized: switchedOff)))</li>"
+                if let blocker = blockers[lesson] {
+                    return "<li class=\"locked\">\(escape(blocker.detail))</li>"
                 }
                 return "<li>\(escape(lesson.detail(peekShortcut: peekShortcut)))</li>"
             }
             .joined(separator: "\n    ")
         let closing = String(localized: lessons.count > 1 ? "tutorial.page.closing" : "tutorial.page.closing.one")
+        // One click selects the whole block, which is what removes most partial drags. The same
+        // thing has to be reachable from the keyboard: the block is focusable, so Return and Space
+        // have to do what the click does, or the only way left to select it is the drag this page
+        // exists to talk somebody out of. The hint paragraph is the block's description rather than
+        // a label, because the text inside it is the thing being read.
+        let sample = """
+        <pre tabindex="0" aria-describedby="practice-hint"
+             onclick="getSelection().selectAllChildren(this)"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); getSelection().selectAllChildren(this) }"
+        >\(escape(TutorialSample.text))</pre>
+        """
 
         return """
         <!doctype html>
@@ -110,8 +126,8 @@ enum TutorialPractice {
         <body><main>
           <h1>\(escape(title))</h1>
           <p class="intro">\(escape(intro))</p>
-          <pre tabindex="0" onclick="getSelection().selectAllChildren(this)">\(escape(TutorialSample.text))</pre>
-          <p class="hint">\(escape(hint))</p>
+          \(sample)
+          <p class="hint" id="practice-hint">\(escape(hint))</p>
           <ol>
             \(steps)
           </ol>

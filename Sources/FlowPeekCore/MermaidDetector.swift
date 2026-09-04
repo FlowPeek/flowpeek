@@ -20,7 +20,24 @@ public enum MermaidDetector {
     /// Lines examined by the starter scan once comments, directives and front matter are skipped.
     public static let starterWindow = 12
 
+    /// The most raw text worth looking at, in UTF-16 code units. Detection is linear in the input
+    /// and runs on the main actor: 4.4 MB measured 248 ms debug and 182 ms release, of which
+    /// normalisation alone was 175 ms. Select-all in a log file or a long chat transcript is an
+    /// ordinary thing to do, and the answer for anything this size can only ever be "too large" —
+    /// `MermaidSource.maximumCharacters` is 100_000 — so the work is not done at all. 1 MB (~55 ms)
+    /// leaves the real case, a big page with one diagram in it, working.
+    public static let maximumInputCharacters = 1_000_000
+
     public static func detect(_ raw: String) -> MermaidDetection {
+        guard raw.utf16.count <= maximumInputCharacters else {
+            return MermaidDetection(
+                confidence: .none,
+                diagramKeyword: nil,
+                expectedType: nil,
+                extractedSource: "",
+                droppedPrefixLines: 0
+            )
+        }
         var lines = normalize(raw).components(separatedBy: "\n")
         var dropped = dropLeadingLabels(&lines)
         var noise = false

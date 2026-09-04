@@ -22,6 +22,9 @@ final class ShortcutCenter: ObservableObject {
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "HotKey")
     private var hotKeys: [FlowPeekShortcutAction: GlobalHotKey] = [:]
     private var isSuspended = false
+    /// Actions whose chord is currently left to whatever app the user is working in. Anything that
+    /// only registers while its feature runs starts here, since that feature is off at launch.
+    private var inactive = Set(FlowPeekShortcutAction.allCases.filter(\.registersOnlyWhenActive))
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -45,6 +48,13 @@ final class ShortcutCenter: ObservableObject {
         hotKeys.removeAll()
     }
 
+    /// Claims or releases one action's chord as its feature starts and stops. Idempotent, so the
+    /// callers can say it on every settings change without tracking what they said last.
+    func setActive(_ active: Bool, for action: FlowPeekShortcutAction) {
+        if active { inactive.remove(action) } else { inactive.insert(action) }
+        register(action)
+    }
+
     /// Frees the keyboard for one field. Any field already recording is dropped first, so the
     /// suspension always has exactly one owner and can never be left dangling.
     func beginRecording(_ action: FlowPeekShortcutAction) {
@@ -64,6 +74,10 @@ final class ShortcutCenter: ObservableObject {
     }
 
     private func register(_ action: FlowPeekShortcutAction) {
+        guard !inactive.contains(action) else {
+            hotKeys[action]?.unregister()
+            return
+        }
         let hotKey = hotKeys[action] ?? GlobalHotKey()
         hotKey.onPress = { [weak self] in self?.handlers[action]?() }
         hotKey.register(shortcuts[action], for: action)

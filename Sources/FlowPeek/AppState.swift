@@ -85,6 +85,7 @@ final class AppState: ObservableObject {
         shortcuts.handlers = [
             .aiPrompt: { [weak self] in self?.presentAIPrompt() },
             .previewClipboard: { [weak self] in self?.previewCopied() },
+            .ambientPeek: { [weak self] in self?.ambient.activate() },
         ]
         shortcuts.registerAll()
         startEngine()
@@ -132,11 +133,14 @@ final class AppState: ObservableObject {
             clipboard.stop()
         }
         // Ambient peek reads the accessibility tree, so it needs the same grant the overlay does.
-        if isEnabled && ambientPeekEnabled && accessibilityGranted {
+        let ambientRunning = isEnabled && ambientPeekEnabled && accessibilityGranted
+        if ambientRunning {
             ambient.start()
         } else {
             ambient.stop()
         }
+        // ⌥Space is only taken from the rest of the system while an outline can actually appear.
+        shortcuts.setActive(ambientRunning, for: .ambientPeek)
         if !isEnabled {
             overlay.hide()
             indicator.hide()
@@ -249,9 +253,18 @@ final class AppState: ObservableObject {
 
     func receive(_ snapshot: SelectionSnapshot) {
         previews.selectionDidChange()
+        // Select-all in a log file or a long document arrives here. Nothing that large can become a
+        // diagram, and keeping it would hold megabytes of the user's text for the rest of the
+        // session, so it is dropped before it is examined or stored.
+        guard snapshot.text.utf16.count <= MermaidDetector.maximumInputCharacters else {
+            lastSelection = nil
+            lastDetection = nil
+            overlay.hide()
+            logger.debug("selection ignored: \(snapshot.text.utf16.count, privacy: .public) code units")
+            return
+        }
         lastSelection = snapshot
         let detection = MermaidDetector.detect(snapshot.text)
-        lastDetection = (snapshot.text, detection)
         guard isEnabled, detection.confidence >= .likely else {
             logger.debug(
                 """
@@ -264,8 +277,12 @@ final class AppState: ObservableObject {
                 """
             )
             overlay.hide()
+            lastDetection = nil
             return
         }
+        // Stored only past the guard: its one reader is the overlay button, which exists only for a
+        // selection that got this far, and the detection carries a normalized copy of the whole text.
+        lastDetection = (snapshot.text, detection)
         tutorial.noteDetected(.selection)
         overlay.show(for: snapshot)
     }
@@ -305,7 +322,7 @@ final class AppState: ObservableObject {
         guard isEnabled, ambientPeekEnabled else { return }
         ambientCandidate = candidate
         tutorial.noteDetected(.ambient)
-        highlight.show(candidate, shortcut: "⌥Space")
+        highlight.show(candidate, shortcut: shortcuts.shortcuts[.ambientPeek].display)
         logger.debug(
             """
             ambient candidate: \(candidate.detection.diagramKeyword ?? "unknown", privacy: .public) \

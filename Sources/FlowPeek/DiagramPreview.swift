@@ -28,6 +28,8 @@ final class DiagramViewModel: ObservableObject {
     private var needsFit = true
     private var renderTask: Task<Void, Never>?
     private var contrastObserver: (any NSObjectProtocol)?
+    /// One silent retry per source, so a dead WebContent process cannot put the panel into a loop.
+    private var didRetryAfterCrash = false
     private static var renderCounter: UInt64 = 0
 
     init(document: DiagramDocument, pool: MermaidWebViewPool = .shared) {
@@ -49,9 +51,7 @@ final class DiagramViewModel: ObservableObject {
     func attach() {
         guard engine == nil else { return }
         do {
-            let view = try pool.checkOut()
-            view.onViewportChange = { [weak self] scale in self?.scale = scale }
-            engine = view
+            adopt(try pool.checkOut())
         } catch {
             status = .failed(error.localizedDescription)
             logger.error("no engine view available: \(error.localizedDescription, privacy: .public)")
@@ -59,6 +59,23 @@ final class DiagramViewModel: ObservableObject {
         }
         observeContrastChanges()
         render()
+    }
+
+    /// Everything a checked-out view needs before it can be rendered into. `checkIn` drops the
+    /// viewport callback and resets the page's scale, so a view arriving from the pool — the first
+    /// one or a replacement — carries neither: without this the readout keeps reporting the zoom of
+    /// whichever view was here before, and a pinch moves nothing.
+    private func adopt(_ view: MermaidEngineView) {
+        view.onViewportChange = { [weak self] scale in self?.scale = scale }
+        scale = 1
+        engine = view
+    }
+
+    /// The net under every surface: whoever owned the model is supposed to call `release()`, and a
+    /// model that is simply dropped instead still gives its engine back rather than stranding a
+    /// WebContent process for the life of the process.
+    isolated deinit {
+        release()
     }
 
     func release() {
@@ -80,6 +97,7 @@ final class DiagramViewModel: ObservableObject {
     func update(source newValue: String) {
         guard newValue != source else { return }
         source = newValue
+        didRetryAfterCrash = false
         render()
     }
 
@@ -146,6 +164,7 @@ final class DiagramViewModel: ObservableObject {
                 if !result.scrubbed.isEmpty {
                     self.logger.error("scrubbed \(result.scrubbed.joined(separator: ","), privacy: .public) from a rendered diagram")
                 }
+                self.didRetryAfterCrash = false
                 self.status = .rendered(result)
                 self.needsFit = true
                 self.engine?.fitToStage()
@@ -157,22 +176,49 @@ final class DiagramViewModel: ObservableObject {
                     "render failed: \(error.localizationKey, privacy: .public) \(error.localizedDescription, privacy: .private)"
                 )
                 switch error {
-                case .timedOut, .webContentTerminated, .navigationFailed:
-                    self.replaceEngine()
+                case .webContentTerminated, .navigationFailed:
+                    self.recover(from: error, retrying: true)
+                case .timedOut:
+                    self.recover(from: error, retrying: false)
                 default:
-                    break
+                    self.status = .failed(error.localizedDescription)
                 }
-                self.status = .failed(error.localizedDescription)
             }
         }
     }
 
+    /// The engine is gone either way, so the panel always gets a live replacement — otherwise the
+    /// zoom buttons, a theme switch and the next `update(source:)` all land on nothing.
+    ///
+    /// A dead WebContent process is worth one silent retry: the replacement renders in 5-11 ms and
+    /// the user never learns the first one died. A timeout is not — re-running the same source buys
+    /// another 8 s of spinner to arrive at the same sentence.
+    private func recover(from failure: MermaidRenderError, retrying: Bool) {
+        do {
+            try replaceEngine()
+        } catch {
+            // The render error describes a process that no longer exists; what the user needs to
+            // know now is that the engine could not be restarted.
+            status = .failed(error.localizedDescription)
+            logger.error("no replacement engine available: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        guard retrying, !didRetryAfterCrash else {
+            status = .failed(failure.localizedDescription)
+            return
+        }
+        didRetryAfterCrash = true
+        render()
+    }
+
     /// A view that timed out or terminated is never reused.
-    private func replaceEngine() {
-        guard let engine else { return }
-        self.engine = nil
-        pool.evict(engine)
-        self.engine = try? pool.checkOut()
+    private func replaceEngine() throws(MermaidRenderError) {
+        if let engine {
+            self.engine = nil
+            pool.evict(engine)
+        }
+        adopt(try pool.checkOut())
+        needsFit = true
     }
 
     private func observeContrastChanges() {
@@ -247,10 +293,19 @@ struct MermaidPreviewSurface: View {
 
 @MainActor
 final class PreviewCoordinator: NSObject, NSWindowDelegate {
+    /// A promoted preview and the model whose engine it is showing. Every window carries its own
+    /// pair: one shared slot made the second "Open in Window" close the first window's twin and
+    /// leak the first window's engine.
+    private struct Promoted {
+        let window: NSWindow
+        let model: DiagramViewModel
+    }
+
     private var quickPanel: NSPanel?
-    private var window: NSWindow?
-    private var model: DiagramViewModel?
+    private var quickModel: DiagramViewModel?
+    private var promoted: [Promoted] = []
     private var dismissMonitors: [Any] = []
+    private let pool: MermaidWebViewPool
 
     private static let quickSize = CGSize(width: 720, height: 520)
     private static let quickMinSize = CGSize(width: 360, height: 260)
@@ -258,10 +313,15 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     private static let windowMinSize = CGSize(width: 480, height: 340)
     private static let messageSize = CGSize(width: 460, height: 240)
 
+    init(pool: MermaidWebViewPool = .shared) {
+        self.pool = pool
+        super.init()
+    }
+
     func showQuick(document: DiagramDocument) {
         closeQuick()
-        let model = DiagramViewModel(document: document)
-        self.model = model
+        let model = DiagramViewModel(document: document, pool: pool)
+        quickModel = model
         model.attach()
         let panel = makePanel(
             size: Self.quickSize,
@@ -295,8 +355,12 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     }
 
     func promote() {
-        guard let model else { return }
+        guard let model = quickModel else { return }
         dismissQuickPanel()
+        // The window inherits the panel's live engine, so the quick slot must let go of it here
+        // rather than release it: the next quick preview would otherwise check the engine back in
+        // underneath the window that is still drawing with it.
+        quickModel = nil
         let window = FlowPeekGlassWindow(
             contentRect: CGRect(origin: .zero, size: Self.windowSize),
             styleMask: [.borderless, .resizable, .fullSizeContentView],
@@ -315,17 +379,33 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
                 model: model,
                 compact: false,
                 onPromote: {},
-                onClose: { [weak self] in self?.closeWindow() }
+                // Keyed to this window, not to whichever one the coordinator saw last: the close dot
+                // of the older window used to close the newer one.
+                onClose: { [weak self, weak window] in
+                    guard let window else { return }
+                    self?.close(window)
+                }
             )
         )
         // NSHostingController resizes the window to the SwiftUI fitting size, which collapses a
         // 1000x720 window to ~87x111 — the content size has to be re-imposed afterwards.
         window.setContentSize(Self.windowSize)
         window.contentMinSize = Self.windowMinSize
-        window.center()
+        if let previous = promoted.last?.window {
+            // Two diagrams are opened in windows to be compared; centring the second one would hide
+            // it exactly behind the first. Clamped because a borderless window is not kept on the
+            // screen for us, and the offsets accumulate.
+            window.setFrameOrigin(ScreenGeometry.clamp(
+                origin: CGPoint(x: previous.frame.minX + 26, y: previous.frame.minY - 26),
+                size: window.frame.size,
+                visibleFrames: NSScreen.screens.map(\.visibleFrame)
+            ))
+        } else {
+            window.center()
+        }
         window.isReleasedWhenClosed = false
         window.delegate = self
-        self.window = window
+        promoted.append(Promoted(window: window, model: model))
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
@@ -334,15 +414,17 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
 
     func closeQuick() {
         dismissQuickPanel()
-        if window == nil { releaseModel() }
+        releaseQuickModel()
     }
 
-    func closeWindow() {
-        guard let window else { return }
-        self.window = nil
-        window.delegate = nil
-        window.close()
-        if quickPanel == nil { releaseModel() }
+    /// Closes one promoted window and hands its engine back. The window is looked up rather than
+    /// assumed, so a stale callback for a window that is already gone does nothing.
+    private func close(_ window: NSWindow) {
+        guard let index = promoted.firstIndex(where: { $0.window === window }) else { return }
+        let entry = promoted.remove(at: index)
+        entry.window.delegate = nil
+        entry.window.close()
+        entry.model.release()
     }
 
     // MARK: - NSWindowDelegate
@@ -352,10 +434,13 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         if closing === quickPanel {
             quickPanel = nil
             removeDismissMonitors()
-            if window == nil { releaseModel() }
-        } else if closing === window {
-            window = nil
-            if quickPanel == nil { releaseModel() }
+            releaseQuickModel()
+        } else if let index = promoted.firstIndex(where: { $0.window === closing }) {
+            // Escape reaches `cancelOperation`, which closes the window without going through
+            // `close(_:)`; this is the only path that returns that window's engine.
+            let entry = promoted.remove(at: index)
+            entry.window.delegate = nil
+            entry.model.release()
         }
     }
 
@@ -397,9 +482,11 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         panel.close()
     }
 
-    private func releaseModel() {
-        model?.release()
-        model = nil
+    /// Unconditional: a quick panel closed while a promoted window is open still owns its own
+    /// engine, and leaving it checked out cost the pool one pre-warmed view per preview.
+    private func releaseQuickModel() {
+        quickModel?.release()
+        quickModel = nil
     }
 
     private func installDismissMonitors() {

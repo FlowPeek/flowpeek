@@ -10,6 +10,9 @@ final class ClipboardIndicatorCoordinator {
 
     static let size = CGSize(width: 296, height: 56)
     static let visibleDuration: TimeInterval = 5
+    /// A badge that has to be found by ear rather than seen needs longer than a glance: VoiceOver
+    /// has to reach the end of the sentence before the panel it describes is gone.
+    static let voiceOverDuration: TimeInterval = 12
     private static let fadeDuration: TimeInterval = 0.18
 
     private var panel: NSPanel?
@@ -56,8 +59,9 @@ final class ClipboardIndicatorCoordinator {
 
     private func scheduleDismissal() {
         dismissal?.cancel()
+        let duration = NSWorkspace.shared.isVoiceOverEnabled ? Self.voiceOverDuration : Self.visibleDuration
         dismissal = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.visibleDuration))
+            try? await Task.sleep(for: .seconds(duration))
             guard !Task.isCancelled else { return }
             self?.hide()
         }
@@ -116,17 +120,35 @@ private struct ClipboardIndicatorView: View {
     @State private var isHovered = false
 
     var body: some View {
-        Button(action: activate) {
+        Button {
+            // Before the badge is taken out from under the pointer: the exit event never arrives
+            // once the panel is gone, and the pointing hand would outlive it.
+            endHover()
+            activate()
+        } label: {
             FlowPeekGlassSurface(cornerRadius: 16) {
                 HStack(spacing: 11) {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.tint)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("clipboard.indicator.title")
-                            .font(.system(size: 12, weight: .semibold))
-                            .lineLimit(1)
-                        Text(subtitle)
+                        HStack(spacing: 6) {
+                            Text("clipboard.indicator.title")
+                                .font(.system(size: 12, weight: .semibold))
+                                .lineLimit(1)
+                            // The keyword is raw source text -- "erDiagram", "swimlane-beta" -- so
+                            // it is shown as a tag rather than as prose, and it truncates before
+                            // the title does. It used to *replace* the line below, which is the
+                            // only place the badge ever says what to do with it.
+                            if let keyword = model.keyword, !keyword.isEmpty {
+                                Text(verbatim: keyword)
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        }
+                        Text("clipboard.indicator.subtitle.generic")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -148,16 +170,31 @@ private struct ClipboardIndicatorView: View {
             .animation(.easeOut(duration: 0.12), value: isHovered)
         }
         .buttonStyle(.plain)
+        // The whole pane of glass is the button, not just the text inside it.
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onHover { hovering in
-            isHovered = hovering
-            hover(hovering)
+            // Guarded, so repeated enter events cannot stack pushes the exits will never balance.
+            guard hovering != isHovered else { return }
+            if hovering {
+                isHovered = true
+                NSCursor.pointingHand.push()
+                hover(true)
+            } else {
+                endHover()
+                hover(false)
+            }
         }
+        .onDisappear { endHover() }
+        .help("clipboard.indicator.help")
+        // Without a label VoiceOver reads the three Texts and the key cap glyphs as one run-on
+        // string and never says that any of it is pressable.
+        .accessibilityLabel(Text("clipboard.indicator.title"))
+        .accessibilityHint(Text("clipboard.indicator.help"))
     }
 
-    private var subtitle: String {
-        guard let keyword = model.keyword, !keyword.isEmpty else {
-            return String(localized: "clipboard.indicator.subtitle.generic")
-        }
-        return keyword
+    private func endHover() {
+        guard isHovered else { return }
+        isHovered = false
+        NSCursor.pop()
     }
 }

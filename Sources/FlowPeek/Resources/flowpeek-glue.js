@@ -373,6 +373,18 @@
     return vp.scale;
   }
 
+  /// Scrolls the stage by a pixel delta, which is what an arrow key from Swift has to land on:
+  /// #stage is the scroller and nothing in this page is focusable, so there is no element a keydown
+  /// listener here could ever be delivered to.
+  function panBy(dx, dy) {
+    var e = els();
+    if (!e.stage) return { x: 0, y: 0 };
+    var x = Number(dx), y = Number(dy);
+    e.stage.scrollLeft += isFinite(x) ? x : 0;
+    e.stage.scrollTop += isFinite(y) ? y : 0;
+    return { x: e.stage.scrollLeft, y: e.stage.scrollTop };
+  }
+
   function viewport() {
     return { scale: vp.scale, width: vp.w, height: vp.h };
   }
@@ -468,6 +480,7 @@
     setScale: setScale,
     zoomBy: zoomBy,
     fit: fit,
+    panBy: panBy,
     viewport: viewport,
     cspViolations: function () { return cspViolations.slice(); }
   };

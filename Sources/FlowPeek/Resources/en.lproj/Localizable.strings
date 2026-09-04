@@ -207,3 +207,20 @@
 "preview.notice.labels-dropped" = "Some labels use formatting FlowPeek cannot show — mathematical notation, for one — so those labels are blank.";
 "preview.notice.size-estimated" = "FlowPeek had to estimate this diagram's size, so it may look cropped. Use Fit to Window to see all of it.";
 "preview.notice.details" = "Engine notes: %@";
+
+/* Preview export */
+"preview.export.label" = "Diagram Options";
+"preview.export.help" = "Copy, save, or change the canvas";
+"preview.export.copy-image" = "Copy Image";
+"preview.export.copy-text" = "Copy Diagram Text";
+"preview.export.save.png" = "Save as PNG…";
+"preview.export.save.pdf" = "Save as PDF…";
+"preview.export.save.svg" = "Save as SVG…";
+"preview.export.copied" = "Copied";
+"preview.export.saved" = "Saved";
+"preview.export.failed" = "Could not export";
+"preview.background.transparent-canvas" = "Transparent Canvas";
+"preview.zoom-level" = "Zoom Level";
+"preview.a11y.diagram" = "Diagram: %@";
+"preview.a11y.diagram.hint" = "Copy Diagram Text in the share menu reads this diagram back as Mermaid.";
+"clipboard.indicator.help" = "Open the copied diagram";

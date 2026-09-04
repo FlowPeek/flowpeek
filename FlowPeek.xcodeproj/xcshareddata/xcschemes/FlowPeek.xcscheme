@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "4CB49A5159D4D5B9FF989F3DFDA3982D"
+               BlueprintIdentifier = "AA6B4D13974DAF8AA0EBAC90BEE49BA2"
                BuildableName = "FlowPeek.app"
                BlueprintName = "FlowPeek"
                ReferencedContainer = "container:FlowPeek.xcodeproj">
@@ -30,7 +30,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "4CB49A5159D4D5B9FF989F3DFDA3982D"
+            BlueprintIdentifier = "AA6B4D13974DAF8AA0EBAC90BEE49BA2"
             BuildableName = "FlowPeek.app"
             BlueprintName = "FlowPeek"
             ReferencedContainer = "container:FlowPeek.xcodeproj">
@@ -41,7 +41,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "C40FBCDD665F5E3F9C1A7F7E2A54A3E8"
+               BlueprintIdentifier = "6A05B2E713F7EB13D902E532402DFFB0"
                BuildableName = "FlowPeekCoreTests.xctest"
                BlueprintName = "FlowPeekCoreTests"
                ReferencedContainer = "container:FlowPeek.xcodeproj">
@@ -51,7 +51,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "63AEF0D880CE81FC313DB46C2A62A8FC"
+               BlueprintIdentifier = "947E99D4C072D0F94ED65A459B9648A1"
                BuildableName = "FlowPeekRendererTests.xctest"
                BlueprintName = "FlowPeekRendererTests"
                ReferencedContainer = "container:FlowPeek.xcodeproj">
@@ -73,7 +73,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "4CB49A5159D4D5B9FF989F3DFDA3982D"
+            BlueprintIdentifier = "AA6B4D13974DAF8AA0EBAC90BEE49BA2"
             BuildableName = "FlowPeek.app"
             BlueprintName = "FlowPeek"
             ReferencedContainer = "container:FlowPeek.xcodeproj">
@@ -90,7 +90,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "4CB49A5159D4D5B9FF989F3DFDA3982D"
+            BlueprintIdentifier = "AA6B4D13974DAF8AA0EBAC90BEE49BA2"
             BuildableName = "FlowPeek.app"
             BlueprintName = "FlowPeek"
             ReferencedContainer = "container:FlowPeek.xcodeproj">

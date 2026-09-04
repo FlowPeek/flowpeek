@@ -58,6 +58,21 @@ gh secret set NOTARY_PASSWORD --repo FlowPeek/flowpeek   # the app-specific pass
 gh secret set NOTARY_TEAM_ID  --repo FlowPeek/flowpeek   # F7WUT95TT6
 ```
 
+### In-app updates
+
+**Already done.** `SPARKLE_PRIVATE_KEY` holds the EdDSA private key that signs each update; the
+public half is `SUPublicEDKey` in `Config/Info.plist`. The workflow zips the stapled app, signs it
+with `sign_update`, writes a single-item `appcast.xml`, and uploads both to the release.
+
+`SUFeedURL` points at `releases/latest/download/appcast.xml`, which GitHub redirects to the newest
+release — so the feed URL never changes and needs no hosting of its own. Sparkle checks daily.
+
+If `SPARKLE_PRIVATE_KEY` is missing the release still publishes, with a warning, but in-app updates
+will not see that version. To rotate the key, run `generate_keys` from Sparkle's artifact bundle
+(`.build/artifacts/sparkle/Sparkle/bin`), put the new public key in `Config/Info.plist`, and
+`generate_keys -x` the private half into the secret. Rotating invalidates updates for anyone still
+on a build carrying the old public key, so prefer not to.
+
 ### Tap access
 
 **Already done.** `GITHUB_TOKEN` cannot write to another repository, so the cask is pushed with an
@@ -114,9 +129,6 @@ say `accepted / source=Notarized Developer ID`.
 
 ## Still to do before a public v1
 
-- `Config/Info.plist` carries the literal `REPLACE_WITH_SPARKLE_ED25519_PUBLIC_KEY` and no
-  `SUFeedURL`, so Sparkle stays inactive. In-app updates need an EdDSA key pair and a published
-  appcast — `Updates/appcast.xml.example` shows the shape.
 - The release runs on `macos-26`, which ships Xcode 26.0.1 through 26.6 and defaults to 26.6.
   `macos-15` would also work — it carries 26.0.1 through 26.3 — but defaults to Xcode 16.4, so the
   workflow's "newest Xcode" step is doing real work there. If an image ever drops Xcode 26 the run

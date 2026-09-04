@@ -29,8 +29,14 @@
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 FlowPeek</string>
     <key>SUEnableAutomaticChecks</key>
-    <false/>
+    <true/>
+    <!-- GitHub redirects releases/latest/download/<asset> to the newest release, so this URL is
+         stable while the release workflow re-uploads appcast.xml on every tag. No extra hosting. -->
+    <key>SUFeedURL</key>
+    <string>https://github.com/FlowPeek/flowpeek/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>REPLACE_WITH_SPARKLE_ED25519_PUBLIC_KEY</string>
+    <string>JxNKL7N4ydZGNSFrjODUHBpt+746seri2LLtfnVxQgk=</string>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
 </dict>
 </plist>

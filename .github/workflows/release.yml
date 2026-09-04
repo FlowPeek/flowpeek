@@ -219,6 +219,93 @@ jobs:
           echo "name=$(basename "$FLOWPEEK_DMG_PATH")" >> "$GITHUB_OUTPUT"
           echo "SHA-256: $sha"
 
+      - name: Build the Sparkle update and appcast
+        id: sparkle
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SPARKLE_PRIVATE_KEY:-}" ]; then
+            echo "::warning::SPARKLE_PRIVATE_KEY is not set; publishing without an appcast, so in-app updates will not see this release."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Sparkle updates from a zip of the .app rather than the DMG: it can swap an app bundle in
+          # place, while a DMG would have to be mounted and copied. The app inside is the stapled
+          # one, so the update is notarized as well as EdDSA-signed.
+          zip="$RUNNER_TEMP/FlowPeek-$VERSION.zip"
+          ditto -c -k --keepParent "$RUNNER_TEMP/export/FlowPeek.app" "$zip"
+
+          # The tool ships in Sparkle's SPM artifact bundle. xcodebuild resolves packages under its
+          # own DerivedData, and `swift test` never pulls the artifact because the test target does
+          # not depend on Sparkle, so look in both places and resolve on demand if neither has it.
+          find_tool() {
+            find .build/artifacts "$RUNNER_TEMP/DerivedData/SourcePackages" -type f \
+              -name sign_update -perm +111 2>/dev/null | head -1
+          }
+          tools="$(find_tool)"
+          if [ -z "$tools" ]; then
+            echo "sign_update not present yet; resolving the Sparkle artifact"
+            swift build --product FlowPeek 2>&1 | tail -5 || true
+            tools="$(find_tool)"
+          fi
+          if [ -z "$tools" ]; then
+            echo "::error::Sparkle's sign_update tool was not found in .build/artifacts or DerivedData." >&2
+            exit 1
+          fi
+          echo "using $tools"
+
+          key="$RUNNER_TEMP/sparkle_private.key"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          signature_line="$("$tools" "$zip" --ed-key-file "$key")"
+          rm -f "$key"
+          echo "$signature_line"
+
+          signature="$(printf '%s' "$signature_line" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
+          length="$(printf '%s' "$signature_line" | sed -n 's/.*length="\([^"]*\)".*/\1/p')"
+          if [ -z "$signature" ] || [ -z "$length" ]; then
+            echo "::error::Could not parse sign_update output: $signature_line" >&2
+            exit 1
+          fi
+
+          # A single-item feed is all Sparkle needs to offer the newest build, and this URL is
+          # re-uploaded on every release so the feed never points at a stale asset.
+          published="$(date -u +"%a, %d %b %Y %H:%M:%S +0000")"
+          appcast="$RUNNER_TEMP/appcast.xml"
+          cat > "$appcast" <<XML
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>FlowPeek</title>
+              <link>https://github.com/FlowPeek/flowpeek/releases/latest/download/appcast.xml</link>
+              <description>Updates for FlowPeek</description>
+              <language>en</language>
+              <item>
+                <title>$VERSION</title>
+                <pubDate>$published</pubDate>
+                <sparkle:version>$BUILD</sparkle:version>
+                <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+                <link>https://github.com/FlowPeek/flowpeek/releases/tag/v$VERSION</link>
+                <enclosure url="https://github.com/FlowPeek/flowpeek/releases/download/v$VERSION/FlowPeek-$VERSION.zip"
+                           sparkle:edSignature="$signature"
+                           length="$length"
+                           type="application/octet-stream" />
+              </item>
+            </channel>
+          </rss>
+          XML
+          # The heredoc is indented for readability; strip that indentation back off.
+          /usr/bin/sed -i '' -E 's/^          //' "$appcast"
+          /usr/bin/xmllint --noout "$appcast"
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          echo "appcast=$appcast" >> "$GITHUB_OUTPUT"
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+          cat "$appcast"
+
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -236,12 +323,16 @@ jobs:
             echo
             echo "SHA-256: \`${{ steps.dmg.outputs.sha256 }}\`"
           } > "$notes"
+          assets=("${{ steps.dmg.outputs.dmg }}")
+          if [ "${{ steps.sparkle.outputs.skipped }}" != "true" ]; then
+            assets+=("${{ steps.sparkle.outputs.zip }}" "${{ steps.sparkle.outputs.appcast }}")
+          fi
           if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
-            gh release upload "${{ steps.version.outputs.tag }}" "${{ steps.dmg.outputs.dmg }}" --clobber
+            gh release upload "${{ steps.version.outputs.tag }}" "${assets[@]}" --clobber
             gh release edit "${{ steps.version.outputs.tag }}" --notes-file "$notes"
           else
             gh release create "${{ steps.version.outputs.tag }}" \
-              "${{ steps.dmg.outputs.dmg }}" \
+              "${assets[@]}" \
               --title "FlowPeek ${{ steps.version.outputs.version }}" \
               --notes-file "$notes"
           fi

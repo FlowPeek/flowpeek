@@ -72,12 +72,11 @@ The default model identifiers are `gpt-5.6-terra`, `claude-sonnet-5`, and `gemin
 
 Before shipping:
 
-1. Replace `REPLACE_WITH_SPARKLE_ED25519_PUBLIC_KEY` in `Config/Info.plist` and add an HTTPS `SUFeedURL`.
 2. Set `DEVELOPMENT_TEAM` and the Developer ID signing identity.
 3. Archive and export the app, then run `Scripts/notarize_dmg.sh` with the environment variables documented in that script.
 4. Publish an EdDSA-signed Sparkle appcast. `Updates/appcast.xml.example` shows the required shape.
 
-Sparkle remains inactive until a feed URL is configured, so development builds do not contact an update server.
+Sparkle checks `https://github.com/FlowPeek/flowpeek/releases/latest/download/appcast.xml` once a day. GitHub redirects that path to the newest release, and the release workflow re-uploads the appcast on every tag, so no separate hosting is involved. Updates are EdDSA-signed with the key whose public half is in `Config/Info.plist`; the private half lives only in the `SPARKLE_PRIVATE_KEY` secret and the author's keychain.
 
 ## Source layout
 

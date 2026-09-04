@@ -143,3 +143,7 @@
 "mermaid.engine.degraded" = "다이어그램 엔진 상태 저하 — %@";
 "mermaid.engine.broken" = "다이어그램 엔진을 사용할 수 없음 — %@";
 "preview.error.title" = "이 선택 항목을 미리 볼 수 없습니다";
+
+/* 미리보기 배경 */
+"preview.background.solid" = "불투명 배경 사용";
+"preview.background.transparent" = "투명 배경 사용";

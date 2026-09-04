@@ -143,3 +143,7 @@
 "mermaid.engine.degraded" = "Diagram engine degraded — %@";
 "mermaid.engine.broken" = "Diagram engine unavailable — %@";
 "preview.error.title" = "Cannot Preview This Selection";
+
+/* Preview background */
+"preview.background.solid" = "Use a Solid Background";
+"preview.background.transparent" = "Use a Transparent Background";

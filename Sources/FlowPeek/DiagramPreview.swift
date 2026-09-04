@@ -18,6 +18,20 @@ final class DiagramViewModel: ObservableObject {
     @Published private(set) var status: Status = .idle
     @Published private(set) var scale: Double = 1
     @Published private(set) var engine: MermaidEngineView?
+    /// Transparent by default: a diagram reads as part of the glass rather than as a slide pasted
+    /// on top of it. Some palettes -- a light-themed diagram over a dark desktop -- need the solid
+    /// canvas back, so this is one click away in the preview's own chrome and remembered after.
+    @Published var backgroundTransparent = DiagramViewModel.storedTransparency {
+        didSet {
+            UserDefaults.standard.set(backgroundTransparent, forKey: DiagramViewModel.transparencyKey)
+            engine?.setBackgroundTransparent(backgroundTransparent)
+        }
+    }
+
+    static let transparencyKey = "flowpeek.preview.transparentBackground"
+    private static var storedTransparency: Bool {
+        UserDefaults.standard.object(forKey: transparencyKey) as? Bool ?? true
+    }
 
     let seed: String
     private(set) var source: String
@@ -51,6 +65,7 @@ final class DiagramViewModel: ObservableObject {
         do {
             let view = try pool.checkOut()
             view.onViewportChange = { [weak self] scale in self?.scale = scale }
+            view.setBackgroundTransparent(backgroundTransparent)
             engine = view
         } catch {
             status = .failed(error.localizedDescription)
@@ -457,6 +472,10 @@ struct DiagramPreviewView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 12)
+            chromeButton(
+                model.backgroundTransparent ? "checkerboard.rectangle" : "square.fill",
+                help: model.backgroundTransparent ? "preview.background.solid" : "preview.background.transparent"
+            ) { model.backgroundTransparent.toggle() }
             zoomCluster
             if compact {
                 chromeButton("macwindow", help: "preview.open-window", action: onPromote)

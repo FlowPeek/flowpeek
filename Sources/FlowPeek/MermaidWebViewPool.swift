@@ -53,23 +53,28 @@ final class MermaidEngineView: NSObject, MermaidRendering {
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         super.init()
         bridge.onScale = { [weak self] scale in self?.onViewportChange?(scale) }
-        // The page, the SVG and the space under the page are all transparent so the diagram can sit
-        // directly on the glass. `underPageBackgroundColor` alone is not enough on macOS -- the view
-        // still paints its own backdrop first, measured as a fully opaque panel interior -- and
-        // `isOpaque` is get-only here, so the backdrop is switched off through the one key WebKit
-        // exposes for it. Guarded, because a missing key would raise rather than fail quietly.
         webView.underPageBackgroundColor = .clear
-        // KVC finds `_setDrawsBackground:`, which is the name WebKit actually exposes on macOS;
-        // probing for the un-prefixed spelling reported false and skipped the call entirely.
-        if webView.responds(to: NSSelectorFromString("_setDrawsBackground:")) {
-            webView.setValue(false, forKey: "drawsBackground")
-        }
         webView.allowsMagnification = false
         webView.navigationDelegate = policy
         webView.uiDelegate = policy
         policy.onFinish = { [weak self] in self?.markReady() }
         policy.onFatal = { [weak self] in self?.markFailed($0) }
         webView.loadHTMLString(MermaidEnginePage.html, baseURL: nil)
+    }
+
+    /// Whether the diagram sits straight on the glass or on a solid canvas of its own.
+    ///
+    /// The page, the SVG and the space under the page are all transparent already, so the only
+    /// thing between a diagram and the glass is the view's own backdrop. `underPageBackgroundColor`
+    /// does not switch that off on macOS -- measured as a fully opaque panel interior -- and
+    /// `isOpaque` is get-only on an `NSView`, so it goes through the one key WebKit exposes.
+    /// Guarded and probed under the name KVC actually resolves (`_setDrawsBackground:`): the
+    /// un-prefixed spelling reports false and the call would be skipped in silence.
+    func setBackgroundTransparent(_ transparent: Bool) {
+        guard webView.responds(to: NSSelectorFromString("_setDrawsBackground:")) else { return }
+        webView.setValue(!transparent, forKey: "drawsBackground")
+        // Without this the previous backdrop stays on screen until something else invalidates.
+        webView.setNeedsDisplay(webView.bounds)
     }
 
     // MARK: - Rendering

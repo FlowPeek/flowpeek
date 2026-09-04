@@ -1,0 +1,83 @@
+# FlowPeek
+
+FlowPeek is a native macOS menu-bar app that recognizes selected Mermaid source in browsers and desktop apps, places a small action beside the selection, and renders it in a Quick Look–style preview. An experimental `⌥⌘M` workflow can use selected text as context for OpenAI, Claude, or Gemini to create a diagram.
+
+## Requirements
+
+- macOS 14 or later (Apple Silicon and Intel)
+- Xcode 26 or later for development
+- Node.js only when refreshing the vendored Mermaid asset
+- A Developer ID Application certificate for direct distribution
+
+## Build
+
+The checked-in Xcode project builds a real menu-bar `.app`:
+
+```sh
+xcodebuild -project FlowPeek.xcodeproj -scheme FlowPeek \
+  -derivedDataPath /private/tmp/flowpeek-derived \
+  build
+```
+
+Core and application compile tests can also run through Swift Package Manager:
+
+```sh
+swift test
+```
+
+The renderer tests need the app host (they drive the real WKWebView, page and glue), so they run under
+`xcodebuild … test`. Two of them consume checked-in fixtures:
+
+- `Tests/Fixtures/detector_corpus.json` is shared with `npm run conformance`, which replays it through
+  the vendored bundle's own `mermaid.detectType()`. A re-vendored Mermaid whose detector regexes moved
+  fails on one side or the other rather than drifting silently.
+- `Tests/Fixtures/golden/` holds normalised SVG snapshots per diagram type and appearance. Re-record
+  them with `TEST_RUNNER_FLOWPEEK_RECORD_GOLDEN=1 xcodebuild … test` — the correct response to a
+  deliberate Mermaid or theme change, and the wrong response to an unexplained diff.
+
+Debug builds use a valid local bundle signature so macOS can grant Accessibility permission even when an Apple Development certificate is unavailable or not trusted. Release builds preserve the configured Development Team and require its valid Developer ID certificate as described below.
+
+`FlowPeek.xcodeproj` is generated deterministically by `ruby Scripts/generate_xcodeproj.rb`. Run that command after adding or removing source files. Mermaid 11.17.2 is pinned and copied into the app; refresh it with `npm install && npm run vendor:mermaid`.
+
+## Permissions and privacy
+
+FlowPeek requests only macOS Accessibility permission. It uses Accessibility APIs to read the current selection and selection bounds; it does not request Screen Recording or Input Monitoring. Selected text is held in memory and is not logged or written to disk. AI context is sent only after the user explicitly clicks Generate (or the explicit Repair button), and BYOK credentials are stored in the macOS Keychain.
+
+Because cross-application Accessibility access is incompatible with the intended sandbox model, the distribution target has App Sandbox disabled and Hardened Runtime enabled. Distribute a Developer ID–signed, notarized, stapled DMG rather than a Mac App Store build.
+
+## Renderer security
+
+- Mermaid is local; no CDN or remote renderer is used.
+- Mermaid runs with `securityLevel: sandbox`, locked security settings, a 50,000-character limit, and a 500-edge limit.
+- The `WKWebView` uses a non-persistent data store, denies user-initiated navigation, blocks remote content with CSP, removes links, and disables `window.open`.
+- Default diagrams receive semantic light/dark macOS colors and system typography. Mermaid frontmatter, init directives, `themeVariables`, `classDef`, `style`, `linkStyle`, and `themeCSS` remain authoritative for explicitly customized diagrams.
+
+## AI experiment
+
+Enable the experiment in Settings, save a provider API key, select arbitrary text in another app, and press `⌥⌘M`. The provider must return `{ title, mermaid, notes }`; FlowPeek validates the Mermaid locally before displaying it. Invalid output is never retried automatically—the user decides whether to invoke Repair.
+
+The default model identifiers are `gpt-5.6-terra`, `claude-sonnet-5`, and `gemini-3.7-flash`. Availability depends on the user’s provider account and can change; production should expose model configuration and move credentials to a backend.
+
+## Release setup
+
+Before shipping:
+
+1. Replace `REPLACE_WITH_SPARKLE_ED25519_PUBLIC_KEY` in `Config/Info.plist` and add an HTTPS `SUFeedURL`.
+2. Set `DEVELOPMENT_TEAM` and the Developer ID signing identity.
+3. Archive and export the app, then run `Scripts/notarize_dmg.sh` with the environment variables documented in that script.
+4. Publish an EdDSA-signed Sparkle appcast. `Updates/appcast.xml.example` shows the required shape.
+
+Sparkle remains inactive until a feed URL is configured, so development builds do not contact an update server.
+
+## Source layout
+
+- `Sources/FlowPeekCore`: pure validation, theme, document, and AI data models
+- `Sources/FlowPeek`: AppKit/SwiftUI app, Accessibility reader, panels, WebKit renderer, Keychain, and provider adapters
+- `Sources/FlowPeek/Resources`: English/Korean localization and vendored Mermaid
+- `Tests/FlowPeekCoreTests`: deterministic core behavior tests
+- `Tests/FlowPeekRendererTests`: app-hosted renderer conformance, golden and adversarial tests
+- `Tests/Fixtures`: the shared detector corpus and the golden SVG snapshots
+
+## Third-party software
+
+Mermaid 11.17.2 and Sparkle 2.9.2 are MIT licensed. See `THIRD_PARTY_NOTICES.md` and their upstream distributions for full license texts.

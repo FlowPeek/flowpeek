@@ -1,0 +1,12 @@
+{
+  "name": "flowpeek-renderer-assets",
+  "private": true,
+  "scripts": {
+    "vendor:mermaid": "cp node_modules/mermaid/dist/mermaid.min.js Sources/FlowPeek/Resources/mermaid.min.js",
+    "conformance": "node Scripts/conformance.mjs",
+    "verify:xcodeproj": "before=$(shasum FlowPeek.xcodeproj/project.pbxproj); ruby Scripts/generate_xcodeproj.rb >/dev/null; test \"$before\" = \"$(shasum FlowPeek.xcodeproj/project.pbxproj)\" || { echo \"FAIL FlowPeek.xcodeproj is stale - re-run ruby Scripts/generate_xcodeproj.rb and commit the result\"; exit 1; }"
+  },
+  "dependencies": {
+    "mermaid": "11.17.2"
+  }
+}

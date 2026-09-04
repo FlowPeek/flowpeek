@@ -1,0 +1,70 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "extended-srgb:0.07,0.44,0.99,1.00",
+      "extended-srgb:0.44,0.24,0.93,1.00"
+    ]
+  },
+  "groups": [
+    {
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.45
+      },
+      "layers": [
+        {
+          "image-name": "BranchUpper.svg",
+          "name": "Branch Upper",
+          "fill": {
+            "solid": "extended-srgb:1.00,1.00,1.00,0.94"
+          }
+        },
+        {
+          "image-name": "BranchLower.svg",
+          "name": "Branch Lower",
+          "fill": {
+            "solid": "extended-srgb:1.00,1.00,1.00,0.94"
+          }
+        }
+      ]
+    },
+    {
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.62
+      },
+      "layers": [
+        {
+          "image-name": "Caret.svg",
+          "name": "Caret",
+          "fill": {
+            "solid": "extended-srgb:1.00,1.00,1.00,1.00"
+          }
+        },
+        {
+          "image-name": "NodeUpper.svg",
+          "name": "Node Upper",
+          "fill": {
+            "solid": "extended-srgb:1.00,1.00,1.00,1.00"
+          }
+        },
+        {
+          "image-name": "NodeLower.svg",
+          "name": "Node Lower",
+          "fill": {
+            "solid": "extended-srgb:1.00,1.00,1.00,1.00"
+          }
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": [
+      "iOS",
+      "macOS"
+    ]
+  }
+}

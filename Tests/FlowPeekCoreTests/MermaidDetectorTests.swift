@@ -1,0 +1,219 @@
+import XCTest
+@testable import FlowPeekCore
+
+/// One test per row of the detection specification's acceptance table.
+final class MermaidDetectorTests: XCTestCase {
+    private func expect(
+        _ input: String,
+        _ confidence: MermaidDetection.Confidence,
+        _ type: String?,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let detection = MermaidDetector.detect(input)
+        XCTAssertEqual(detection.confidence, confidence, "confidence", file: file, line: line)
+        XCTAssertEqual(detection.expectedType, type, "detector id", file: file, line: line)
+    }
+
+    // MARK: - B, baselines
+
+    func testB01GraphTD() { expect("graph TD\nA-->B", .certain, "flowchart-v2") }
+    func testB02FlowchartLR() { expect("flowchart LR\nA-->B", .certain, "flowchart-v2") }
+    func testB03SequenceDiagram() { expect("sequenceDiagram\nAlice->>Bob: Hi", .certain, "sequence") }
+    func testB04LeadingIndent() { expect("   graph TD\n A-->B", .certain, "flowchart-v2") }
+    func testB05ClassDiagramV2() { expect("classDiagram-v2\nA <|-- B", .certain, "classDiagram") }
+    func testB06StateDiagramV2BeforeBase() { expect("stateDiagram-v2\n[*] --> S", .certain, "stateDiagram") }
+    func testB07BalancedFrontMatter() { expect("---\ntitle: T\n---\ngraph TD\nA-->B", .certain, "flowchart-v2") }
+    func testB08SingleLineDirective() { expect("%%{init:{'theme':'dark'}}%%\ngraph TD\nA-->B", .certain, "flowchart-v2") }
+    func testB09MultiLineDirective() { expect("%%{init:{\n  'theme':'dark'\n}}%%\ngraph TD\nA-->B", .certain, "flowchart-v2") }
+    func testB10LeadingComment() { expect("%% a comment\ngraph TD\nA-->B", .certain, "flowchart-v2") }
+
+    // MARK: - F, fences
+
+    func testF01BalancedMermaidFence() { expect("```mermaid\ngraph TD\nA-->B\n```", .certain, "flowchart-v2") }
+    func testF02BareFence() { expect("```\ngraph TD\nA-->B\n```", .certain, "flowchart-v2") }
+    func testF03ProseBeforeFence() { expect("Here is the diagram:\n\n```mermaid\ngraph TD\nA-->B\n```", .likely, "flowchart-v2") }
+    func testF04HeadingBeforeFence() { expect("## Architecture\n```mermaid\ngraph TD\nA-->B\n```", .likely, "flowchart-v2") }
+    func testF05UnclosedFence() { expect("```mermaid\ngraph TD\nA-->B", .likely, "flowchart-v2") }
+    func testF06TildeFence() { expect("~~~mermaid\ngraph TD\nA-->B\n~~~", .certain, "flowchart-v2") }
+    func testF07MmdInfoString() { expect("```mmd\ngraph TD\nA-->B\n```", .certain, "flowchart-v2") }
+
+    func testF08TakesTheFirstOfTwoBlocksAndLeavesNoFenceBehind() {
+        let input = "```mermaid\ngraph TD\nA-->B\n```\n\n```mermaid\ngraph LR\nC-->D\n```"
+        let detection = MermaidDetector.detect(input)
+        XCTAssertEqual(detection.confidence, .likely)
+        XCTAssertEqual(detection.expectedType, "flowchart-v2")
+        XCTAssertEqual(detection.extractedSource, "graph TD\nA-->B")
+        XCTAssertFalse(detection.extractedSource.contains("```"))
+    }
+
+    func testF09SkipsNonMermaidBlock() { expect("```js\nconst x=1\n```\n```mermaid\ngraph TD\nA-->B\n```", .likely, "flowchart-v2") }
+    func testF10FenceAttributes() { expect("```mermaid {highlight=1}\ngraph TD\nA-->B\n```", .likely, "flowchart-v2") }
+    func testF11TrailingProse() { expect("```mermaid\ngraph TD\nA-->B\n```\n\nThat's the flow.", .likely, "flowchart-v2") }
+
+    // MARK: - U, Unicode
+
+    func testU01NonBreakingSpaceIsNormalisedForTheRendererToo() {
+        let detection = MermaidDetector.detect("graph\u{00A0}TD\nA-->B")
+        XCTAssertEqual(detection.confidence, .certain)
+        XCTAssertEqual(detection.expectedType, "flowchart-v2")
+        XCTAssertEqual(detection.extractedSource, "graph TD\nA-->B")
+        XCTAssertFalse(detection.extractedSource.unicodeScalars.contains("\u{00A0}"))
+    }
+
+    func testU02ByteOrderMark() { expect("\u{FEFF}graph TD\nA-->B", .certain, "flowchart-v2") }
+    func testU03ByteOrderMarkBeforeFence() { expect("\u{FEFF}```mermaid\ngraph TD\nA-->B\n```", .certain, "flowchart-v2") }
+
+    func testU04CarriageReturns() {
+        let detection = MermaidDetector.detect("graph TD\r\nA-->B\r\n")
+        XCTAssertEqual(detection.confidence, .certain)
+        XCTAssertEqual(detection.expectedType, "flowchart-v2")
+        XCTAssertEqual(detection.extractedSource, "graph TD\nA-->B")
+    }
+
+    func testU05LineSeparator() { expect("graph TD\u{2028}A-->B", .certain, "flowchart-v2") }
+    func testU06ZeroWidthSpace() { expect("\u{200B}graph TD\nA-->B", .certain, "flowchart-v2") }
+    func testU07IdeographicSpace() { expect("graph\u{3000}TD\nA-->B", .certain, "flowchart-v2") }
+
+    // MARK: - C, chrome
+
+    func testC01CopyLabel() { expect("Copy\ngraph TD\nA-->B", .likely, "flowchart-v2") }
+    func testC02KoreanCopyLabel() { expect("복사\ngraph TD\nA-->B", .likely, "flowchart-v2") }
+    func testC03TrailingChromeIsHarmless() { expect("graph TD\nA-->B\nCopy", .certain, "flowchart-v2") }
+
+    func testC04SpaceGutter() {
+        let detection = MermaidDetector.detect("1  graph TD\n2  A-->B\n3  B-->C")
+        XCTAssertEqual(detection.confidence, .likely)
+        XCTAssertEqual(detection.expectedType, "flowchart-v2")
+        XCTAssertEqual(detection.extractedSource, "graph TD\nA-->B\nB-->C")
+    }
+
+    func testC05PipeGutter() {
+        let detection = MermaidDetector.detect("1 | graph TD\n2 | A-->B\n3 | B-->C")
+        XCTAssertEqual(detection.confidence, .likely)
+        XCTAssertEqual(detection.expectedType, "flowchart-v2")
+        XCTAssertEqual(detection.extractedSource, "graph TD\nA-->B\nB-->C")
+    }
+
+    func testC06SingleNumericLineIsNeverAGutter() {
+        let detection = MermaidDetector.detect("graph TD\n1 --> 2")
+        XCTAssertEqual(detection.confidence, .certain)
+        XCTAssertEqual(detection.expectedType, "flowchart-v2")
+        XCTAssertEqual(detection.extractedSource, "graph TD\n1 --> 2")
+    }
+
+    func testC07ShellPrompt() { expect("$ cat diagram.mmd\ngraph TD\nA-->B", .likely, "flowchart-v2") }
+
+    // MARK: - K, keyword coverage
+
+    func testK01C4Context() { expect("C4Context\ntitle X", .likely, "c4") }
+    func testK02C4Container() { expect("C4Container\ntitle X", .likely, "c4") }
+
+    func testK03RemainingC4Flavours() {
+        expect("C4Component\ntitle X", .likely, "c4")
+        expect("C4Dynamic\ntitle X", .likely, "c4")
+        expect("C4Deployment\ntitle X", .likely, "c4")
+    }
+
+    func testK04LoneInfoIsWeak() { expect("info", .weak, "info") }
+    func testK05EventModeling() { expect("eventmodeling\n  triggerCommand C", .likely, "eventmodeling") }
+    func testK06GitGraphColonForm() { expect("gitGraph:\n  commit", .likely, "gitGraph") }
+    func testK07RequirementWithoutDiagramSuffix() { expect("requirement\n  test_req", .likely, "requirement") }
+    func testK08BareSankey() { expect("sankey\nA,B,10", .likely, "sankey") }
+    func testK09BareXYChart() { expect("xychart\n  title Sales", .likely, "xychart") }
+    func testK10BareBlock() { expect("block\n  columns 2", .likely, "block") }
+    func testK11BarePacket() { expect("packet\n  0-7: \"a\"", .likely, "packet") }
+    func testK12Architecture() { expect("architecture\n  group g(cloud)[G]", .likely, "architecture") }
+    func testK13Treemap() { expect("treemap\n\"Root\"\n  \"A\": 10", .likely, "treemap") }
+
+    func testK14IshikawaIsCaseInsensitive() {
+        expect("ishikawa-beta\n  Effect", .likely, "ishikawa")
+        expect("ISHIKAWA-BETA\n  Effect", .likely, "ishikawa")
+    }
+
+    func testK15Venn() { expect("venn-beta\n  title V", .likely, "venn") }
+
+    func testK16WardleyIsCaseInsensitive() {
+        expect("wardley-beta\n  title W", .likely, "wardley")
+        expect("Wardley-Beta\n  title W", .likely, "wardley")
+    }
+
+    func testK17Cynefin() { expect("cynefin-beta\n  title C", .likely, "cynefin") }
+    func testK18Swimlane() { expect("swimlane-beta\n  lane A", .likely, "swimlane") }
+    func testK19TreeView() { expect("treeView-beta\n  Root", .likely, "treeView") }
+
+    func testK20RailroadFamilyIsCaseInsensitive() {
+        expect("railroad-beta\n  rule Start", .likely, "railroad")
+        expect("RAILROAD-BETA\n  rule Start", .likely, "railroad")
+        expect("railroad-ebnf-beta\n  rule Start", .likely, "railroadEbnf")
+        expect("RAILROAD-EBNF-BETA\n  rule Start", .likely, "railroadEbnf")
+        expect("railroad-abnf-beta\n  rule Start", .likely, "railroadAbnf")
+        expect("railroad-peg-beta\n  rule Start", .likely, "railroadPeg")
+    }
+
+    func testK21Radar() { expect("radar-beta\n  axis a, b", .likely, "radar") }
+    func testK22Kanban() { expect("kanban\n  Todo", .likely, "kanban") }
+    func testK23FlowchartElkOutranksFlowchart() { expect("flowchart-elk TD\nA-->B", .certain, "flowchart-elk") }
+
+    // MARK: - N, negatives
+
+    func testN01ZenumlIsNotRegisteredInMermaid11() { expect("zenuml\nA->B: hi", MermaidDetection.Confidence.none, nil) }
+    func testN02StartersAreCaseSensitive() { expect("SEQUENCEDIAGRAM\nA->>B: x", MermaidDetection.Confidence.none, nil) }
+    func testN03ProseContainingGraph() { expect("The graph shows a 12% increase.", MermaidDetection.Confidence.none, nil) }
+    func testN04GitGraphProse() { expect("git graph of the repo", MermaidDetection.Confidence.none, nil) }
+    func testN05LonePieProseIsAtMostWeak() { expect("pie chart of revenue is shown below", .weak, "pie") }
+
+    func testN06Empty() {
+        expect("", MermaidDetection.Confidence.none, nil)
+        expect("   ", MermaidDetection.Confidence.none, nil)
+    }
+
+    func testN07JSON() { expect("{ \"graph\": \"TD\" }", MermaidDetection.Confidence.none, nil) }
+    func testN08SQL() { expect("SELECT * FROM graph", MermaidDetection.Confidence.none, nil) }
+
+    // MARK: - E, edges of the algorithm
+
+    func testE01UnclosedFrontMatterFallsThroughToTheStarterScan() {
+        expect("---\ntitle: T\ngraph TD\nA-->B", .likely, "flowchart-v2")
+    }
+
+    func testE02CommentsOnlyThenStarter() { expect("%%\n%%\n%%\ngraph TD\nA-->B", .certain, "flowchart-v2") }
+
+    func testE03BareMermaidLabelLine() {
+        let detection = MermaidDetector.detect("mermaid\ngraph TD\nA-->B")
+        XCTAssertEqual(detection.confidence, .certain)
+        XCTAssertEqual(detection.expectedType, "flowchart-v2")
+        XCTAssertEqual(detection.extractedSource, "graph TD\nA-->B")
+        XCTAssertEqual(detection.droppedPrefixLines, 1)
+    }
+
+    func testE04StarterOutsideTheTwelveLineWindow() {
+        let prose = (1...13).map { "Prose sentence \($0) that says nothing useful." }.joined(separator: "\n")
+        expect(prose + "\ngraph TD\nA-->B", MermaidDetection.Confidence.none, nil)
+    }
+
+    func testE05SizeGateIsMeasuredInUTF16CodeUnits() {
+        let huge = "graph TD\n" + String(repeating: "A-->B\n", count: 40_000)
+        XCTAssertGreaterThan(huge.utf16.count, 200_000)
+        XCTAssertGreaterThanOrEqual(MermaidDetector.detect(huge).confidence, .likely)
+        XCTAssertThrowsError(try MermaidSource(rawValue: huge)) { error in
+            XCTAssertEqual(error as? MermaidSource.ValidationError, .tooLarge(huge.utf16.count - 1))
+        }
+
+        // Emoji: 60,001 grapheme clusters but 120,002 UTF-16 units, so only the UTF-16 gate rejects it.
+        let emoji = "graph TD\nA-->B[\"" + String(repeating: "😀", count: 60_000) + "\"]"
+        XCTAssertLessThan(emoji.count, MermaidSource.maximumCharacters)
+        XCTAssertGreaterThan(emoji.utf16.count, MermaidSource.maximumCharacters)
+        XCTAssertThrowsError(try MermaidSource(rawValue: emoji)) { error in
+            XCTAssertEqual(error as? MermaidSource.ValidationError, .tooLarge(emoji.utf16.count))
+        }
+    }
+
+    func testE06LongArrowsAreNoLongerBilledTwice() throws {
+        let source = "flowchart TD\n" + String(repeating: "  A ----> B\n", count: 300)
+        let detection = MermaidDetector.detect(source)
+        XCTAssertGreaterThanOrEqual(detection.confidence, .likely)
+        XCTAssertEqual(detection.expectedType, "flowchart-v2")
+        XCTAssertNoThrow(try MermaidSource(rawValue: source))
+    }
+}

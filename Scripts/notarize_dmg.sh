@@ -38,6 +38,23 @@ ditto "$FLOWPEEK_APP_PATH" "$staging/volume/FlowPeek.app"
 ln -s /Applications "$staging/volume/Applications"
 hdiutil create -volname FlowPeek -srcfolder "$staging/volume" -ov -format UDZO "$FLOWPEEK_DMG_PATH"
 
+# Sign the image with the identity that signed the app, read back from the app rather than
+# configured twice. Without this the disk image carries no signature, and the Gatekeeper assessment
+# below reports "no usable signature" even though the image is notarized and stapled. Signing has to
+# happen before notarization: re-signing would invalidate the staple.
+identity="$(codesign -dvv "$FLOWPEEK_APP_PATH" 2>&1 | sed -n 's/^Authority=\(Developer ID Application.*\)$/\1/p' | head -1)"
+if [[ -z "$identity" ]]; then
+  print -u2 "Could not read a Developer ID authority from $FLOWPEEK_APP_PATH"
+  exit 1
+fi
+print "signing the image as: $identity"
+sign_arguments=(--sign "$identity" --timestamp)
+if [[ -n "${FLOWPEEK_NOTARY_KEYCHAIN:-}" ]]; then
+  sign_arguments+=(--keychain "$FLOWPEEK_NOTARY_KEYCHAIN")
+fi
+codesign "${sign_arguments[@]}" "$FLOWPEEK_DMG_PATH"
+codesign --verify --strict --verbose=2 "$FLOWPEEK_DMG_PATH"
+
 print "\n== notarizing the DMG =="
 xcrun notarytool submit "$FLOWPEEK_DMG_PATH" "${notary_arguments[@]}" --wait
 xcrun stapler staple "$FLOWPEEK_DMG_PATH"

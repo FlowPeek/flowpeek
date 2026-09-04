@@ -86,7 +86,8 @@ warning in the job log.
 Each of these fails the run rather than shipping something broken:
 
 - **Xcode 26 or newer.** `AppIcon.icon` is an Icon Composer document and only Xcode 26's `actool`
-  compiles it. The step prints every Xcode it found and the version it picked.
+  compiles it. The step prints every Xcode it found and the version it picked, then `xcode-select`s
+  it, so the run never depends on the image's default.
 - **`swift test` and `Scripts/conformance.mjs`.** The conformance script loads the vendored
   `mermaid.min.js` in a bare `vm` context and asserts it has no dynamic imports, no workers and no
   `eval`, and that its diagram registry still matches the Swift detector table.
@@ -114,5 +115,7 @@ say `accepted / source=Notarized Developer ID`.
 - `Config/Info.plist` carries the literal `REPLACE_WITH_SPARKLE_ED25519_PUBLIC_KEY` and no
   `SUFeedURL`, so Sparkle stays inactive. In-app updates need an EdDSA key pair and a published
   appcast — `Updates/appcast.xml.example` shows the shape.
-- The release runs on `macos-15`. If that image stops shipping Xcode 26, switch `runs-on` to the
-  image that does; the Xcode check will tell you plainly rather than producing an iconless app.
+- The release runs on `macos-26`, which ships Xcode 26.0.1 through 26.6 and defaults to 26.6.
+  `macos-15` would also work — it carries 26.0.1 through 26.3 — but defaults to Xcode 16.4, so the
+  workflow's "newest Xcode" step is doing real work there. If an image ever drops Xcode 26 the run
+  fails at that step rather than producing an app with no icon.

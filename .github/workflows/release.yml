@@ -22,9 +22,12 @@ concurrency:
 
 jobs:
   release:
-    # macOS 26 is required: AppIcon.icon is an Icon Composer document, and only Xcode 26's actool
-    # can compile it. The Xcode check below fails loudly rather than silently shipping no icon.
-    runs-on: macos-15
+    # AppIcon.icon is an Icon Composer document and only Xcode 26's actool compiles it, so the image
+    # matters. Measured from actions/runner-images: macos-26 ships Xcode 26.0.1-26.6 and defaults to
+    # 26.6; macos-15 carries 26.0.1-26.3 but still defaults to 16.4. macos-26 also matches the
+    # macOS 26 APIs the app builds against. The Xcode check below is kept anyway, so a regression in
+    # the image fails the run instead of silently shipping an app with no icon.
+    runs-on: macos-26
     timeout-minutes: 60
 
     steps:

@@ -81,6 +81,32 @@ final class MermaidDetectorTests: XCTestCase {
     func testC02KoreanCopyLabel() { expect("복사\ngraph TD\nA-->B", .likely, "flowchart-v2") }
     func testC03TrailingChromeIsHarmless() { expect("graph TD\nA-->B\nCopy", .certain, "flowchart-v2") }
 
+    /// The measured mermaid.ai case: an editable code block exposes its content as the field's own
+    /// value and again as highlighted text, so a region read hands over the diagram twice. mermaid
+    /// reads to the last line and fails on the second starter, so the repeat has to be cut.
+    func testC10RepeatedStarterIsTruncated() {
+        let once = "eventmodeling\n\ntf 01 ui CartUI\ntf 02 cmd AddItem\ntf 03 evt ItemAdded"
+        let detection = MermaidDetector.detect(once + "\n" + once)
+        XCTAssertEqual(detection.expectedType, "eventmodeling")
+        XCTAssertEqual(detection.extractedSource, once)
+    }
+
+    /// Two different diagrams in a row also has to yield one: the first, which is the one the read
+    /// was anchored on.
+    func testC11SecondDiagramOfTheSameTypeIsDropped() {
+        let detection = MermaidDetector.detect("graph TD\nA-->B\ngraph LR\nC-->D")
+        XCTAssertEqual(detection.extractedSource, "graph TD\nA-->B")
+    }
+
+    /// The cut is keyed on a repeat of *this* diagram's own type, so a body that legitimately uses
+    /// a keyword belonging to another diagram type survives intact.
+    func testC12ForeignKeywordInBodySurvives() {
+        let source = "classDiagram\nclass Order\nclass Item\nOrder ||-- Item"
+        let detection = MermaidDetector.detect(source)
+        XCTAssertEqual(detection.expectedType, "classDiagram")
+        XCTAssertEqual(detection.extractedSource, source)
+    }
+
     func testC04SpaceGutter() {
         let detection = MermaidDetector.detect("1  graph TD\n2  A-->B\n3  B-->C")
         XCTAssertEqual(detection.confidence, .likely)
@@ -215,5 +241,80 @@ final class MermaidDetectorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(detection.confidence, .likely)
         XCTAssertEqual(detection.expectedType, "flowchart-v2")
         XCTAssertNoThrow(try MermaidSource(rawValue: source))
+    }
+
+    // MARK: - What the renderer is handed
+
+    /// mermaid reads from the very first line, so prose the window scanned past has to be dropped
+    /// or it reports an unknown diagram type. This is what ⌥Space hit on mermaid.ai's own docs.
+    func testProseBeforeTheStarterIsNotHandedToTheRenderer() {
+        let detection = MermaidDetector.detect("""
+            Compact version:
+            Code:
+            eventmodeling
+
+            tf 01 ui CartUI
+            tf 02 cmd AddItem
+            """)
+        XCTAssertGreaterThanOrEqual(detection.confidence, .likely)
+        XCTAssertEqual(detection.expectedType, "eventmodeling")
+        XCTAssertTrue(detection.extractedSource.hasPrefix("eventmodeling"))
+        XCTAssertFalse(detection.extractedSource.contains("Compact version"))
+    }
+
+    /// Comments and init directives ahead of the keyword *are* the source and must survive.
+    func testCommentsAndDirectivesAheadOfTheStarterAreKept() {
+        let detection = MermaidDetector.detect("""
+            %%{init:{'theme':'dark'}}%%
+            %% a note about the flow
+            graph TD
+              A --> B
+            """)
+        XCTAssertEqual(detection.confidence, .certain)
+        XCTAssertTrue(detection.extractedSource.hasPrefix("%%{init:"))
+        XCTAssertTrue(detection.extractedSource.contains("%% a note about the flow"))
+    }
+
+    func testFrontMatterAheadOfTheStarterIsKept() {
+        let detection = MermaidDetector.detect("""
+            ---
+            title: Checkout
+            ---
+            graph LR
+              A --> B
+            """)
+        XCTAssertGreaterThanOrEqual(detection.confidence, .likely)
+        XCTAssertTrue(detection.extractedSource.hasPrefix("---"))
+        XCTAssertTrue(detection.extractedSource.contains("title: Checkout"))
+    }
+
+    /// Prose resets the preamble: a comment that sits above prose belongs to the prose, not to the
+    /// diagram, and carrying it through would put a stray line before the keyword.
+    func testACommentAboveProseIsNotTreatedAsPreamble() {
+        let detection = MermaidDetector.detect("""
+            %% this comment is about the paragraph
+            Some explanation of the checkout flow.
+            graph TD
+              A --> B
+            """)
+        XCTAssertGreaterThanOrEqual(detection.confidence, .likely)
+        XCTAssertTrue(detection.extractedSource.hasPrefix("graph TD"))
+    }
+
+    /// Trailing affordances under a runnable snippet, which reading a block by its enclosing
+    /// element picks up.
+    func testTrailingSnippetChromeIsDropped() {
+        let detection = MermaidDetector.detect("""
+            eventmodeling
+
+            tf 01 ui CartUI
+            tf 02 cmd AddItem
+
+            ⌘ + Enter
+            |
+            """)
+        XCTAssertGreaterThanOrEqual(detection.confidence, .likely)
+        XCTAssertFalse(detection.extractedSource.contains("⌘ + Enter"))
+        XCTAssertTrue(detection.extractedSource.hasSuffix("tf 02 cmd AddItem"))
     }
 }

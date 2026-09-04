@@ -7,11 +7,15 @@ public struct MacMermaidTheme: Equatable, Sendable {
     /// `themeVariables.fontFamily` alone leaves that at the Trebuchet default.
     public static let systemFontStack = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif"
 
+    /// Kept so the renderer can pick mermaid's matching base palette; diagram types that hardcode
+    /// their colours ignore `variables` entirely and only respond to the base theme.
+    public let appearance: Appearance
     public let variables: [String: String]
     public let css: String
     public let fontFamily: String
 
     public init(appearance: Appearance, accentHex: String, increaseContrast: Bool) {
+        self.appearance = appearance
         let dark = appearance == .dark
         fontFamily = Self.systemFontStack
         let line = dark ? (increaseContrast ? "#98989D" : "#636366") : (increaseContrast ? "#636366" : "#AEAEB2")

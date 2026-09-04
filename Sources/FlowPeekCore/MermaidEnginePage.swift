@@ -14,10 +14,18 @@ public enum MermaidEnginePage {
     public static let stageElementID = "stage"
     public static let diagramElementID = "diagram"
     public static let errorElementID = "error"
+    /// Where mermaid is told to render. See `measure` in the CSS below.
+    public static let measureElementID = "measure"
 
     /// A scrolling stage that centres a canvas whose *layout* size tracks the zoom, so panning is
     /// native scrolling and zooming is a cheap GPU transform on the wrapper. The `<svg>` is pinned to
     /// its natural pixel size by the glue, never left at mermaid's `width="100%"`.
+    ///
+    /// `#measure` is where mermaid is told to render. It is off-screen but deliberately *in the
+    /// render tree*: renderers that lay out with `getBBox()` -- eventmodeling's data blocks among
+    /// them -- throw "svg element not in render tree" in mermaid's own default container, and
+    /// `display:none` here would reintroduce exactly that. It is given room to lay out at natural
+    /// size and emptied again after every render.
     public static let html = """
     <!doctype html><html><head><meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="\(contentSecurityPolicy)">
@@ -30,7 +38,8 @@ public enum MermaidEnginePage {
     #diagram{position:absolute;top:0;left:0;transform-origin:0 0}
     #diagram svg{display:block;max-width:none;background:transparent}
     #error{display:none}
-    </style></head><body><div id="stage"><div id="canvas"><div id="diagram"></div></div></div><div id="error"></div></body></html>
+    #measure{position:absolute;left:-99999px;top:0;width:4000px;height:4000px;overflow:hidden}
+    </style></head><body><div id="stage"><div id="canvas"><div id="diagram"></div></div></div><div id="error"></div><div id="measure"></div></body></html>
     """
 
     /// Name of the `WKContentWorld` the engine, the glue and every `callAsyncJavaScript` share.

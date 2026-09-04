@@ -53,8 +53,17 @@ final class MermaidEngineView: NSObject, MermaidRendering {
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         super.init()
         bridge.onScale = { [weak self] scale in self?.onViewportChange?(scale) }
-        // Public API; replaces the `setValue(false, forKey: "drawsBackground")` KVC hack.
+        // The page, the SVG and the space under the page are all transparent so the diagram can sit
+        // directly on the glass. `underPageBackgroundColor` alone is not enough on macOS -- the view
+        // still paints its own backdrop first, measured as a fully opaque panel interior -- and
+        // `isOpaque` is get-only here, so the backdrop is switched off through the one key WebKit
+        // exposes for it. Guarded, because a missing key would raise rather than fail quietly.
         webView.underPageBackgroundColor = .clear
+        // KVC finds `_setDrawsBackground:`, which is the name WebKit actually exposes on macOS;
+        // probing for the un-prefixed spelling reported false and skipped the call entirely.
+        if webView.responds(to: NSSelectorFromString("_setDrawsBackground:")) {
+            webView.setValue(false, forKey: "drawsBackground")
+        }
         webView.allowsMagnification = false
         webView.navigationDelegate = policy
         webView.uiDelegate = policy

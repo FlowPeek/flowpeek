@@ -47,7 +47,20 @@ public enum MermaidDetector {
             )
         }
 
-        let body = lines.dropFirst(hit.lineIndex + 1).filter { !trimmed($0).isEmpty }
+        // Hand the renderer the diagram only. mermaid reads from the first line, so prose that the
+        // window scanned past would make it report an unknown diagram type.
+        //
+        // It also reads to the *last* line, so anything that gathers text from a region rather than
+        // from one block can hand over the same diagram twice, or two diagrams in a row. A repeat of
+        // this diagram's own starter is the boundary: a body never restarts with its own type
+        // keyword, so cutting there yields exactly the one diagram that was pointed at.
+        let end = lines.indices
+            .dropFirst(hit.lineIndex + 1)
+            .first { match(trimmed(lines[$0]))?.id == hit.id } ?? lines.count
+        let diagram = lines[hit.sourceStartIndex..<end]
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = lines[(hit.lineIndex + 1)..<end].filter { !trimmed($0).isEmpty }
         let confidence: MermaidDetection.Confidence
         if body.isEmpty {
             confidence = .weak
@@ -61,8 +74,8 @@ public enum MermaidDetector {
             confidence: confidence,
             diagramKeyword: hit.keyword,
             expectedType: hit.id,
-            extractedSource: source,
-            droppedPrefixLines: dropped
+            extractedSource: diagram,
+            droppedPrefixLines: dropped + hit.sourceStartIndex
         )
     }
 
@@ -199,8 +212,21 @@ public enum MermaidDetector {
 
     private static let chromeLabels: Set<String> = [
         "copy", "copy code", "복사", "コピー", "复制", "kopieren", "copier",
-        "share", "edit", "run", "preview", "raw", "blame", "wrap lines"
+        "share", "edit", "run", "preview", "raw", "blame", "wrap lines",
+        // Trailing affordances a documentation page puts under a runnable snippet. Reading a block
+        // by its enclosing element picks these up, and mermaid then fails on them.
+        "run ▶", "▶", "mermaid", "|", "⌘ + enter", "ctrl + enter", "open editor", "try it"
     ]
+
+    /// Chrome also appears *after* a snippet, and it only became reachable once a block could be
+    /// read by its enclosing element rather than by the exact line under the pointer.
+    private static func dropTrailingChrome(_ lines: inout [String]) {
+        while let last = lines.last {
+            let trimmed = last.trimmingCharacters(in: .whitespaces)
+            guard trimmed.isEmpty || chromeLabels.contains(trimmed.lowercased()) else { break }
+            lines.removeLast()
+        }
+    }
 
     private struct ChromeOutcome {
         var dropped = 0
@@ -210,6 +236,10 @@ public enum MermaidDetector {
     private static func stripChrome(_ lines: inout [String]) -> ChromeOutcome {
         var outcome = ChromeOutcome()
         dropLeadingChrome(&lines, into: &outcome)
+        // Deliberately does not mark the outcome as changed: what follows the diagram says nothing
+        // about how confidently its opening line was recognised, and counting it downgraded a
+        // clean block with a trailing "Copy" -- or merely a trailing blank line -- from certain.
+        dropTrailingChrome(&lines)
         if stripGutter(&lines) { outcome.changed = true }
         dropLeadingChrome(&lines, into: &outcome)
         return outcome
@@ -295,6 +325,10 @@ public enum MermaidDetector {
         let keyword: String
         let lineIndex: Int
         let survivingIndex: Int
+        /// Where the diagram itself begins. Front matter, `%%{init}%%` directives and `%%` comments
+        /// ahead of the starter belong to the source and are kept; prose ahead of them does not and
+        /// is dropped, because mermaid reads from the very first line and would fail on it.
+        let sourceStartIndex: Int
     }
 
     /// Arrow-shaped tokens only: a bare `:` corroborates a diagram body but is far too common to
@@ -307,12 +341,17 @@ public enum MermaidDetector {
 
     private static func scan(_ lines: [String]) -> Hit? {
         var index = 0
+        var frontMatterStart: Int?
         if let first = firstNonBlankIndex(lines), trimmed(lines[first]) == "---",
            let close = lines.indices.dropFirst(first + 1).first(where: { trimmed(lines[$0]) == "---" }) {
+            frontMatterStart = first
             index = close + 1
         }
         var surviving = 0
         var insideDirective = false
+        // The start of the run of comments and directives immediately before the starter. Prose
+        // resets it, so only lines that really belong to the diagram survive ahead of the keyword.
+        var preamble: Int? = frontMatterStart
         while index < lines.count, surviving < starterWindow {
             let line = trimmed(lines[index])
             defer { index += 1 }
@@ -323,13 +362,25 @@ public enum MermaidDetector {
             }
             if line.hasPrefix("%%{") {
                 insideDirective = !line.contains("}%%")
+                if preamble == nil { preamble = index }
                 continue
             }
-            if line.hasPrefix("%%") { continue }
+            if line.hasPrefix("%%") {
+                if preamble == nil { preamble = index }
+                continue
+            }
             if let starter = match(line) {
-                return Hit(id: starter.id, keyword: starter.keyword, lineIndex: index, survivingIndex: surviving)
+                return Hit(
+                    id: starter.id,
+                    keyword: starter.keyword,
+                    lineIndex: index,
+                    survivingIndex: surviving,
+                    sourceStartIndex: preamble ?? index
+                )
             }
             surviving += 1
+            // Prose: nothing before this line, comments included, can belong to the diagram.
+            preamble = nil
         }
         return nil
     }

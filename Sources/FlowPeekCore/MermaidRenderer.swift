@@ -58,7 +58,8 @@ public struct MermaidRenderRequest: Sendable, Equatable {
             seed: seed,
             fontFamily: theme.fontFamily,
             themeVariables: theme.variables,
-            themeCSS: theme.css
+            themeCSS: theme.css,
+            dark: theme.appearance == .dark
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -89,6 +90,9 @@ struct MermaidRenderPayload: Codable, Equatable, Sendable {
     let fontFamily: String
     let themeVariables: [String: String]
     let themeCSS: String
+    /// Selects mermaid's own light or dark palette as the base, so diagram types that hardcode
+    /// their colours still adapt instead of keeping light defaults under dark text.
+    let dark: Bool
 }
 
 public struct MermaidRenderResult: Sendable, Equatable {

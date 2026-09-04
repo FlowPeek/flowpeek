@@ -59,7 +59,14 @@
       maxEdges: 2000,
       deterministicIds: true,
       deterministicIDSeed: String(p.seed || "flowpeek"),
-      theme: "base",
+      // 'base' is a blank canvas: only the variables we hand over get applied, so any diagram type
+      // whose palette we did not anticipate keeps mermaid's light defaults. eventmodeling hardcodes
+      // near-white lanes (fill 250,250,250 on stroke 240,240,240) that ignore themeVariables
+      // entirely, so forcing primaryTextColor to white in dark mode produced white text on white
+      // boxes. 'default'/'dark' ship complete palettes that mermaid recomputes per appearance --
+      // the same diagram becomes fill 40,40,43 with 204,204,204 text -- and our variables still
+      // layer on top for the types that do read them.
+      theme: p.dark === true ? "dark" : "default",
       themeVariables: p.themeVariables || {},
       themeCSS: p.themeCSS || ""
     };
@@ -69,11 +76,41 @@
 
   // Post-render sweep over the detached node. <style> is deliberately NOT removed:
   // mermaid ships the entire theme as one <style> element inside the SVG.
+  // Elements that must never survive anywhere, inside a <foreignObject> label included: each one
+  // either fetches something, embeds a document, or animates an attribute we cannot vet.
+  var BANNED = "script,iframe,object,embed,link,meta,base,image,img,picture,source,audio,video," +
+    "form,input,button,select,textarea,animate,animateTransform,animateMotion,set,handler,math";
+  // The tags mermaid's HTML labels are actually built from. Anything else inside a label is
+  // unwrapped -- its text is kept, the element is not.
+  var LABEL_TAGS = {
+    DIV: 1, SPAN: 1, BR: 1, P: 1, B: 1, I: 1, EM: 1, STRONG: 1, U: 1, S: 1,
+    SUB: 1, SUP: 1, CODE: 1, PRE: 1, UL: 1, OL: 1, LI: 1, LABEL: 1, SMALL: 1
+  };
+
+  function unwrap(el) {
+    el.replaceWith.apply(el, Array.prototype.slice.call(el.childNodes));
+  }
+
   function scrub(root) {
     var removed = [];
-    root.querySelectorAll("script,foreignObject,image,iframe,object,embed,link,meta,animate,set,handler,audio,video,source")
-      .forEach(function (n) { removed.push(n.tagName.toLowerCase()); n.remove(); });
-    root.querySelectorAll("a").forEach(function (a) { a.replaceWith.apply(a, Array.prototype.slice.call(a.childNodes)); });
+    root.querySelectorAll(BANNED).forEach(function (n) { removed.push(n.tagName.toLowerCase()); n.remove(); });
+    // <foreignObject> is kept, not deleted. eventmodeling emits every node label as one even with
+    // htmlLabels off, so deleting them left the boxes empty -- the diagram drew with no text at
+    // all. The HTML inside is reduced to the label vocabulary instead, and the attribute pass
+    // below then runs over it like any other element. Script cannot execute here regardless: the
+    // page has no script-src and default-src is 'none'.
+    root.querySelectorAll("foreignObject").forEach(function (fo) {
+      var inner = fo.querySelectorAll("*");
+      for (var j = 0; j < inner.length; j++) {
+        var node = inner[j];
+        if (!node.isConnected) continue;
+        if (!LABEL_TAGS[node.tagName.toUpperCase()]) {
+          removed.push("foreignobject>" + node.tagName.toLowerCase());
+          unwrap(node);
+        }
+      }
+    });
+    root.querySelectorAll("a").forEach(function (a) { unwrap(a); });
     var nodes = [root];
     var w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
     while (w.nextNode()) nodes.push(w.currentNode);
@@ -119,13 +156,21 @@
     diagram.replaceChildren();
     clearGeometry();
     var t0 = now();
+    var wipeMeasure = function () {
+      var m = document.getElementById("measure");
+      if (m) m.replaceChildren();
+    };
     try {
       mm.initialize(buildConfig(p));
       await mm.parse(p.source); // deliberately no options object - we want parse() to throw
-      var r = await mm.render(String(p.renderID || "fp-0"), p.source);
+      // Render into an attached, off-screen box rather than mermaid's default container: a
+      // renderer that measures with getBBox() needs a live render tree, and without this
+      // eventmodeling's data blocks throw "svg element not in render tree".
+      var measure = document.getElementById("measure");
+      var r = await mm.render(String(p.renderID || "fp-0"), p.source, measure || undefined);
       var doc = new DOMParser().parseFromString("<!doctype html><body>" + r.svg, "text/html");
       var svg = doc.body.querySelector("svg");
-      if (!svg) return fail("render-no-svg", "mermaid returned no <svg> element");
+      if (!svg) { wipeMeasure(); return fail("render-no-svg", "mermaid returned no <svg> element"); }
       var node = document.importNode(svg, true);
       var scrubbed = scrub(node);
       diagram.replaceChildren(node);
@@ -135,11 +180,13 @@
       if (!(live instanceof SVGSVGElement)) {
         diagram.replaceChildren();
         clearGeometry();
+        wipeMeasure();
         return fail("render-no-svg", "nothing was attached to #diagram");
       }
       if (String(live.textContent || "").indexOf("Maximum text size in diagram exceeded") !== -1) {
         diagram.replaceChildren();
         clearGeometry();
+        wipeMeasure();
         return fail("too-large", "mermaid substituted its size-limit placeholder");
       }
       // Pin the SVG to its natural size and fit it to the stage. The reported width/height are the
@@ -147,6 +194,7 @@
       bindGestures();
       var geometry = adoptGeometry(live);
       fit();
+      wipeMeasure();
       return J({
         ok: true,
         diagramType: String(r.diagramType || ""),
@@ -160,6 +208,7 @@
     } catch (e) {
       diagram.replaceChildren();
       clearGeometry();
+      wipeMeasure();
       var msg = String((e && e.message) || e);
       return fail(classify(msg), msg, (e && e.hash && e.hash.loc && e.hash.loc.first_line) || null);
     }

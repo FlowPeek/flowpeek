@@ -55,4 +55,8 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
 private final class SettingsWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+    /// Escape means the same thing on every FlowPeek surface. `windowWillClose` already clears the
+    /// coordinator's reference, so this needs no route through it. A shortcut recorder mid-capture
+    /// swallows the key in its own `keyDown`, so this never fires while one is listening.
+    override func cancelOperation(_ sender: Any?) { close() }
 }

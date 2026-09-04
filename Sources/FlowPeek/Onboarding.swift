@@ -34,9 +34,16 @@ final class OnboardingCoordinator {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         window.level = .floating
         window.hidesOnDeactivate = false
-        window.setContentSize(NSSize(width: 720, height: 680))
+        // 40pt taller than it was: the permission step now explains the choice and offers two
+        // buttons, and its card is the one that decides this height. Kept well under the 775pt a
+        // 1280x800 display leaves below the menu bar.
+        window.setContentSize(NSSize(width: 720, height: 720))
         window.center()
         window.isReleasedWhenClosed = false
+        // Escape has to route through closeWindow() rather than the window's own close(): that is
+        // the only place the Space observer is torn down, and a bare close() would leave the
+        // observer calling orderFrontRegardless() on the dismissed card at the next Space switch.
+        window.onCancel = { [weak self] in self?.closeWindow() }
         self.window = window
         spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
@@ -66,6 +73,11 @@ final class OnboardingCoordinator {
     }
 
     private func closeWindow() {
+        // Answering the permission question, either way, is finishing setup: the tutorial is
+        // practice, not a gate. Leaving it unanswered is what earns a second offer at the next
+        // launch, so "I'll decide later" still works and only "I decided" sticks.
+        let app = AppState.shared
+        if app.accessibilityGranted || app.permissionDeclined { app.onboardingComplete = true }
         window?.close()
         window = nil
         if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
@@ -74,8 +86,13 @@ final class OnboardingCoordinator {
 }
 
 private final class OnboardingWindow: NSWindow {
+    var onCancel: (() -> Void)?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+    /// Borderless means no titlebar and, in a menu-bar-only app, no File menu either — without this
+    /// the card has no keyboard dismissal at all.
+    override func cancelOperation(_ sender: Any?) { onCancel?() }
 }
 
 struct OnboardingView: View {
@@ -186,7 +203,10 @@ struct OnboardingView: View {
             while !Task.isCancelled && !app.accessibilityGranted {
                 app.refreshPermission()
                 if !app.accessibilityGranted { permissionFlow.recordUnconfirmedCheck() }
-                try? await Task.sleep(for: .milliseconds(500))
+                // One second, so `shouldOfferRelaunch`'s count reads as seconds. Auto-advance on
+                // grant does not depend on this interval anyway: didBecomeActiveNotification above
+                // refreshes the moment focus comes back from System Settings.
+                try? await Task.sleep(for: .seconds(1))
             }
             if app.accessibilityGranted { advancePastPermission() }
         }
@@ -273,12 +293,12 @@ struct OnboardingView: View {
         .togglesOnTap($launchAtLogin, cornerRadius: 18)
     }
 
-    /// Three lessons, each ticked only when a preview really opened by that route. The practice
-    /// text lives in the browser rather than in this window: FlowPeek refuses to read its own
-    /// process, so a drag in here could never produce an overlay button.
+    /// The lessons that can actually be passed, each ticked only when a preview really opened by
+    /// that route. The practice text lives in the browser rather than in this window: FlowPeek
+    /// refuses to read its own process, so a drag in here could never produce an overlay button.
     private var tutorialCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(TutorialProgress.Lesson.allCases) { lesson in
+            ForEach(availableLessons) { lesson in
                 HStack(alignment: .top, spacing: 12) {
                     stateBadge(app.tutorial[lesson])
                     VStack(alignment: .leading, spacing: 3) {
@@ -296,8 +316,32 @@ struct OnboardingView: View {
                     }
                     Spacer(minLength: 0)
                 }
-                if lesson != TutorialProgress.Lesson.allCases.last {
+                if lesson != availableLessons.last || !app.accessibilityGranted {
                     Divider().opacity(0.4)
+                }
+            }
+            // Not a dimmed copy of the two withheld rows: their instructions describe a button and
+            // an outline that will not appear, so what is left is the one sentence that explains it
+            // and the way back to the switch.
+            if !app.accessibilityGranted {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "lock")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("tutorial.locked")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("permission.turn-on") {
+                            app.permissionDeclined = false
+                            step = .permission
+                        }
+                        .controlSize(.small)
+                        .padding(.top, 2)
+                    }
+                    Spacer(minLength: 0)
                 }
             }
         }
@@ -334,12 +378,24 @@ struct OnboardingView: View {
                 Text(String(localized: app.accessibilityNeedsRepair ? "permission.registration.changed" : "permission.relaunch.help"))
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 HStack {
-                    Button("permission.reset") { app.resetAccessibilityRegistration() }
+                    // Removing FlowPeek's TCC entry throws away a grant the user may have just
+                    // given, so it is offered only for the state it actually repairs — a stale
+                    // entry left by an earlier build — and never merely because waiting took a
+                    // while. Relaunching costs nothing, so that one can be offered on patience.
+                    if app.accessibilityNeedsRepair {
+                        Button("permission.reset") { app.confirmAccessibilityReset() }
+                    }
                     Button("permission.relaunch") { app.relaunchAfterPermissionChange() }
                 }
                 if let error = app.permissionRecoveryError {
                     Text(error).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
                 }
+            }
+            // Sits with the decline button rather than up in the card: a button that means "no" is
+            // only a real choice if what it costs is legible from where it is offered.
+            if step == .permission && !app.accessibilityGranted {
+                Text("permission.clipboard-works")
+                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             HStack {
                 if step > .welcome { Button("common.back") { back() } }
@@ -354,12 +410,18 @@ struct OnboardingView: View {
                         Label("permission.finishing", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     } else {
-                        Button(String(localized: permissionFlow.phase == .waitingForUser ? "permission.open-again" : "permission.open-settings")) {
-                            permissionFlow.beginWaitingForSystemSettings()
-                            app.requestAccessibility()
+                        HStack(spacing: 10) {
+                            // The step used to have exactly one forward button, and it reopened the
+                            // pane the user had just refused. This is the button that means "no".
+                            Button("permission.decline") { decline() }
+                                .controlSize(.large)
+                            Button(String(localized: permissionFlow.phase == .waitingForUser ? "permission.open-again" : "permission.open-settings")) {
+                                permissionFlow.beginWaitingForSystemSettings()
+                                app.requestAccessibility()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
                     }
                 case .launch:
                     Button("common.continue") { step = .tutorial }
@@ -371,10 +433,10 @@ struct OnboardingView: View {
                             // Get out of the way first: this window floats, and it was sitting
                             // squarely on top of the page the user has to drag across.
                             stepAside()
-                            TutorialPractice.open()
+                            TutorialPractice.open(lessons: availableLessons)
                         }
                             .controlSize(.large)
-                        Button(app.tutorial.isComplete ? "common.start" : "tutorial.skip") { completion() }
+                        Button(app.tutorial.isComplete(among: availableLessons) ? "common.start" : "tutorial.skip") { completion() }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.large)
                     }
@@ -385,10 +447,10 @@ struct OnboardingView: View {
         .padding(.bottom, 24)
     }
 
-    /// Nothing to do on the permission step once it is already granted, so it is skipped rather than
-    /// flashed past.
+    /// Nothing to do on the permission step once it is already granted or already refused, so it is
+    /// skipped rather than flashed past — or, in the refused case, walked into again.
     private func advanceFromWelcome() {
-        step = app.accessibilityGranted ? .launch : .permission
+        step = permissionSettled ? .launch : .permission
     }
 
     private func advancePastPermission() {
@@ -396,12 +458,28 @@ struct OnboardingView: View {
         step = .launch
     }
 
+    /// Declining is a step forward, not a dismissal: the login question and the tutorial are still
+    /// worth asking, and the clipboard lesson still works.
+    private func decline() {
+        app.permissionDeclined = true
+        step = .launch
+    }
+
     private func back() {
         switch step {
         case .tutorial: step = .launch
-        case .launch: step = app.accessibilityGranted ? .welcome : .permission
+        case .launch: step = permissionSettled ? .welcome : .permission
         case .permission, .welcome: step = .welcome
         }
+    }
+
+    /// The permission question has an answer, whichever one it is.
+    private var permissionSettled: Bool {
+        app.accessibilityGranted || app.permissionDeclined
+    }
+
+    private var availableLessons: [TutorialProgress.Lesson] {
+        TutorialProgress.Lesson.available(accessibilityGranted: app.accessibilityGranted)
     }
 
     private func applyLaunchAtLogin(_ enabled: Bool) {

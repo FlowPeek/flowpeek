@@ -155,11 +155,13 @@ struct SettingsView: View {
                     statusBadge
                 }
                 HStack {
+                    // Turning the switch on is what almost everyone here wants; removing the TCC
+                    // entry destroys a grant, so it must not be the one that looks like the default.
                     Button("settings.permission.request") { app.openAccessibilitySettings() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
                     if !app.accessibilityGranted {
-                        Button("permission.reset") { app.resetAccessibilityRegistration() }
-                            .buttonStyle(.borderedProminent)
+                        Button("permission.reset") { app.confirmAccessibilityReset() }
+                            .buttonStyle(.bordered)
                     }
                 }
             }

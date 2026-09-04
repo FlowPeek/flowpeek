@@ -11,6 +11,9 @@ final class AppState: ObservableObject {
 
     @AppStorage("flowpeek.enabled") var isEnabled = true
     @AppStorage("flowpeek.onboardingComplete") var onboardingComplete = false
+    /// The user was offered Accessibility and said no. Remembered so the answer is not asked for
+    /// again at every launch; cleared the moment the grant arrives.
+    @AppStorage("flowpeek.permission.declined") var permissionDeclined = false
     @AppStorage("flowpeek.clipboard.enabled") var clipboardWatchEnabled = true
     /// Experimental: hold Option to outline Mermaid under the pointer. Off until asked for.
     @AppStorage("flowpeek.ambient.enabled") var ambientPeekEnabled = false
@@ -95,16 +98,17 @@ final class AppState: ObservableObject {
         #else
         let forceOnboarding = false
         #endif
-        accessibilityNeedsRepair = onboardingComplete && !accessibilityGranted
+        // A deliberate decline is not a broken registration, so it must not be met with the
+        // "this build no longer matches the allowed entry" copy and a reset button.
+        accessibilityNeedsRepair = onboardingComplete && !accessibilityGranted && !permissionDeclined
         if OnboardingPolicy.shouldShow(
             accessibilityGranted: accessibilityGranted,
             onboardingCompleted: onboardingComplete,
+            permissionDeclined: permissionDeclined,
             forceOnboarding: forceOnboarding
         ) {
-            if !accessibilityGranted { onboardingComplete = false }
+            if !accessibilityGranted && !permissionDeclined { onboardingComplete = false }
             OnboardingCoordinator.shared.show()
-        } else {
-            onboardingComplete = true
         }
     }
 
@@ -203,6 +207,20 @@ final class AppState: ObservableObject {
             guard application != nil else { NSSound.beep(); return }
             Task { @MainActor in NSApp.terminate(nil) }
         }
+    }
+
+    /// The one action here that can destroy a grant the user already gave, so it asks first with
+    /// Cancel as the default button.
+    func confirmAccessibilityReset() {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "permission.reset.confirm.title")
+        alert.informativeText = String(localized: "permission.reset.confirm.body")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "common.cancel"))
+        alert.addButton(withTitle: String(localized: "permission.reset.confirm.action"))
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        resetAccessibilityRegistration()
     }
 
     func resetAccessibilityRegistration() {
@@ -394,7 +412,12 @@ final class AppState: ObservableObject {
         let becameGranted = granted && !accessibilityGranted
         let becameRevoked = !granted && accessibilityGranted
         accessibilityGranted = granted
-        if granted { accessibilityNeedsRepair = false }
+        if granted {
+            accessibilityNeedsRepair = false
+            // Granting answers the question the decline was an answer to, so a later revoke gets
+            // the full offer back rather than being silently treated as still-declined.
+            permissionDeclined = false
+        }
         if becameGranted && isEnabled { selectionMonitor.restart() }
         if becameRevoked { selectionMonitor.stop(); overlay.hide() }
     }

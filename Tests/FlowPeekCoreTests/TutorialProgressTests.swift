@@ -53,6 +53,37 @@ final class TutorialProgressTests: XCTestCase {
         XCTAssertEqual(progress, TutorialProgress())
     }
 
+    /// Without the grant the drag never produces a button and Option-hover never outlines
+    /// anything, so those two lessons must not be on offer.
+    func testOnlyTheClipboardLessonIsAvailableWithoutAccessibility() {
+        XCTAssertEqual(TutorialProgress.Lesson.available(accessibilityGranted: false), [.clipboard])
+        XCTAssertEqual(
+            TutorialProgress.Lesson.available(accessibilityGranted: true),
+            TutorialProgress.Lesson.allCases
+        )
+    }
+
+    func testWithheldLessonsAreExactlyTheOnesNeedingTheGrant() {
+        let withheld = Set(TutorialProgress.Lesson.requiringAccessibility)
+        let offered = Set(TutorialProgress.Lesson.available(accessibilityGranted: false))
+        XCTAssertEqual(withheld.union(offered), Set(TutorialProgress.Lesson.allCases))
+        XCTAssertTrue(withheld.isDisjoint(with: offered))
+    }
+
+    /// A declining user finishes by doing the one lesson they can, and the finish button has to say
+    /// so rather than offering to "finish anyway" forever.
+    func testTheClipboardLessonAloneCompletesTheTutorialWithoutAccessibility() {
+        var progress = TutorialProgress()
+        let available = TutorialProgress.Lesson.available(accessibilityGranted: false)
+        XCTAssertFalse(progress.isComplete(among: available))
+
+        progress.noteOpened(.clipboard)
+
+        XCTAssertTrue(progress.isComplete(among: available))
+        XCTAssertEqual(progress.completedCount(among: available), 1)
+        XCTAssertFalse(progress.isComplete)
+    }
+
     /// Whether a key resolves to real text cannot be checked here: `String(localized:)` reads the
     /// main bundle, which in a test process is the xctest runner and carries no catalogue. What core
     /// can guarantee is that no two lessons share a key or a symbol, which is what would actually

@@ -41,18 +41,21 @@ struct FlowPeekWindowCloseButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle().fill(isHovered ? Color.red : Color.secondary.opacity(0.24))
-                if isHovered {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(.black.opacity(0.7))
-                }
+                Circle().fill(isHovered ? Color.red : Color.secondary.opacity(0.42))
+                // Drawn at rest too, not only on hover: on the borderless surfaces this is the one
+                // visible way out, and a bare grey dot does not read as a close button until the
+                // pointer is already on it.
+                Image(systemName: "xmark")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(isHovered ? Color.black.opacity(0.7) : Color.primary.opacity(0.45))
             }
             .frame(width: 13, height: 13)
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .accessibilityLabel(Text("common.close"))
+        .help(Text("common.close"))
     }
 }
 

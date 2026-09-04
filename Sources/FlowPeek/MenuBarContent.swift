@@ -15,6 +15,9 @@ struct MenuBarContent: View {
         Button("menu.settings") {
             app.handle(.showSettings)
         }
+        // The only other opener is the launch-time check, which now stops firing once the permission
+        // question has an answer — so without this the wizard would be unreachable after dismissal.
+        Button("menu.onboarding") { OnboardingCoordinator.shared.show() }
         Button("menu.permission.refresh") { app.refreshPermission() }
         Divider()
         Button("menu.update") {

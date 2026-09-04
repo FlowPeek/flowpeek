@@ -1,6 +1,7 @@
 "menu.detection.on" = "Detection On";
 "menu.detection.paused" = "Detection Paused";
 "menu.settings" = "Permissions & Settings…";
+"menu.onboarding" = "Welcome & Tutorial…";
 "menu.permission.refresh" = "Refresh Accessibility Permission";
 "menu.update" = "Check for Updates…";
 "menu.about" = "About FlowPeek";
@@ -8,8 +9,8 @@
 "onboarding.window.title" = "Welcome to FlowPeek";
 "onboarding.welcome.title" = "Select Mermaid. See It Instantly.";
 "onboarding.welcome.message" = "Select Mermaid syntax in a browser or app, then use the nearby button to open a native preview. Your selection never leaves this Mac.";
-"onboarding.permission.title" = "Turn On One Switch";
-"onboarding.permission.message" = "Accessibility Settings opens automatically. Turn on FlowPeek there—this window detects the change and finishes setup for you.";
+"onboarding.permission.title" = "One Optional Switch";
+"onboarding.permission.message" = "Copying a diagram needs no permission. For a button beside text you select in other apps, FlowPeek needs permission to read that selection—nothing else, and nothing leaves this Mac.";
 "tutorial.title" = "Try All Three";
 "tutorial.message" = "FlowPeek has three ways in. Open the practice page and use each one for real — the ticks fill in as you go.";
 "tutorial.open-page" = "Open Practice Page";
@@ -17,6 +18,8 @@
 "tutorial.page.title" = "FlowPeek practice";
 "tutorial.page.intro" = "This is a real page in your own browser, so every gesture below behaves exactly as it will from now on.";
 "tutorial.page.closing" = "Each one opens the same preview. Close it with Escape.";
+"tutorial.page.closing.one" = "It opens the same preview you will get from now on. Close it with Escape.";
+"tutorial.locked" = "Selecting text and pointing at it both need the Accessibility switch.";
 "tutorial.selection.title" = "Select it";
 "tutorial.selection.detail" = "Drag across the diagram below. A small button appears beside it — click that.";
 "tutorial.clipboard.title" = "Copy it";
@@ -36,6 +39,9 @@
 "permission.refresh" = "Refresh Permission Status";
 "permission.step.toggle" = "Turn on FlowPeek in Accessibility";
 "permission.step.detail" = "FlowPeek is already in the list. Turn on the switch at its right. macOS may ask for Touch ID or your password; you do not need to return here afterward.";
+"permission.clipboard-works" = "Copying a diagram still works without this switch.";
+"permission.decline" = "Continue Without It";
+"permission.turn-on" = "Turn On Accessibility";
 "permission.open-settings" = "Open Accessibility Settings";
 "permission.open-again" = "Open Accessibility Settings Again";
 "permission.waiting" = "Waiting for you to turn on the FlowPeek switch…";
@@ -43,9 +49,13 @@
 "permission.relaunch.help" = "Already turned the switch on? macOS sometimes applies it only to a newly launched process.";
 "permission.relaunch" = "Relaunch FlowPeek";
 "permission.reset" = "Reset & Register Again";
+"permission.reset.confirm.title" = "Remove FlowPeek from the Accessibility list?";
+"permission.reset.confirm.body" = "This deletes FlowPeek's entry along with any permission you have already given, and you will have to turn the switch on again afterwards. It is only worth doing when the switch is already on and FlowPeek still cannot read a selection.";
+"permission.reset.confirm.action" = "Remove Entry";
 "permission.reset.failed" = "FlowPeek could not reset the Accessibility entry. Remove FlowPeek from the list with the minus button, then open settings again.";
 "permission.registration.changed" = "This FlowPeek build no longer matches the previously allowed entry. Reset it once, then turn on the newly registered FlowPeek switch.";
 "common.back" = "Back";
+"common.cancel" = "Cancel";
 "common.continue" = "Continue";
 "common.start" = "Get Started";
 "settings.accessibility" = "Accessibility";

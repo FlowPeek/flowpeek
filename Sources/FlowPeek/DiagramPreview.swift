@@ -578,8 +578,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
             )
         )
         hosting.frame = CGRect(origin: .zero, size: opening)
-        hosting.autoresizingMask = [.width, .height]
-        window.contentView = hosting
+        window.contentView = ResizableContentView(content: hosting)
         window.setFrame(CGRect(origin: window.frame.origin, size: opening), display: false)
         window.contentMinSize = Self.windowMinSize
         if let previous = promoted.last?.window {
@@ -714,8 +713,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         // `DiagramPreviewView`'s frame. The window owns its size; SwiftUI fills it.
         let hosting = NSHostingView(rootView: content)
         hosting.frame = CGRect(origin: .zero, size: size)
-        hosting.autoresizingMask = [.width, .height]
-        panel.contentView = hosting
+        panel.contentView = ResizableContentView(content: hosting)
         panel.setFrame(CGRect(origin: panel.frame.origin, size: size), display: false)
         panel.contentMinSize = minSize
         panel.center()

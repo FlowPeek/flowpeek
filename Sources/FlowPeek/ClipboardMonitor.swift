@@ -54,6 +54,14 @@ final class ClipboardMonitor {
         logger.info("clipboard watch stopped")
     }
 
+    /// What is on the pasteboard right now, for the paths the user asked for by pressing something.
+    /// Deliberately does not touch `lastChangeCount`: reading here must not swallow the badge the
+    /// poller is about to raise for the same copy, and it has to work while the watch is stopped.
+    func currentText() -> String? {
+        guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return nil }
+        return text
+    }
+
     /// Exposed for tests and for the "check now" path; safe to call at any time.
     func poll() {
         let changeCount = pasteboard.changeCount

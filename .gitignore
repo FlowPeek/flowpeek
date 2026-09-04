@@ -5,3 +5,5 @@ DerivedData/
 node_modules/
 xcuserdata/
 *.xcuserstate
+vendor/bundle/
+.bundle/

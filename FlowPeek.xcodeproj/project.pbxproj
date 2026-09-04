@@ -7,88 +7,88 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		00961B860E08E99B8469C9ACF00AD41F /* MermaidWebPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34D7991F86DDCD7664595D9E267D9CE2 /* MermaidWebPolicy.swift */; };
-		00D03B7F8DB8C7AF1E633B261BD0CB26 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E33A182253AE54FEA3F0D458A64456B /* SettingsView.swift */; };
-		042BDA137CA9B88BCD1FC9A1516B1432 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E5CF5318E2D0AB9A621A9C98D9101947 /* AppIcon.icon */; };
-		042E5F0ED79D63785D5C55CFD86CA0CA /* SelectionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C0612FA33B4B3F8A98151ACEFA49FBF /* SelectionMonitor.swift */; };
-		095D442897861ADF906236C0EFE0FEF2 /* SelectionSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B882D283BB7E3B15FB1B54237138172D /* SelectionSnapshotTests.swift */; };
-		12294AB53DFBBB496E029011FDC870CE /* MermaidSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2993B1EB0CA2172817A680EA3E70A58 /* MermaidSourceTests.swift */; };
-		2031E2216603F5F3C84AFBA6F588E697 /* AccessibilityPermissionFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B899C2F814A1734F8FA6C388F079ADF /* AccessibilityPermissionFlowTests.swift */; };
-		28EDD0932D80B0E5F8A55C0EE5A49962 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 4D814BC6BAAB33B08AADC4D3B17D8D95 /* Sparkle */; };
-		2C587F41796AA4BBCE27B2226675A4AC /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2364112367759C477C6471F54DED0B10 /* AppState.swift */; };
-		41D082A27C8D5576F4F4153EAD3A484E /* SelectionGatherer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5D037CC6FEF2179856BFA39F0C4940 /* SelectionGatherer.swift */; };
-		48D755E0D308200C928EF6340B84837D /* mermaid.min.js in Resources */ = {isa = PBXBuildFile; fileRef = 632BB1351E9E1576CE27453500590784 /* mermaid.min.js */; };
-		49BF33AEA3D9C85C2BFB4444AF5D0296 /* MermaidEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66085B41B3D65484A3F3BA5CE25E3E0C /* MermaidEngineTests.swift */; };
-		4A083488579E1DCDEF2FBB0D9B54C1B7 /* AppCommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6109283B607DFF9059191AA2B23031C4 /* AppCommandRouterTests.swift */; };
-		4AA94B091EBDB488DF4822F4DC526C08 /* SelectionGathererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAF32C983ACC745D8816192519836739 /* SelectionGathererTests.swift */; };
-		4E3BDB86BF6BA283F84E4141AA7CAD9B /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F202F8CBC1CF805B056B78A6A9E417B7 /* Localizable.strings */; };
-		5675F4B8BB2C0B550CE26A6B6F39CFF7 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFED3C2AD42A3F230A83D1185909D07A /* Cocoa.framework */; };
-		5BF2A20157F309FC5904FFD2B543B769 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E3DDC7A030DE0E461187EA438FA221F /* AppLanguage.swift */; };
-		5D48A949C7F0991D91C17FB6BAB31970 /* flowpeek-glue.js in Resources */ = {isa = PBXBuildFile; fileRef = 8DE977594B6068899A0DC64F827D3ED6 /* flowpeek-glue.js */; };
-		60DA8330D29C0D1E9EE7A994C5ECBFDB /* AppCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC10FEBC0751BFF64E6EC7EB86ABAE0 /* AppCommandRouter.swift */; };
-		6111EC00E2433DDF0BB5AFD67348F068 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 623D9AFC16E0D2DAB126B95810907FD1 /* KeychainStore.swift */; };
-		6BE31442072C358B560CFD26B279B90C /* DiagramPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A00CC776BF6FFC201F48613A23DB92 /* DiagramPreview.swift */; };
-		6CC21FC618541C8C058A08EE27F10B59 /* ShortcutCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB289025694562D9CBD488CCADCE403 /* ShortcutCenter.swift */; };
-		73B3A128C5C01A3E338F354460B9E151 /* AccessibilityPermissionFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB7BC0C54BBCD8143FB174CD92284CB7 /* AccessibilityPermissionFlow.swift */; };
-		79E323F5CDE97F88D81305CDE8454AFB /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D80731B0C957A727E1A036EBDF7588D /* AppDelegate.swift */; };
-		7FDA2BE36485B5CC4162F6B586D3B087 /* MermaidWebViewPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44D6F5FA077CE1ACFF2605CB884FB5FE /* MermaidWebViewPool.swift */; };
-		82E56B64DBE8A6240BC4EF7700F78A56 /* MacMermaidTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3EAD35FFF163B8E2BF64D8B4AAA81B2 /* MacMermaidTheme.swift */; };
-		8B817A10B8C17163E59EB14E255F0FA2 /* MermaidDetectorCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9645E665AA003511802E3D760E8D14F5 /* MermaidDetectorCorpusTests.swift */; };
-		8E080E15D5897EDE022E91975DB90137 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDA87EE9F9F10CD1C21EB9DFDEFB108 /* Models.swift */; };
-		8F7B4968ECEBED5A991284BD0C45E914 /* FlowPeekApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCB24BFAE51CCBFEF9E1E7FF1C80E377 /* FlowPeekApp.swift */; };
-		9146773A5E382577B669709BDAA76570 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 485344F652AB9288F5688993D0285D10 /* ShortcutRecorder.swift */; };
-		940133DFB70F4646C7E7D8604C120C9D /* OnboardingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB5019320DFB98FAE080BAE8C5A4E2C /* OnboardingPolicy.swift */; };
-		940819668149D699F1E88C46DD002929 /* ClipboardMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3F0C9B1463170C321C5C8E882969285 /* ClipboardMonitor.swift */; };
-		A0997D636F5C6EA8B642D0519FD460F7 /* MenuBarContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70CC5D54DB672B652E9159AE7D03238 /* MenuBarContent.swift */; };
-		A8031C293D743752CD6ADCDBBEA27891 /* SettingsWindowCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4462447AAFF54CDF9E6331CD13DB38 /* SettingsWindowCoordinator.swift */; };
-		AAD00161E82E6F0B033DBF7FFE0CC6EF /* KeyboardShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC28644884278443A4953673388ABE7F /* KeyboardShortcut.swift */; };
-		AD170B8EAB5354C10F54E891205EF26A /* APIKeyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51C18E5CA1F78CA99D54CB2EB197EA22 /* APIKeyCoordinator.swift */; };
-		AFECA87D03DAED6F5188118606B722D2 /* AIPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE2052E972FEDFEB671B7A2FA0C93F9 /* AIPrompt.swift */; };
-		B3BDF25D6226BAD5024981EE11425DD2 /* MermaidWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E6B3216639CF93E2942DEFF02E7B46F /* MermaidWebView.swift */; };
-		B610E2E0E5F2FAA282A51308DE6FD746 /* ClipboardIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F85D1AF7BA4D62A6F3965DF6CC410D /* ClipboardIndicator.swift */; };
-		B6A4CF405091FE48D996EB062703C0E7 /* RendererTestBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93A81E7524EEF0B748AD7465A5325D7F /* RendererTestBundleTests.swift */; };
-		B78B1D6D121F63A2EA7F2E9B67BC9099 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFED3C2AD42A3F230A83D1185909D07A /* Cocoa.framework */; };
-		B84E0AE48EBF1F1F1DED2FA5B44D96DA /* InstallLocationAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 554EBFC55C6099343A25D33E78332A18 /* InstallLocationAdvisor.swift */; };
-		BB5F344A99EA1A25E4AACEA95099F820 /* MermaidDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE570C88160D6E90B5BD358EE5E651AB /* MermaidDetector.swift */; };
-		C02A8F1FBDEB3B84A17F8C2B93CE0D2C /* AIProviders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57004C8113A0CDAC537F77604C4EA259 /* AIProviders.swift */; };
-		C29DE21DF82BE1771189A9C95D22DB5B /* MermaidEnginePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3940F6E7D8956259517EC79F89AD115F /* MermaidEnginePage.swift */; };
-		C51DDC2FD1A877C399DF1CD04593E596 /* MermaidDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03EAA83A0231FC816E5A1F961AB8A094 /* MermaidDetectorTests.swift */; };
-		CCE12D6935446BA2FCE662953FBC68D3 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFED3C2AD42A3F230A83D1185909D07A /* Cocoa.framework */; };
-		D4607496E4B98168191C2A6C87DAFD99 /* GlobalHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88FEE9A6053B1B3099021173C20E8BDE /* GlobalHotKey.swift */; };
-		D46E6EC696578C18F0D94E793E08FA70 /* MermaidRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A246436E2051749811115F201D9A57A2 /* MermaidRendererTests.swift */; };
-		DDA63822A8BA0E908C13834C33FC9F5A /* AppLanguageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32C4AD2586763C981D9178B392AF10F7 /* AppLanguageTests.swift */; };
-		DDBC72CE40A365EDE956864BC215DF48 /* libFlowPeekCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2E273BAB6E7F1C381D22D5106C82CA29 /* libFlowPeekCore.a */; };
-		DEEBD4DBFB4FB4B0F0C476A6C45B92D8 /* OnboardingPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 268A268BDF90FD019A1A1BEDB84F017E /* OnboardingPolicyTests.swift */; };
-		DF0AFCCE56746C1E223710711F7F7AC9 /* GlassWindowComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C4454F5241B1AAF6BFC1E1A78601DD /* GlassWindowComponents.swift */; };
-		DFA69A8D531F9B8467AAE84730F385B6 /* MermaidRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AB63AD15DF40EB0B92B9F2F4153DDFF /* MermaidRenderer.swift */; };
-		E3F4325A3F74B0D65049C851180F26D5 /* UpdaterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A62652BC72BE02699807D35EDBB7D86 /* UpdaterService.swift */; };
-		E496A63EDA82C991E1AAC2196149237D /* MermaidSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 332E5B0DE4D6C81554EF60AA333F6B67 /* MermaidSource.swift */; };
-		E77D8C5C145ED9EC6D2E705DDD35F9E0 /* SelectionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2DC3882A60258E3A9748576373E42BB /* SelectionOverlay.swift */; };
-		F397B7D476F61A46740CAF3F01C299C7 /* libFlowPeekCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2E273BAB6E7F1C381D22D5106C82CA29 /* libFlowPeekCore.a */; };
-		F674348EAA2743941A83A651739D2ADA /* KeyboardShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6E8918CE67A52083B1AC2036F780D08 /* KeyboardShortcutTests.swift */; };
-		F9E136DEFB5127E2CDD3897788BEFFDE /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21C799F30535CC3950BB14017C186D9E /* Onboarding.swift */; };
+		00E684F0B5D65378785E5EF29CD52201 /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21C799F30535CC3950BB14017C186D9E /* Onboarding.swift */; };
+		0676CB20482489CFDE11E5D31FDB545C /* SelectionGatherer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5D037CC6FEF2179856BFA39F0C4940 /* SelectionGatherer.swift */; };
+		0D39BCEEE6530298B306E0EAD47174AE /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E5CF5318E2D0AB9A621A9C98D9101947 /* AppIcon.icon */; };
+		0F6C8E7DB1240F9B32E574355A184EC6 /* OnboardingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAB5019320DFB98FAE080BAE8C5A4E2C /* OnboardingPolicy.swift */; };
+		16A8B0AF82B4E5E924E4559218701767 /* MermaidWebPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34D7991F86DDCD7664595D9E267D9CE2 /* MermaidWebPolicy.swift */; };
+		1BAA9F8E1672981ECD2A0CF07F35BE03 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 82ED1D28CA2B2EBBEF0C46E5B49C8263 /* Cocoa.framework */; };
+		1D1A09C1830F8235145BE1D72251E234 /* libFlowPeekCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2E273BAB6E7F1C381D22D5106C82CA29 /* libFlowPeekCore.a */; };
+		1F16A09CBF8C7E336C11A37B486DBD6B /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A2AE41074954058B1C3B585B9940F7E1 /* Sparkle */; };
+		2777A07AAAE770E2440D8F64084722BF /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E3DDC7A030DE0E461187EA438FA221F /* AppLanguage.swift */; };
+		2CB88B20DFD6BA7BEA3388AB47BC009C /* KeyboardShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC28644884278443A4953673388ABE7F /* KeyboardShortcut.swift */; };
+		336945785156BAC58AD985C8ECEDF316 /* AppCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC10FEBC0751BFF64E6EC7EB86ABAE0 /* AppCommandRouter.swift */; };
+		3623391DF4DF109931BE9DEC106840DD /* FlowPeekApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCB24BFAE51CCBFEF9E1E7FF1C80E377 /* FlowPeekApp.swift */; };
+		38903AE5132EB28A6728BE2119C061A8 /* GlassWindowComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C4454F5241B1AAF6BFC1E1A78601DD /* GlassWindowComponents.swift */; };
+		3AEA74AF0B4C2BC578407E0403E0A0F7 /* GlobalHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88FEE9A6053B1B3099021173C20E8BDE /* GlobalHotKey.swift */; };
+		3D134C5EE678EF03A0D14E67210B0CD4 /* MermaidEnginePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3940F6E7D8956259517EC79F89AD115F /* MermaidEnginePage.swift */; };
+		48D617FF7C2A6AB87920A189A07C1C90 /* MermaidRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AB63AD15DF40EB0B92B9F2F4153DDFF /* MermaidRenderer.swift */; };
+		4A73BAB83F5817FA864707D4C6997021 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E33A182253AE54FEA3F0D458A64456B /* SettingsView.swift */; };
+		4C81BE6BB39AD2048E363B9AF7EEA3A9 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 623D9AFC16E0D2DAB126B95810907FD1 /* KeychainStore.swift */; };
+		5027ED9F1F3E45AA5661AE7F2F316D7B /* ClipboardIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F85D1AF7BA4D62A6F3965DF6CC410D /* ClipboardIndicator.swift */; };
+		588D035CDB3A4353544429358AA02ADD /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 82ED1D28CA2B2EBBEF0C46E5B49C8263 /* Cocoa.framework */; };
+		5E47029A9E2A6076805EF9198DFD0D87 /* libFlowPeekCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2E273BAB6E7F1C381D22D5106C82CA29 /* libFlowPeekCore.a */; };
+		5F8D80EE1D30403E52B3366F576B28EF /* MermaidWebViewPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44D6F5FA077CE1ACFF2605CB884FB5FE /* MermaidWebViewPool.swift */; };
+		6161C1CAD52974B9DCB63F67BEFD3B50 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDA87EE9F9F10CD1C21EB9DFDEFB108 /* Models.swift */; };
+		717FB9561362CDAA5320108AAC23A81D /* ShortcutCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB289025694562D9CBD488CCADCE403 /* ShortcutCenter.swift */; };
+		72D8CAAC4F886DDD6C4E6B1E5BC5706D /* MenuBarContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70CC5D54DB672B652E9159AE7D03238 /* MenuBarContent.swift */; };
+		755B5593D0DA131B9F1C10E458EC3918 /* SelectionGathererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAF32C983ACC745D8816192519836739 /* SelectionGathererTests.swift */; };
+		782E5F0F4F77AE96A11CC537920810C0 /* MermaidDetectorCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9645E665AA003511802E3D760E8D14F5 /* MermaidDetectorCorpusTests.swift */; };
+		7B12255FA66C884D460595349B0642A6 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D80731B0C957A727E1A036EBDF7588D /* AppDelegate.swift */; };
+		7D223603D72CD292CEC8713B845198FD /* AIPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE2052E972FEDFEB671B7A2FA0C93F9 /* AIPrompt.swift */; };
+		7E88087583BC19CFF096BE26EF5B62BC /* SelectionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C0612FA33B4B3F8A98151ACEFA49FBF /* SelectionMonitor.swift */; };
+		7E8C8B4BF1337040197CB48965EE7032 /* KeyboardShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6E8918CE67A52083B1AC2036F780D08 /* KeyboardShortcutTests.swift */; };
+		7F06696C94CFC8987E089689A339494B /* SelectionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2DC3882A60258E3A9748576373E42BB /* SelectionOverlay.swift */; };
+		8D504D089CA61986B99A7A287ED8C882 /* mermaid.min.js in Resources */ = {isa = PBXBuildFile; fileRef = 632BB1351E9E1576CE27453500590784 /* mermaid.min.js */; };
+		8EE062373BDD8B34A4A59C189C8F7FEA /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 82ED1D28CA2B2EBBEF0C46E5B49C8263 /* Cocoa.framework */; };
+		935344ED79ADCBD71910AE21EBE1BB26 /* OnboardingPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 268A268BDF90FD019A1A1BEDB84F017E /* OnboardingPolicyTests.swift */; };
+		951D22720B7789170FBD9F124BAFA935 /* AppLanguageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32C4AD2586763C981D9178B392AF10F7 /* AppLanguageTests.swift */; };
+		9DB69B6D542D718D03CFEACB2AC79D27 /* MermaidRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A246436E2051749811115F201D9A57A2 /* MermaidRendererTests.swift */; };
+		9F04A5FBA14BF39171B30748012CDE68 /* AccessibilityPermissionFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB7BC0C54BBCD8143FB174CD92284CB7 /* AccessibilityPermissionFlow.swift */; };
+		A2BEDD2E41EDCAAEF0CDE0B5295DE183 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2364112367759C477C6471F54DED0B10 /* AppState.swift */; };
+		A6BC484DC0B555008DD286EA1C2C6FB3 /* APIKeyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51C18E5CA1F78CA99D54CB2EB197EA22 /* APIKeyCoordinator.swift */; };
+		A85E91EBDC0CAFD0141ACBF11B7A777E /* MermaidEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66085B41B3D65484A3F3BA5CE25E3E0C /* MermaidEngineTests.swift */; };
+		AD245B2C4C0C877C07B40E1CB8646B8A /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F202F8CBC1CF805B056B78A6A9E417B7 /* Localizable.strings */; };
+		B12D154862E50CA2E5D3D7D377189C28 /* InstallLocationAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 554EBFC55C6099343A25D33E78332A18 /* InstallLocationAdvisor.swift */; };
+		B5CEF2ACE74B4B6286C43708089AB205 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 485344F652AB9288F5688993D0285D10 /* ShortcutRecorder.swift */; };
+		B6475B78404E88EA583F640333F5E944 /* UpdaterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A62652BC72BE02699807D35EDBB7D86 /* UpdaterService.swift */; };
+		B6D4B3A20217D5D1C420740B0CF3B428 /* ClipboardMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3F0C9B1463170C321C5C8E882969285 /* ClipboardMonitor.swift */; };
+		BD8FAE378B1B10009BA3DCEE9EFAE375 /* MermaidDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03EAA83A0231FC816E5A1F961AB8A094 /* MermaidDetectorTests.swift */; };
+		C049F0007E08F9EAF48AF4616F420BA2 /* SettingsWindowCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4462447AAFF54CDF9E6331CD13DB38 /* SettingsWindowCoordinator.swift */; };
+		C33123B40380C7F2CA7A77FB9ECB03E2 /* MermaidWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E6B3216639CF93E2942DEFF02E7B46F /* MermaidWebView.swift */; };
+		C799510DF0B3DB576513227ACDF485FA /* MermaidSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2993B1EB0CA2172817A680EA3E70A58 /* MermaidSourceTests.swift */; };
+		CE8EA75DC6F5D82A865E31D23BBFBE28 /* AppCommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6109283B607DFF9059191AA2B23031C4 /* AppCommandRouterTests.swift */; };
+		CFAB3E356C1A3F89A95394D260AED8CC /* MermaidDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE570C88160D6E90B5BD358EE5E651AB /* MermaidDetector.swift */; };
+		D0D79EF44E626EF4A0C90FC2EE64C3E7 /* DiagramPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A00CC776BF6FFC201F48613A23DB92 /* DiagramPreview.swift */; };
+		D4A803D9D08AA54C9642880F871082A0 /* AccessibilityPermissionFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B899C2F814A1734F8FA6C388F079ADF /* AccessibilityPermissionFlowTests.swift */; };
+		D504E465077ECCE85E97C4DC0DE2C638 /* SelectionSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B882D283BB7E3B15FB1B54237138172D /* SelectionSnapshotTests.swift */; };
+		DAD3C12A9EBC7548D10A8674E0EB260D /* RendererTestBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93A81E7524EEF0B748AD7465A5325D7F /* RendererTestBundleTests.swift */; };
+		DE811843C950986390F15C2D98B3CF2A /* MacMermaidTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3EAD35FFF163B8E2BF64D8B4AAA81B2 /* MacMermaidTheme.swift */; };
+		ED6939F489081724A862832DA60595F0 /* AIProviders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57004C8113A0CDAC537F77604C4EA259 /* AIProviders.swift */; };
+		FBAD7D6D02AAF11599521492402E5FF9 /* flowpeek-glue.js in Resources */ = {isa = PBXBuildFile; fileRef = 8DE977594B6068899A0DC64F827D3ED6 /* flowpeek-glue.js */; };
+		FE93E44B321C304FBE290AD07AC041BD /* MermaidSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 332E5B0DE4D6C81554EF60AA333F6B67 /* MermaidSource.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		30B368889D392EBC0AE89E13F8D59404 /* PBXContainerItemProxy */ = {
+		2900BB5F68155C5E501C97C7CD1E049B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C70FEABD27D5F1808DAE5EAE67B4D9FE /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 8CA31766BEF30CE51FA16C85EB94E7E0;
-			remoteInfo = FlowPeek;
-		};
-		6F63BC31D741223D34C1582BCFDC2BB2 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = C70FEABD27D5F1808DAE5EAE67B4D9FE /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 9398A3A674C2A4B57C94691949058BAF;
+			remoteGlobalIDString = E7612868D8BAA9F63DEFF2B10FCACC19;
 			remoteInfo = FlowPeekCore;
 		};
-		DB40F82A06B620B0255963CAE9E66AD5 /* PBXContainerItemProxy */ = {
+		3B723ECC264140410C78E523D7E60173 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C70FEABD27D5F1808DAE5EAE67B4D9FE /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 9398A3A674C2A4B57C94691949058BAF;
+			remoteGlobalIDString = 9D5ACCDE1834777C810F4E3B909F1DB5;
+			remoteInfo = FlowPeek;
+		};
+		78D03012DDC5AD133E9E0B0DFD44F530 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C70FEABD27D5F1808DAE5EAE67B4D9FE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E7612868D8BAA9F63DEFF2B10FCACC19;
 			remoteInfo = FlowPeekCore;
 		};
 /* End PBXContainerItemProxy section */
@@ -127,6 +127,7 @@
 		6CC10FEBC0751BFF64E6EC7EB86ABAE0 /* AppCommandRouter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppCommandRouter.swift; sourceTree = "<group>"; };
 		6D80731B0C957A727E1A036EBDF7588D /* AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		7EE2052E972FEDFEB671B7A2FA0C93F9 /* AIPrompt.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AIPrompt.swift; sourceTree = "<group>"; };
+		82ED1D28CA2B2EBBEF0C46E5B49C8263 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		88FEE9A6053B1B3099021173C20E8BDE /* GlobalHotKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
 		8AB63AD15DF40EB0B92B9F2F4153DDFF /* MermaidRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MermaidRenderer.swift; sourceTree = "<group>"; };
 		8B899C2F814A1734F8FA6C388F079ADF /* AccessibilityPermissionFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccessibilityPermissionFlowTests.swift; sourceTree = "<group>"; };
@@ -150,7 +151,6 @@
 		CB7BC0C54BBCD8143FB174CD92284CB7 /* AccessibilityPermissionFlow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AccessibilityPermissionFlow.swift; sourceTree = "<group>"; };
 		CEDA87EE9F9F10CD1C21EB9DFDEFB108 /* Models.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		DCB24BFAE51CCBFEF9E1E7FF1C80E377 /* FlowPeekApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FlowPeekApp.swift; sourceTree = "<group>"; };
-		DFED3C2AD42A3F230A83D1185909D07A /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.15.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		E2993B1EB0CA2172817A680EA3E70A58 /* MermaidSourceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MermaidSourceTests.swift; sourceTree = "<group>"; };
 		E2DC3882A60258E3A9748576373E42BB /* SelectionOverlay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionOverlay.swift; sourceTree = "<group>"; };
 		E5CF5318E2D0AB9A621A9C98D9101947 /* AppIcon.icon */ = {isa = PBXFileReference; includeInIndex = 1; path = AppIcon.icon; sourceTree = "<group>"; };
@@ -159,37 +159,37 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		0135CBE54662E950920741D140159429 /* Frameworks */ = {
+		4A09DB06A49045D410144ACE8936EC20 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B78B1D6D121F63A2EA7F2E9B67BC9099 /* Cocoa.framework in Frameworks */,
-				F397B7D476F61A46740CAF3F01C299C7 /* libFlowPeekCore.a in Frameworks */,
+				588D035CDB3A4353544429358AA02ADD /* Cocoa.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		5157A3A12AFE539DF5051EA34C586D57 /* Frameworks */ = {
+		52A6E12C2DE885853AE7D066A19DFEDA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1BAA9F8E1672981ECD2A0CF07F35BE03 /* Cocoa.framework in Frameworks */,
+				1D1A09C1830F8235145BE1D72251E234 /* libFlowPeekCore.a in Frameworks */,
+				1F16A09CBF8C7E336C11A37B486DBD6B /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		892CFE469AF02BBCE572DFD26E5B5D56 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		85F5961FF5D99A72C390A68BA94D974D /* Frameworks */ = {
+		988099B5149512C25E0DB7DDBB3239BE /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CCE12D6935446BA2FCE662953FBC68D3 /* Cocoa.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		E13A028C5496B809873E1105FFF7E3E2 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				5675F4B8BB2C0B550CE26A6B6F39CFF7 /* Cocoa.framework in Frameworks */,
-				DDBC72CE40A365EDE956864BC215DF48 /* libFlowPeekCore.a in Frameworks */,
-				28EDD0932D80B0E5F8A55C0EE5A49962 /* Sparkle in Frameworks */,
+				8EE062373BDD8B34A4A59C189C8F7FEA /* Cocoa.framework in Frameworks */,
+				5E47029A9E2A6076805EF9198DFD0D87 /* libFlowPeekCore.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -294,7 +294,7 @@
 		A47100E0A35BC648F628EF38235B87F8 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				D521AE756C495BED327D944E01398643 /* OS X */,
+				F92CFA94113EBF3D0F381BF71C7E522D /* OS X */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -322,14 +322,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		D521AE756C495BED327D944E01398643 /* OS X */ = {
-			isa = PBXGroup;
-			children = (
-				DFED3C2AD42A3F230A83D1185909D07A /* Cocoa.framework */,
-			);
-			name = "OS X";
-			sourceTree = "<group>";
-		};
 		F0D7F5FBB38951FCD773E51E6C1F4266 /* FlowPeekRendererTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -338,6 +330,14 @@
 			);
 			name = FlowPeekRendererTests;
 			path = FlowPeekRendererTests;
+			sourceTree = "<group>";
+		};
+		F92CFA94113EBF3D0F381BF71C7E522D /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				82ED1D28CA2B2EBBEF0C46E5B49C8263 /* Cocoa.framework */,
+			);
+			name = "OS X";
 			sourceTree = "<group>";
 		};
 		FA234233B45B3B4F861343D9E278ABAF /* FlowPeekCoreTests */ = {
@@ -362,7 +362,7 @@
 /* End PBXGroup section */
 
 /* Begin PBXHeadersBuildPhase section */
-		4007CFAAE9C85A30122ADB0C9E074EB5 /* Headers */ = {
+		FF3FDCEC4DDE9EAFDE4A8BA5ABEF7C92 /* Headers */ = {
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -372,70 +372,70 @@
 /* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
-		36CA25396163E1A309295B4A17ECDA16 /* FlowPeekRendererTests */ = {
+		265AE179665425FBBDA8BD1BB22E7CB3 /* FlowPeekCoreTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B5B4960BFFFBC059EE610C13CC7832C0 /* Build configuration list for PBXNativeTarget "FlowPeekRendererTests" */;
+			buildConfigurationList = 3EE19F2AC7099B1D98D9832D27F7E4D6 /* Build configuration list for PBXNativeTarget "FlowPeekCoreTests" */;
 			buildPhases = (
-				067D1C137589041EE2D31D71E952CD85 /* Sources */,
-				85F5961FF5D99A72C390A68BA94D974D /* Frameworks */,
-				4F1F084A973D61A208841A084DA78913 /* Resources */,
+				82C88FEFE83E2BDCDA36C97200EC8B11 /* Sources */,
+				988099B5149512C25E0DB7DDBB3239BE /* Frameworks */,
+				C261382BC7E25A386803B256FAF7C859 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				BD9916A93D5F6E4656E9AA3EEA22CCC5 /* PBXTargetDependency */,
-			);
-			name = FlowPeekRendererTests;
-			productName = FlowPeekRendererTests;
-			productReference = ABA492181E9672BC21AAF398261463DE /* FlowPeekRendererTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
-		8CA31766BEF30CE51FA16C85EB94E7E0 /* FlowPeek */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = FB24C40B9858F64C20C7882574BD911E /* Build configuration list for PBXNativeTarget "FlowPeek" */;
-			buildPhases = (
-				20658374595402B2F6649F4E04D86C25 /* Sources */,
-				E13A028C5496B809873E1105FFF7E3E2 /* Frameworks */,
-				0CF2BDBBE6AA0932AB14912AFCEBA6D9 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				6B5515591297A4947466E0648D81C1E9 /* PBXTargetDependency */,
-			);
-			name = FlowPeek;
-			packageProductDependencies = (
-				4D814BC6BAAB33B08AADC4D3B17D8D95 /* Sparkle */,
-			);
-			productName = FlowPeek;
-			productReference = B7CDFB2D9909084ADB9F6EBE7D87164B /* FlowPeek.app */;
-			productType = "com.apple.product-type.application";
-		};
-		8D7CE5FDB5AD6C34FAA7B3BB07C3FA10 /* FlowPeekCoreTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 6C04026661E0D57ECC90A87C7A885419 /* Build configuration list for PBXNativeTarget "FlowPeekCoreTests" */;
-			buildPhases = (
-				79881D301ADED8C12F74EF0069EDE19B /* Sources */,
-				0135CBE54662E950920741D140159429 /* Frameworks */,
-				3F80EE7D7348ACE9013C27B513D8B6CC /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				DF430F3FAC228B18FE19C7AD117C624F /* PBXTargetDependency */,
+				07CF88AE0AB3B990E5A4208531189995 /* PBXTargetDependency */,
 			);
 			name = FlowPeekCoreTests;
 			productName = FlowPeekCoreTests;
 			productReference = 6CB12CED791B687066C8DB4CF40E9A30 /* FlowPeekCoreTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		9398A3A674C2A4B57C94691949058BAF /* FlowPeekCore */ = {
+		9D5ACCDE1834777C810F4E3B909F1DB5 /* FlowPeek */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 4FF027D56B47973882304F6B21E16525 /* Build configuration list for PBXNativeTarget "FlowPeekCore" */;
+			buildConfigurationList = F0C2220EA1D36F83FB32ABB4C348273E /* Build configuration list for PBXNativeTarget "FlowPeek" */;
 			buildPhases = (
-				4007CFAAE9C85A30122ADB0C9E074EB5 /* Headers */,
-				864C05FC058DE1BDC2E14ACAB4AD9B32 /* Sources */,
-				5157A3A12AFE539DF5051EA34C586D57 /* Frameworks */,
+				3D2DF6D57F1010905E60DF095ED1B93F /* Sources */,
+				52A6E12C2DE885853AE7D066A19DFEDA /* Frameworks */,
+				F0CD2EC9BD5E44219041AD45E0D7D959 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B80C08E649CBB7F993E0D07F58DFAB44 /* PBXTargetDependency */,
+			);
+			name = FlowPeek;
+			packageProductDependencies = (
+				A2AE41074954058B1C3B585B9940F7E1 /* Sparkle */,
+			);
+			productName = FlowPeek;
+			productReference = B7CDFB2D9909084ADB9F6EBE7D87164B /* FlowPeek.app */;
+			productType = "com.apple.product-type.application";
+		};
+		9E29D5F464D004B3189D091E3D1BA764 /* FlowPeekRendererTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B53C14BDB3CC09866CEE25309B4AABF0 /* Build configuration list for PBXNativeTarget "FlowPeekRendererTests" */;
+			buildPhases = (
+				669B5DD5FCA87F36FE87171903EA3B46 /* Sources */,
+				4A09DB06A49045D410144ACE8936EC20 /* Frameworks */,
+				302744A6C2F4057A1199E79BB6DF909F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2FBA6BC54DCE86D521A3918C34B467CF /* PBXTargetDependency */,
+			);
+			name = FlowPeekRendererTests;
+			productName = FlowPeekRendererTests;
+			productReference = ABA492181E9672BC21AAF398261463DE /* FlowPeekRendererTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		E7612868D8BAA9F63DEFF2B10FCACC19 /* FlowPeekCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 88861FA45F3E316797CED7F830C430EE /* Build configuration list for PBXNativeTarget "FlowPeekCore" */;
+			buildPhases = (
+				FF3FDCEC4DDE9EAFDE4A8BA5ABEF7C92 /* Headers */,
+				5FDE62DC8B0C94450338B40044A12528 /* Sources */,
+				892CFE469AF02BBCE572DFD26E5B5D56 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -452,11 +452,11 @@
 		C70FEABD27D5F1808DAE5EAE67B4D9FE /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastSwiftUpdateCheck = 1500;
-				LastUpgradeCheck = 1500;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					36CA25396163E1A309295B4A17ECDA16 = {
-						TestTargetID = 8CA31766BEF30CE51FA16C85EB94E7E0;
+					9E29D5F464D004B3189D091E3D1BA764 = {
+						TestTargetID = 9D5ACCDE1834777C810F4E3B909F1DB5;
 					};
 				};
 			};
@@ -470,148 +470,150 @@
 				Base,
 			);
 			mainGroup = D18C04588026DD7511AF51A5E762ED41;
+			minimizedProjectReferenceProxies = 0;
 			packageReferences = (
-				8375569D149FC78CE57448225180042B /* XCRemoteSwiftPackageReference "Sparkle" */,
+				5072AB56DCA6DAB40A5619811C7018DE /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
+			preferredProjectObjectVersion = 100;
 			productRefGroup = 96DE2CF124B8629572F4A826C3A2FA21 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				9398A3A674C2A4B57C94691949058BAF /* FlowPeekCore */,
-				8CA31766BEF30CE51FA16C85EB94E7E0 /* FlowPeek */,
-				8D7CE5FDB5AD6C34FAA7B3BB07C3FA10 /* FlowPeekCoreTests */,
-				36CA25396163E1A309295B4A17ECDA16 /* FlowPeekRendererTests */,
+				E7612868D8BAA9F63DEFF2B10FCACC19 /* FlowPeekCore */,
+				9D5ACCDE1834777C810F4E3B909F1DB5 /* FlowPeek */,
+				265AE179665425FBBDA8BD1BB22E7CB3 /* FlowPeekCoreTests */,
+				9E29D5F464D004B3189D091E3D1BA764 /* FlowPeekRendererTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		0CF2BDBBE6AA0932AB14912AFCEBA6D9 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				5D48A949C7F0991D91C17FB6BAB31970 /* flowpeek-glue.js in Resources */,
-				48D755E0D308200C928EF6340B84837D /* mermaid.min.js in Resources */,
-				042BDA137CA9B88BCD1FC9A1516B1432 /* AppIcon.icon in Resources */,
-				4E3BDB86BF6BA283F84E4141AA7CAD9B /* Localizable.strings in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		3F80EE7D7348ACE9013C27B513D8B6CC /* Resources */ = {
+		302744A6C2F4057A1199E79BB6DF909F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		4F1F084A973D61A208841A084DA78913 /* Resources */ = {
+		C261382BC7E25A386803B256FAF7C859 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0CD2EC9BD5E44219041AD45E0D7D959 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FBAD7D6D02AAF11599521492402E5FF9 /* flowpeek-glue.js in Resources */,
+				8D504D089CA61986B99A7A287ED8C882 /* mermaid.min.js in Resources */,
+				0D39BCEEE6530298B306E0EAD47174AE /* AppIcon.icon in Resources */,
+				AD245B2C4C0C877C07B40E1CB8646B8A /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		067D1C137589041EE2D31D71E952CD85 /* Sources */ = {
+		3D2DF6D57F1010905E60DF095ED1B93F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				49BF33AEA3D9C85C2BFB4444AF5D0296 /* MermaidEngineTests.swift in Sources */,
-				B6A4CF405091FE48D996EB062703C0E7 /* RendererTestBundleTests.swift in Sources */,
+				7D223603D72CD292CEC8713B845198FD /* AIPrompt.swift in Sources */,
+				ED6939F489081724A862832DA60595F0 /* AIProviders.swift in Sources */,
+				A6BC484DC0B555008DD286EA1C2C6FB3 /* APIKeyCoordinator.swift in Sources */,
+				7B12255FA66C884D460595349B0642A6 /* AppDelegate.swift in Sources */,
+				A2BEDD2E41EDCAAEF0CDE0B5295DE183 /* AppState.swift in Sources */,
+				5027ED9F1F3E45AA5661AE7F2F316D7B /* ClipboardIndicator.swift in Sources */,
+				B6D4B3A20217D5D1C420740B0CF3B428 /* ClipboardMonitor.swift in Sources */,
+				D0D79EF44E626EF4A0C90FC2EE64C3E7 /* DiagramPreview.swift in Sources */,
+				3623391DF4DF109931BE9DEC106840DD /* FlowPeekApp.swift in Sources */,
+				38903AE5132EB28A6728BE2119C061A8 /* GlassWindowComponents.swift in Sources */,
+				3AEA74AF0B4C2BC578407E0403E0A0F7 /* GlobalHotKey.swift in Sources */,
+				B12D154862E50CA2E5D3D7D377189C28 /* InstallLocationAdvisor.swift in Sources */,
+				4C81BE6BB39AD2048E363B9AF7EEA3A9 /* KeychainStore.swift in Sources */,
+				72D8CAAC4F886DDD6C4E6B1E5BC5706D /* MenuBarContent.swift in Sources */,
+				16A8B0AF82B4E5E924E4559218701767 /* MermaidWebPolicy.swift in Sources */,
+				C33123B40380C7F2CA7A77FB9ECB03E2 /* MermaidWebView.swift in Sources */,
+				5F8D80EE1D30403E52B3366F576B28EF /* MermaidWebViewPool.swift in Sources */,
+				00E684F0B5D65378785E5EF29CD52201 /* Onboarding.swift in Sources */,
+				7E88087583BC19CFF096BE26EF5B62BC /* SelectionMonitor.swift in Sources */,
+				7F06696C94CFC8987E089689A339494B /* SelectionOverlay.swift in Sources */,
+				4A73BAB83F5817FA864707D4C6997021 /* SettingsView.swift in Sources */,
+				C049F0007E08F9EAF48AF4616F420BA2 /* SettingsWindowCoordinator.swift in Sources */,
+				717FB9561362CDAA5320108AAC23A81D /* ShortcutCenter.swift in Sources */,
+				B5CEF2ACE74B4B6286C43708089AB205 /* ShortcutRecorder.swift in Sources */,
+				B6475B78404E88EA583F640333F5E944 /* UpdaterService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		20658374595402B2F6649F4E04D86C25 /* Sources */ = {
+		5FDE62DC8B0C94450338B40044A12528 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AFECA87D03DAED6F5188118606B722D2 /* AIPrompt.swift in Sources */,
-				C02A8F1FBDEB3B84A17F8C2B93CE0D2C /* AIProviders.swift in Sources */,
-				AD170B8EAB5354C10F54E891205EF26A /* APIKeyCoordinator.swift in Sources */,
-				79E323F5CDE97F88D81305CDE8454AFB /* AppDelegate.swift in Sources */,
-				2C587F41796AA4BBCE27B2226675A4AC /* AppState.swift in Sources */,
-				B610E2E0E5F2FAA282A51308DE6FD746 /* ClipboardIndicator.swift in Sources */,
-				940819668149D699F1E88C46DD002929 /* ClipboardMonitor.swift in Sources */,
-				6BE31442072C358B560CFD26B279B90C /* DiagramPreview.swift in Sources */,
-				8F7B4968ECEBED5A991284BD0C45E914 /* FlowPeekApp.swift in Sources */,
-				DF0AFCCE56746C1E223710711F7F7AC9 /* GlassWindowComponents.swift in Sources */,
-				D4607496E4B98168191C2A6C87DAFD99 /* GlobalHotKey.swift in Sources */,
-				B84E0AE48EBF1F1F1DED2FA5B44D96DA /* InstallLocationAdvisor.swift in Sources */,
-				6111EC00E2433DDF0BB5AFD67348F068 /* KeychainStore.swift in Sources */,
-				A0997D636F5C6EA8B642D0519FD460F7 /* MenuBarContent.swift in Sources */,
-				00961B860E08E99B8469C9ACF00AD41F /* MermaidWebPolicy.swift in Sources */,
-				B3BDF25D6226BAD5024981EE11425DD2 /* MermaidWebView.swift in Sources */,
-				7FDA2BE36485B5CC4162F6B586D3B087 /* MermaidWebViewPool.swift in Sources */,
-				F9E136DEFB5127E2CDD3897788BEFFDE /* Onboarding.swift in Sources */,
-				042E5F0ED79D63785D5C55CFD86CA0CA /* SelectionMonitor.swift in Sources */,
-				E77D8C5C145ED9EC6D2E705DDD35F9E0 /* SelectionOverlay.swift in Sources */,
-				00D03B7F8DB8C7AF1E633B261BD0CB26 /* SettingsView.swift in Sources */,
-				A8031C293D743752CD6ADCDBBEA27891 /* SettingsWindowCoordinator.swift in Sources */,
-				6CC21FC618541C8C058A08EE27F10B59 /* ShortcutCenter.swift in Sources */,
-				9146773A5E382577B669709BDAA76570 /* ShortcutRecorder.swift in Sources */,
-				E3F4325A3F74B0D65049C851180F26D5 /* UpdaterService.swift in Sources */,
+				9F04A5FBA14BF39171B30748012CDE68 /* AccessibilityPermissionFlow.swift in Sources */,
+				336945785156BAC58AD985C8ECEDF316 /* AppCommandRouter.swift in Sources */,
+				2777A07AAAE770E2440D8F64084722BF /* AppLanguage.swift in Sources */,
+				2CB88B20DFD6BA7BEA3388AB47BC009C /* KeyboardShortcut.swift in Sources */,
+				DE811843C950986390F15C2D98B3CF2A /* MacMermaidTheme.swift in Sources */,
+				CFAB3E356C1A3F89A95394D260AED8CC /* MermaidDetector.swift in Sources */,
+				3D134C5EE678EF03A0D14E67210B0CD4 /* MermaidEnginePage.swift in Sources */,
+				48D617FF7C2A6AB87920A189A07C1C90 /* MermaidRenderer.swift in Sources */,
+				FE93E44B321C304FBE290AD07AC041BD /* MermaidSource.swift in Sources */,
+				6161C1CAD52974B9DCB63F67BEFD3B50 /* Models.swift in Sources */,
+				0F6C8E7DB1240F9B32E574355A184EC6 /* OnboardingPolicy.swift in Sources */,
+				0676CB20482489CFDE11E5D31FDB545C /* SelectionGatherer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		79881D301ADED8C12F74EF0069EDE19B /* Sources */ = {
+		669B5DD5FCA87F36FE87171903EA3B46 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2031E2216603F5F3C84AFBA6F588E697 /* AccessibilityPermissionFlowTests.swift in Sources */,
-				4A083488579E1DCDEF2FBB0D9B54C1B7 /* AppCommandRouterTests.swift in Sources */,
-				DDA63822A8BA0E908C13834C33FC9F5A /* AppLanguageTests.swift in Sources */,
-				F674348EAA2743941A83A651739D2ADA /* KeyboardShortcutTests.swift in Sources */,
-				8B817A10B8C17163E59EB14E255F0FA2 /* MermaidDetectorCorpusTests.swift in Sources */,
-				C51DDC2FD1A877C399DF1CD04593E596 /* MermaidDetectorTests.swift in Sources */,
-				D46E6EC696578C18F0D94E793E08FA70 /* MermaidRendererTests.swift in Sources */,
-				12294AB53DFBBB496E029011FDC870CE /* MermaidSourceTests.swift in Sources */,
-				DEEBD4DBFB4FB4B0F0C476A6C45B92D8 /* OnboardingPolicyTests.swift in Sources */,
-				4AA94B091EBDB488DF4822F4DC526C08 /* SelectionGathererTests.swift in Sources */,
-				095D442897861ADF906236C0EFE0FEF2 /* SelectionSnapshotTests.swift in Sources */,
+				A85E91EBDC0CAFD0141ACBF11B7A777E /* MermaidEngineTests.swift in Sources */,
+				DAD3C12A9EBC7548D10A8674E0EB260D /* RendererTestBundleTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		864C05FC058DE1BDC2E14ACAB4AD9B32 /* Sources */ = {
+		82C88FEFE83E2BDCDA36C97200EC8B11 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				73B3A128C5C01A3E338F354460B9E151 /* AccessibilityPermissionFlow.swift in Sources */,
-				60DA8330D29C0D1E9EE7A994C5ECBFDB /* AppCommandRouter.swift in Sources */,
-				5BF2A20157F309FC5904FFD2B543B769 /* AppLanguage.swift in Sources */,
-				AAD00161E82E6F0B033DBF7FFE0CC6EF /* KeyboardShortcut.swift in Sources */,
-				82E56B64DBE8A6240BC4EF7700F78A56 /* MacMermaidTheme.swift in Sources */,
-				BB5F344A99EA1A25E4AACEA95099F820 /* MermaidDetector.swift in Sources */,
-				C29DE21DF82BE1771189A9C95D22DB5B /* MermaidEnginePage.swift in Sources */,
-				DFA69A8D531F9B8467AAE84730F385B6 /* MermaidRenderer.swift in Sources */,
-				E496A63EDA82C991E1AAC2196149237D /* MermaidSource.swift in Sources */,
-				8E080E15D5897EDE022E91975DB90137 /* Models.swift in Sources */,
-				940133DFB70F4646C7E7D8604C120C9D /* OnboardingPolicy.swift in Sources */,
-				41D082A27C8D5576F4F4153EAD3A484E /* SelectionGatherer.swift in Sources */,
+				D4A803D9D08AA54C9642880F871082A0 /* AccessibilityPermissionFlowTests.swift in Sources */,
+				CE8EA75DC6F5D82A865E31D23BBFBE28 /* AppCommandRouterTests.swift in Sources */,
+				951D22720B7789170FBD9F124BAFA935 /* AppLanguageTests.swift in Sources */,
+				7E8C8B4BF1337040197CB48965EE7032 /* KeyboardShortcutTests.swift in Sources */,
+				782E5F0F4F77AE96A11CC537920810C0 /* MermaidDetectorCorpusTests.swift in Sources */,
+				BD8FAE378B1B10009BA3DCEE9EFAE375 /* MermaidDetectorTests.swift in Sources */,
+				9DB69B6D542D718D03CFEACB2AC79D27 /* MermaidRendererTests.swift in Sources */,
+				C799510DF0B3DB576513227ACDF485FA /* MermaidSourceTests.swift in Sources */,
+				935344ED79ADCBD71910AE21EBE1BB26 /* OnboardingPolicyTests.swift in Sources */,
+				755B5593D0DA131B9F1C10E458EC3918 /* SelectionGathererTests.swift in Sources */,
+				D504E465077ECCE85E97C4DC0DE2C638 /* SelectionSnapshotTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		6B5515591297A4947466E0648D81C1E9 /* PBXTargetDependency */ = {
+		07CF88AE0AB3B990E5A4208531189995 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = FlowPeekCore;
-			target = 9398A3A674C2A4B57C94691949058BAF /* FlowPeekCore */;
-			targetProxy = 6F63BC31D741223D34C1582BCFDC2BB2 /* PBXContainerItemProxy */;
+			target = E7612868D8BAA9F63DEFF2B10FCACC19 /* FlowPeekCore */;
+			targetProxy = 78D03012DDC5AD133E9E0B0DFD44F530 /* PBXContainerItemProxy */;
 		};
-		BD9916A93D5F6E4656E9AA3EEA22CCC5 /* PBXTargetDependency */ = {
+		2FBA6BC54DCE86D521A3918C34B467CF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = FlowPeek;
-			target = 8CA31766BEF30CE51FA16C85EB94E7E0 /* FlowPeek */;
-			targetProxy = 30B368889D392EBC0AE89E13F8D59404 /* PBXContainerItemProxy */;
+			target = 9D5ACCDE1834777C810F4E3B909F1DB5 /* FlowPeek */;
+			targetProxy = 3B723ECC264140410C78E523D7E60173 /* PBXContainerItemProxy */;
 		};
-		DF430F3FAC228B18FE19C7AD117C624F /* PBXTargetDependency */ = {
+		B80C08E649CBB7F993E0D07F58DFAB44 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = FlowPeekCore;
-			target = 9398A3A674C2A4B57C94691949058BAF /* FlowPeekCore */;
-			targetProxy = DB40F82A06B620B0255963CAE9E66AD5 /* PBXContainerItemProxy */;
+			target = E7612868D8BAA9F63DEFF2B10FCACC19 /* FlowPeekCore */;
+			targetProxy = 2900BB5F68155C5E501C97C7CD1E049B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -683,7 +685,21 @@
 			};
 			name = Release;
 		};
-		117671B401BA3050C2E26D868AF5ECD3 /* Release */ = {
+		0F9FFAFF2875C17F206C9474920FBBDD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_TESTABILITY = NO;
+				EXECUTABLE_PREFIX = lib;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_MODULE_NAME = FlowPeekCore;
+				PRODUCT_NAME = FlowPeekCore;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		27D9F8DBC3241ECA7B33AAAD470C8768 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -709,39 +725,25 @@
 			};
 			name = Release;
 		};
-		3C6288C28D65DCAFB34B3E4D05FAB214 /* Release */ = {
+		3C11960869B1B4C567B3591D33B60AC4 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = F7WUT95TT6;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekCoreTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekRendererTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlowPeek.app/Contents/MacOS/FlowPeek";
 			};
 			name = Release;
 		};
-		48254E8BA9D1F71B523D3912DE78A176 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = F7WUT95TT6;
-				GENERATE_INFOPLIST_FILE = YES;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekCoreTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Debug;
-		};
-		85062E13A1251F6A46E7AB4CDF76279C /* Debug */ = {
+		4C68799F7C34F46EF725B40C57A0DBD7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -764,6 +766,24 @@
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		6215F51A9986C37FAA4E4D52408F7655 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = F7WUT95TT6;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekRendererTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlowPeek.app/Contents/MacOS/FlowPeek";
 			};
 			name = Debug;
 		};
@@ -829,7 +849,23 @@
 			};
 			name = Debug;
 		};
-		9DBC3BFC7B5B2413BB16479AD2F990AF /* Debug */ = {
+		A88F4F95B2690B3D42D259738F793DE6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = F7WUT95TT6;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekCoreTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		AF6D7259E451ECD0BDE5C2C0A61192FA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_TESTABILITY = YES;
@@ -843,55 +879,21 @@
 			};
 			name = Debug;
 		};
-		ACBF39B9B92DA51268B1D6CFCCB45BA9 /* Debug */ = {
+		D5B38612C0960EF4775AFCF1CB3B884C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = F7WUT95TT6;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekRendererTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekCoreTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlowPeek.app/Contents/MacOS/FlowPeek";
 			};
 			name = Debug;
-		};
-		ED0877B35475C89E64076D523FA8E599 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ENABLE_TESTABILITY = NO;
-				EXECUTABLE_PREFIX = lib;
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_MODULE_NAME = FlowPeekCore;
-				PRODUCT_NAME = FlowPeekCore;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Release;
-		};
-		F4FE6DD4F44759D0B5BD1E15226A496C /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = F7WUT95TT6;
-				GENERATE_INFOPLIST_FILE = YES;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekRendererTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 6.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlowPeek.app/Contents/MacOS/FlowPeek";
-			};
-			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
@@ -905,38 +907,38 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		4FF027D56B47973882304F6B21E16525 /* Build configuration list for PBXNativeTarget "FlowPeekCore" */ = {
+		3EE19F2AC7099B1D98D9832D27F7E4D6 /* Build configuration list for PBXNativeTarget "FlowPeekCoreTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				ED0877B35475C89E64076D523FA8E599 /* Release */,
-				9DBC3BFC7B5B2413BB16479AD2F990AF /* Debug */,
+				A88F4F95B2690B3D42D259738F793DE6 /* Release */,
+				D5B38612C0960EF4775AFCF1CB3B884C /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		6C04026661E0D57ECC90A87C7A885419 /* Build configuration list for PBXNativeTarget "FlowPeekCoreTests" */ = {
+		88861FA45F3E316797CED7F830C430EE /* Build configuration list for PBXNativeTarget "FlowPeekCore" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				3C6288C28D65DCAFB34B3E4D05FAB214 /* Release */,
-				48254E8BA9D1F71B523D3912DE78A176 /* Debug */,
+				0F9FFAFF2875C17F206C9474920FBBDD /* Release */,
+				AF6D7259E451ECD0BDE5C2C0A61192FA /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		B5B4960BFFFBC059EE610C13CC7832C0 /* Build configuration list for PBXNativeTarget "FlowPeekRendererTests" */ = {
+		B53C14BDB3CC09866CEE25309B4AABF0 /* Build configuration list for PBXNativeTarget "FlowPeekRendererTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				F4FE6DD4F44759D0B5BD1E15226A496C /* Release */,
-				ACBF39B9B92DA51268B1D6CFCCB45BA9 /* Debug */,
+				3C11960869B1B4C567B3591D33B60AC4 /* Release */,
+				6215F51A9986C37FAA4E4D52408F7655 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		FB24C40B9858F64C20C7882574BD911E /* Build configuration list for PBXNativeTarget "FlowPeek" */ = {
+		F0C2220EA1D36F83FB32ABB4C348273E /* Build configuration list for PBXNativeTarget "FlowPeek" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				117671B401BA3050C2E26D868AF5ECD3 /* Release */,
-				85062E13A1251F6A46E7AB4CDF76279C /* Debug */,
+				27D9F8DBC3241ECA7B33AAAD470C8768 /* Release */,
+				4C68799F7C34F46EF725B40C57A0DBD7 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -944,7 +946,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		8375569D149FC78CE57448225180042B /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+		5072AB56DCA6DAB40A5619811C7018DE /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
 			requirement = {
@@ -955,9 +957,9 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		4D814BC6BAAB33B08AADC4D3B17D8D95 /* Sparkle */ = {
+		A2AE41074954058B1C3B585B9940F7E1 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 8375569D149FC78CE57448225180042B /* XCRemoteSwiftPackageReference "Sparkle" */;
+			package = 5072AB56DCA6DAB40A5619811C7018DE /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */

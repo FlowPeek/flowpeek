@@ -83,9 +83,12 @@ jobs:
       - name: Assert the checked-in project matches the generator
         run: |
           set -euo pipefail
-          gem install xcodeproj --no-document --quiet
+          # Pinned via Gemfile.lock: predictabilize_uuids derives different identifiers across gem
+          # versions, so an unpinned install rewrites every UUID and fails this check on a project
+          # that is otherwise identical.
+          bundle install --quiet
           cp FlowPeek.xcodeproj/project.pbxproj /tmp/pbxproj.before
-          ruby Scripts/generate_xcodeproj.rb >/dev/null
+          bundle exec ruby Scripts/generate_xcodeproj.rb >/dev/null
           if ! diff -q /tmp/pbxproj.before FlowPeek.xcodeproj/project.pbxproj >/dev/null; then
             echo "::error::FlowPeek.xcodeproj is stale. Run 'ruby Scripts/generate_xcodeproj.rb' and commit." >&2
             diff -u /tmp/pbxproj.before FlowPeek.xcodeproj/project.pbxproj | head -40 >&2

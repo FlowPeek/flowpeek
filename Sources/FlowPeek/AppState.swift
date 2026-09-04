@@ -21,6 +21,8 @@ final class AppState: ObservableObject {
     @Published private(set) var permissionRecoveryError: String?
     @Published private(set) var lastSelection: SelectionSnapshot?
     @Published private(set) var engineHealth: MermaidEngineHealth?
+    /// Which of the three routes the user has exercised. Drives the onboarding tutorial.
+    @Published private(set) var tutorial = TutorialProgress()
     /// Mirrors `AppleLanguages` in this app's defaults domain; applied on the next launch.
     @Published var language: AppLanguage = AppLanguage.stored(
         in: UserDefaults.standard.stringArray(forKey: AppLanguage.defaultsKey)
@@ -271,6 +273,7 @@ final class AppState: ObservableObject {
             overlay.hide()
             return
         }
+        tutorial.noteDetected(.selection)
         overlay.show(for: snapshot)
     }
 
@@ -283,6 +286,7 @@ final class AppState: ObservableObject {
             return
         }
         copied = source
+        tutorial.noteDetected(.clipboard)
         indicator.show(
             keyword: copy.detection.diagramKeyword,
             shortcut: shortcuts.shortcuts[.previewClipboard].display
@@ -297,6 +301,7 @@ final class AppState: ObservableObject {
             previews.showMessage(title: title, message: engineHealth.menuDescription ?? "")
             return
         }
+        tutorial.noteOpened(.clipboard)
         previews.showQuick(
             document: DiagramDocument(title: String(localized: "diagram.clipboard-title"), source: copied)
         )
@@ -306,6 +311,7 @@ final class AppState: ObservableObject {
     func receiveAmbient(_ candidate: AmbientCandidate) {
         guard isEnabled, ambientPeekEnabled else { return }
         ambientCandidate = candidate
+        tutorial.noteDetected(.ambient)
         highlight.show(candidate, shortcut: "⌥Space")
         logger.debug(
             """
@@ -314,6 +320,18 @@ final class AppState: ObservableObject {
             box \(Int(candidate.bounds.width), privacy: .public)x\(Int(candidate.bounds.height), privacy: .public)
             """
         )
+    }
+
+    /// The tutorial's third lesson needs the experiment on; offering it there is friendlier than
+    /// sending the user to Settings mid-lesson.
+    func enableAmbientPeek() {
+        guard !ambientPeekEnabled else { return }
+        ambientPeekEnabled = true
+        applyEnabledState()
+    }
+
+    func resetTutorial() {
+        tutorial.reset()
     }
 
     func previewAmbient() {
@@ -327,6 +345,7 @@ final class AppState: ObservableObject {
         }
         do {
             let source = try MermaidSource(rawValue: candidate.detection.extractedSource)
+            tutorial.noteOpened(.ambient)
             previews.showQuick(
                 document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source)
             )
@@ -348,6 +367,7 @@ final class AppState: ObservableObject {
         let detection = cached ?? MermaidDetector.detect(snapshot.text)
         do {
             let source = try MermaidSource(rawValue: detection.extractedSource)
+            tutorial.noteOpened(.selection)
             previews.showQuick(document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source))
         } catch let error as MermaidSource.ValidationError {
             previews.showMessage(title: title, message: localizedUserMessage(error))

@@ -16,7 +16,8 @@ final class OnboardingCoordinator {
                 AppState.shared.onboardingComplete = true
                 self?.closeWindow()
             },
-            close: { [weak self] in self?.closeWindow() }
+            close: { [weak self] in self?.closeWindow() },
+            stepAside: { [weak self] in self?.moveAside() }
         )
         let controller = NSHostingController(rootView: view.environmentObject(AppState.shared))
         let window = OnboardingWindow(contentViewController: controller)
@@ -48,6 +49,22 @@ final class OnboardingCoordinator {
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// Parks the window against the right edge of its screen, keeping it visible as a checklist
+    /// while leaving the practice page usable.
+    private func moveAside() {
+        guard let window else { return }
+        let screen = window.screen ?? NSScreen.main
+        guard let visible = screen?.visibleFrame else { return }
+        let size = window.frame.size
+        let origin = ScreenGeometry.clamp(
+            origin: CGPoint(x: visible.maxX - size.width + 24, y: visible.midY - size.height / 2),
+            size: size,
+            visibleFrames: [visible],
+            inset: 0
+        )
+        window.setFrameOrigin(origin)
+    }
+
     private func closeWindow() {
         window?.close()
         window = nil
@@ -65,7 +82,7 @@ struct OnboardingView: View {
     /// Permission is the only step that can complete itself; the login step is a question, so it
     /// always waits for an answer.
     private enum Step: Int, CaseIterable, Comparable {
-        case welcome, permission, launch
+        case welcome, permission, launch, tutorial
 
         static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 
@@ -74,6 +91,7 @@ struct OnboardingView: View {
             case .welcome: "point.3.connected.trianglepath.dotted"
             case .permission: "hand.point.up.left.and.text"
             case .launch: "power"
+            case .tutorial: "graduationcap"
             }
         }
 
@@ -82,6 +100,7 @@ struct OnboardingView: View {
             case .welcome: "onboarding.welcome.title"
             case .permission: "onboarding.permission.title"
             case .launch: "onboarding.launch.title"
+            case .tutorial: "tutorial.title"
             }
         }
 
@@ -90,17 +109,26 @@ struct OnboardingView: View {
             case .welcome: "onboarding.welcome.message"
             case .permission: "onboarding.permission.message"
             case .launch: "onboarding.launch.message"
+            case .tutorial: "tutorial.message"
             }
         }
     }
 
     @EnvironmentObject private var app: AppState
+    #if DEBUG
+    @State private var step: Step = ProcessInfo.processInfo.arguments.contains("--onboarding-tutorial")
+        ? .tutorial
+        : .welcome
+    #else
     @State private var step: Step = .welcome
+    #endif
     @State private var permissionFlow = AccessibilityPermissionFlow(isGranted: false)
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var launchError: String?
     let completion: () -> Void
     let close: () -> Void
+    /// Moves the window out of the way, because the practice page is the thing being pointed at.
+    let stepAside: () -> Void
 
     var body: some View {
         ZStack {
@@ -131,6 +159,7 @@ struct OnboardingView: View {
                     switch step {
                     case .permission: permissionCard
                     case .launch: launchCard
+                    case .tutorial: tutorialCard
                     case .welcome: EmptyView()
                     }
                 }
@@ -244,6 +273,61 @@ struct OnboardingView: View {
         .togglesOnTap($launchAtLogin, cornerRadius: 18)
     }
 
+    /// Three lessons, each ticked only when a preview really opened by that route. The practice
+    /// text lives in the browser rather than in this window: FlowPeek refuses to read its own
+    /// process, so a drag in here could never produce an overlay button.
+    private var tutorialCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(TutorialProgress.Lesson.allCases) { lesson in
+                HStack(alignment: .top, spacing: 12) {
+                    stateBadge(app.tutorial[lesson])
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(String(localized: lesson.titleKey))
+                            .font(.callout.weight(.semibold))
+                        Text(String(localized: lesson.detailKey))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if lesson == .ambient, !app.ambientPeekEnabled {
+                            Button("tutorial.ambient.enable") { app.enableAmbientPeek() }
+                                .controlSize(.small)
+                                .padding(.top, 2)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                if lesson != TutorialProgress.Lesson.allCases.last {
+                    Divider().opacity(0.4)
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: 540, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22)))
+        .animation(.snappy, value: app.tutorial)
+    }
+
+    /// Waiting, noticed, opened. The middle state matters: it tells the user FlowPeek saw their
+    /// text, which is the half of the interaction that is otherwise invisible.
+    private func stateBadge(_ state: TutorialProgress.State) -> some View {
+        ZStack {
+            switch state {
+            case .waiting:
+                Circle().strokeBorder(.secondary.opacity(0.45), lineWidth: 1.5)
+            case .detected:
+                Circle().strokeBorder(Color.accentColor, lineWidth: 1.5)
+                Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+            case .done:
+                Circle().fill(.green)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 18, height: 18)
+    }
+
     private var footer: some View {
         VStack(spacing: 10) {
             if step == .permission && (permissionFlow.shouldOfferRelaunch || app.accessibilityNeedsRepair) {
@@ -278,9 +362,22 @@ struct OnboardingView: View {
                         .controlSize(.large)
                     }
                 case .launch:
-                    Button("common.start") { completion() }
+                    Button("common.continue") { step = .tutorial }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
+                case .tutorial:
+                    HStack(spacing: 10) {
+                        Button("tutorial.open-page") {
+                            // Get out of the way first: this window floats, and it was sitting
+                            // squarely on top of the page the user has to drag across.
+                            stepAside()
+                            TutorialPractice.open()
+                        }
+                            .controlSize(.large)
+                        Button(app.tutorial.isComplete ? "common.start" : "tutorial.skip") { completion() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                    }
                 }
             }
         }
@@ -301,6 +398,7 @@ struct OnboardingView: View {
 
     private func back() {
         switch step {
+        case .tutorial: step = .launch
         case .launch: step = app.accessibilityGranted ? .welcome : .permission
         case .permission, .welcome: step = .welcome
         }

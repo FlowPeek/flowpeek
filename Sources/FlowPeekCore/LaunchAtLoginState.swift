@@ -47,3 +47,59 @@ public enum LaunchAtLoginState: Equatable, Sendable {
         }
     }
 }
+
+/// The two halves a login-item switch is drawn from, kept in one value because either of them
+/// moving changes what has to be on screen. The system status is only half of it: for the two
+/// statuses `register()`/`unregister()` hand straight back — an item macOS is already holding at
+/// requires-approval, and one that never registered at all — the click is the *only* thing that
+/// moves, and the amber notice beneath the switch has to appear and disappear with it. So the
+/// halves travel together, and whatever publishes this publishes both.
+public struct LaunchAtLoginAnswer: Equatable, Sendable {
+    /// What the system reports: the login item is live.
+    public let registered: Bool
+    /// What the system reports: registered, and waiting on a confirmation under Login Items.
+    public let requiresApproval: Bool
+    /// Whether the login item was asked for during this run, which is the only thing that tells a
+    /// pending approval apart from an item the user switched off themselves. Not persisted, for the
+    /// reason `resolve` gives. Immutable like the rest: it moves by replacing the whole answer, so
+    /// there is no way to move it without whatever holds the answer noticing.
+    public let requestedOn: Bool
+
+    public init(registered: Bool, requiresApproval: Bool, requestedOn: Bool = false) {
+        self.registered = registered
+        self.requiresApproval = requiresApproval
+        self.requestedOn = requestedOn
+    }
+
+    public var state: LaunchAtLoginState {
+        .resolve(registered: registered, requiresApproval: requiresApproval, requestedOn: requestedOn)
+    }
+
+    /// The answer after the user works the switch. Its own step, and a whole new answer, because
+    /// this is the half the system cannot report: ask a requires-approval item to register and the
+    /// status comes back exactly as it went in, so a re-read has nothing to offer and the click is
+    /// all the change there is.
+    public func requesting(_ enabled: Bool) -> LaunchAtLoginAnswer {
+        LaunchAtLoginAnswer(
+            registered: registered,
+            requiresApproval: requiresApproval,
+            requestedOn: enabled
+        )
+    }
+
+    /// The answer after re-reading the system, or `nil` when there is nothing new to draw. Settings
+    /// and the onboarding card both re-read on every activation and most of those find the same
+    /// thing twice, so the no-change case is worth spotting — but only this way round. A re-read
+    /// carries `requestedOn` over rather than re-deriving it, because only the app knows it: the
+    /// system reports the same requires-approval whether this run asked for the registration or the
+    /// user switched the item off themselves. What the switch was set to is `requesting(_:)`'s to
+    /// move, and it must not be guarded by the status sitting still.
+    public func rereading(registered: Bool, requiresApproval: Bool) -> LaunchAtLoginAnswer? {
+        let next = LaunchAtLoginAnswer(
+            registered: registered,
+            requiresApproval: requiresApproval,
+            requestedOn: requestedOn
+        )
+        return next == self ? nil : next
+    }
+}

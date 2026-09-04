@@ -13,8 +13,9 @@ final class ShortcutCenter: ObservableObject {
     /// keys" while quietly losing its claim on the suspension.
     @Published private(set) var recordingAction: FlowPeekShortcutAction?
     /// Actions whose stored combination the OS refused to hand over, which in practice means another
-    /// process already owns it. Rebuilt on every registration, so a clash that appears months after
-    /// the shortcut was recorded still shows up.
+    /// process already owns it. Rebuilt whenever the registrations are — a launch, a recording, an
+    /// assignment, a restore, or a change to which actions may hold a key — so a clash that appears
+    /// months after the shortcut was recorded shows up the next time one of those happens.
     @Published private(set) var unavailableActions: Set<FlowPeekShortcutAction> = []
     /// Which actions may hold a hot key at all, per `ShortcutActivationPolicy`.
     @Published private(set) var activeActions = Set(FlowPeekShortcutAction.allCases)

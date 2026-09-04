@@ -84,16 +84,76 @@ final class OnboardingPolicyTests: XCTestCase {
     /// lid is met by the whole wizard again.
     func testEitherAnswerToThePermissionQuestionFinishesSetup() {
         XCTAssertTrue(
-            OnboardingPolicy.recordsCompletion(accessibilityGranted: true, permissionDeclined: false)
+            OnboardingPolicy.completionAfterDismissal(
+                wasCompleted: false,
+                accessibilityGranted: true,
+                permissionDeclined: false
+            )
         )
         XCTAssertTrue(
-            OnboardingPolicy.recordsCompletion(accessibilityGranted: false, permissionDeclined: true)
+            OnboardingPolicy.completionAfterDismissal(
+                wasCompleted: false,
+                accessibilityGranted: false,
+                permissionDeclined: true
+            )
         )
     }
 
+    /// "I'll decide later" is not an answer, so the offer has to survive the window closing.
     func testLeavingThePermissionQuestionUnansweredDoesNotFinishSetup() {
         XCTAssertFalse(
-            OnboardingPolicy.recordsCompletion(accessibilityGranted: false, permissionDeclined: false)
+            OnboardingPolicy.completionAfterDismissal(
+                wasCompleted: false,
+                accessibilityGranted: false,
+                permissionDeclined: false
+            )
+        )
+    }
+
+    /// Reopening the wizard from the menu bar and closing it again must not cost a finished user
+    /// their quiet launches: whoever writes the flag writes this answer, so it can only ever add.
+    func testAnAlreadyFinishedSetupSurvivesADismissalWithNothingAnswered() {
+        XCTAssertTrue(
+            OnboardingPolicy.completionAfterDismissal(
+                wasCompleted: true,
+                accessibilityGranted: false,
+                permissionDeclined: false
+            )
+        )
+    }
+
+    /// The pair that makes the rest of this suite mean something: the flag the dismissal writes is
+    /// exactly the one that decides whether the next launch is quiet.
+    func testFinishingWithAnAnswerIsWhatStopsTheNextLaunchOfferingTheWizard() {
+        for granted in [true, false] {
+            let completed = OnboardingPolicy.completionAfterDismissal(
+                wasCompleted: false,
+                accessibilityGranted: granted,
+                permissionDeclined: !granted
+            )
+            XCTAssertTrue(completed)
+            XCTAssertFalse(
+                OnboardingPolicy.shouldShow(
+                    accessibilityGranted: granted,
+                    onboardingCompleted: completed,
+                    permissionDeclined: !granted,
+                    forceOnboarding: false
+                )
+            )
+        }
+        // And unanswered stays offered, whether or not the window was dismissed.
+        let unanswered = OnboardingPolicy.completionAfterDismissal(
+            wasCompleted: false,
+            accessibilityGranted: false,
+            permissionDeclined: false
+        )
+        XCTAssertTrue(
+            OnboardingPolicy.shouldShow(
+                accessibilityGranted: false,
+                onboardingCompleted: unanswered,
+                permissionDeclined: false,
+                forceOnboarding: false
+            )
         )
     }
 }
@@ -127,7 +187,7 @@ final class OnboardingStepTests: XCTestCase {
 
     func testTheHeaderCountsEveryStepWhilePermissionIsStillOpen() {
         XCTAssertEqual(
-            OnboardingStep.visible(permissionSettled: false, current: .welcome),
+            OnboardingStep.visible(accessibilityGranted: false, current: .welcome),
             [.welcome, .permission, .launch, .tutorial]
         )
     }
@@ -135,16 +195,41 @@ final class OnboardingStepTests: XCTestCase {
     /// The dot for a step this run will not visit reads as one more card still to come.
     func testTheHeaderDropsTheStepItIsGoingToSkip() {
         XCTAssertEqual(
-            OnboardingStep.visible(permissionSettled: true, current: .tutorial),
+            OnboardingStep.visible(accessibilityGranted: true, current: .tutorial),
             [.welcome, .launch, .tutorial]
         )
     }
 
     func testTheSkippedStepGetsItsDotBackWhileTheUserStandsOnIt() {
         XCTAssertEqual(
-            OnboardingStep.visible(permissionSettled: true, current: .permission),
+            OnboardingStep.visible(accessibilityGranted: true, current: .permission),
             [.welcome, .permission, .launch, .tutorial]
         )
+    }
+
+    /// A refused permission question keeps its dot even though the flow steps over it going
+    /// forward, because Back still walks into it: dropping the dot would grow a capsule under the
+    /// user's hand as they press Back, and jump the count from three to four.
+    func testTheRefusedPermissionQuestionKeepsItsDotBecauseBackStillReachesIt() {
+        XCTAssertEqual(
+            OnboardingStep.visible(accessibilityGranted: false, current: .launch),
+            [.welcome, .permission, .launch, .tutorial]
+        )
+    }
+
+    /// The invariant behind both rules: the header cannot leave out a card the user is standing on
+    /// or is one Back away from, whatever they answered.
+    func testTheHeaderAlwaysHasADotForWhereTheUserIsAndWhereBackGoes() {
+        for granted in [true, false] {
+            for step in OnboardingStep.allCases {
+                let dots = OnboardingStep.visible(accessibilityGranted: granted, current: step)
+                XCTAssertTrue(dots.contains(step), "\(step) with granted=\(granted)")
+                XCTAssertTrue(
+                    dots.contains(step.previous(accessibilityGranted: granted)),
+                    "back from \(step) with granted=\(granted)"
+                )
+            }
+        }
     }
 
     /// "Try All Three" above a single clipboard row is copy the card itself contradicts.

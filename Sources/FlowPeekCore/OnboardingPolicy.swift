@@ -14,13 +14,21 @@ public enum OnboardingPolicy {
         forceOnboarding || (!accessibilityGranted && !permissionDeclined) || !onboardingCompleted
     }
 
-    /// Whether the wizard going away should record setup as finished. Answering the permission
-    /// question, either way, is the whole of it: the tutorial is practice, not a gate. It has to
-    /// hold for *every* way the window can leave — Escape, the ✕, or quitting with it still open —
-    /// because otherwise a user who granted permission and quit for the day is met by the whole
-    /// flow again at the next launch, which is the nag their answer was supposed to end.
-    public static func recordsCompletion(accessibilityGranted: Bool, permissionDeclined: Bool) -> Bool {
-        accessibilityGranted || permissionDeclined
+    /// What the completion flag reads after the wizard goes away, whichever way it went: Escape,
+    /// the ✕, or quitting with the card still open. Answering the permission question, either way,
+    /// is the whole of finishing — the tutorial is practice, not a gate — because otherwise a user
+    /// who granted permission and quit for the day is met by the whole flow again at the next
+    /// launch, which is the nag their answer was supposed to end. Leaving it unanswered is what
+    /// earns the second offer, so "I'll decide later" still works and only "I decided" sticks.
+    /// A run that was already recorded stays recorded: a dismissal can add a completion and never
+    /// take one back, or an already-finished user who reopens the wizard from the menu and closes
+    /// it again would have their quiet launches taken away.
+    public static func completionAfterDismissal(
+        wasCompleted: Bool,
+        accessibilityGranted: Bool,
+        permissionDeclined: Bool
+    ) -> Bool {
+        wasCompleted || accessibilityGranted || permissionDeclined
     }
 }
 
@@ -90,11 +98,12 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
         }
     }
 
-    /// The dots in the header, which have to count the cards this run will actually visit: a
-    /// settled permission question is stepped over going forward, and drawing its dot leaves the
-    /// last card looking like there is still one to come. It reappears while the user is standing on
-    /// it, which is the only way back into that question.
-    public static func visible(permissionSettled: Bool, current: Self) -> [Self] {
-        allCases.filter { $0 != .permission || !permissionSettled || current == .permission }
+    /// The dots in the header, which have to count the cards this run can actually visit: a granted
+    /// permission question is stepped over going forward and has nothing to come back to, so drawing
+    /// its dot leaves the last card looking like there is still one to come. A refused one keeps its
+    /// dot, because `previous` still walks back into it — a row that grows a capsule under the
+    /// user's hand as they press Back is worse than a card they were never going to see.
+    public static func visible(accessibilityGranted: Bool, current: Self) -> [Self] {
+        allCases.filter { $0 != .permission || !accessibilityGranted || current == .permission }
     }
 }

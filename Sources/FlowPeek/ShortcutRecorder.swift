@@ -164,6 +164,9 @@ private struct KeyCaptureView: NSViewRepresentable {
         var onCapture: ((UInt16, FlowPeekShortcut.Modifiers) -> Void)?
         var onModifiers: ((FlowPeekShortcut.Modifiers) -> Void)?
         var onCancel: (() -> Void)?
+        /// The cancel this view is waiting to hand over, kept so a second resignation replaces it
+        /// instead of stacking another waiter beside it.
+        private var deferredCancel: Task<Void, Never>?
 
         override var acceptsFirstResponder: Bool { true }
 
@@ -180,12 +183,17 @@ private struct KeyCaptureView: NSViewRepresentable {
             // that drains in between ends the session the button is about to toggle, so the click
             // starts a fresh recording instead of stopping it. Waiting for the button to come back
             // up leaves the toggle to decide, and `cancelRecording()` is a no-op once it has.
-            Task { @MainActor in
+            // One wait per field, replacing any still in flight: AppKit can resign the same view
+            // more than once for a single click, and every extra waiter is another run of frames
+            // holding the shortcuts down for a cancel that has already been decided.
+            deferredCancel?.cancel()
+            deferredCancel = Task { @MainActor in
                 // Bounded: a mouse held down for a second is not worth keeping every FlowPeek
                 // shortcut suspended for, and the cancel is safe to run either way.
                 var frames = 0
                 while NSEvent.pressedMouseButtons != 0, frames < 60 {
                     try? await Task.sleep(for: .milliseconds(16))
+                    if Task.isCancelled { return }
                     frames += 1
                 }
                 cancel?()

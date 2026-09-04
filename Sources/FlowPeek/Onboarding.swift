@@ -59,11 +59,13 @@ final class OnboardingCoordinator {
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
-            queue: .main
+            queue: nil
         ) { _ in
             // Synchronous rather than a `Task`: the app is already on its way out and a hop to the
-            // next main-actor turn would never run. `queue: .main` is what makes this the main
-            // thread, so the assumption holds.
+            // next main-actor turn would never run. `queue: nil` is the delivery that promises that
+            // — the block runs on the thread that posted the notification, which for
+            // `willTerminate` is the main one, so the isolation assumption holds too. Handing it a
+            // queue instead would be free to enqueue the block for a turn that never comes.
             MainActor.assumeIsolated { Self.recordProgress() }
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -101,11 +103,11 @@ final class OnboardingCoordinator {
     /// works and only "I decided" sticks.
     private static func recordProgress() {
         let app = AppState.shared
-        guard OnboardingPolicy.recordsCompletion(
+        app.onboardingComplete = OnboardingPolicy.completionAfterDismissal(
+            wasCompleted: app.onboardingComplete,
             accessibilityGranted: app.accessibilityGranted,
             permissionDeclined: app.permissionDeclined
-        ) else { return }
-        app.onboardingComplete = true
+        )
     }
 }
 
@@ -215,7 +217,7 @@ struct OnboardingView: View {
             .foregroundStyle(.secondary)
             Spacer()
             HStack(spacing: 7) {
-                ForEach(Step.visible(permissionSettled: permissionSettled, current: step), id: \.rawValue) { candidate in
+                ForEach(Step.visible(accessibilityGranted: app.accessibilityGranted, current: step), id: \.rawValue) { candidate in
                     Capsule()
                         .fill(step == candidate ? Color.accentColor : Color.accentColor.opacity(0.28))
                         .frame(width: step == candidate ? 24 : 8, height: 8)

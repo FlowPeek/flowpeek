@@ -38,10 +38,11 @@ final class AppState: ObservableObject {
     /// difference between the two is the pending relaunch, which is why the notice survives closing
     /// the Settings window and disappears by itself if the user picks their original language back.
     private let launchLanguage = AppLanguage.storedOverride(bundleIdentifier: Bundle.main.bundleIdentifier)
-    /// What macOS reports about the login item, which is not the same thing as what the user asked
-    /// for: a registration can succeed straight into `.requiresApproval`.
-    @Published private(set) var launchAtLoginStatus = SMAppService.mainApp.status
-    private var didRequestLaunchAtLogin = false
+    /// What macOS reports about the login item together with what this run asked for, which is not
+    /// the same thing: a registration can succeed straight into `.requiresApproval`. One published
+    /// value, because the switch and its notice are drawn from both halves and either one moving is
+    /// a redraw.
+    @Published private(set) var launchAtLogin = AppState.systemLaunchAtLogin
 
     let selectionMonitor = SelectionMonitor()
     let overlay = SelectionOverlayCoordinator()
@@ -480,21 +481,30 @@ final class AppState: ObservableObject {
         AIPromptCoordinator.shared.show(context: selection.text)
     }
 
-    var launchAtLoginState: LaunchAtLoginState {
-        LaunchAtLoginState.resolve(
-            registered: launchAtLoginStatus == .enabled,
-            requiresApproval: launchAtLoginStatus == .requiresApproval,
-            requestedOn: didRequestLaunchAtLogin
-        )
+    var launchAtLoginState: LaunchAtLoginState { launchAtLogin.state }
+
+    /// Settings and the onboarding card both re-read this on every activation, and most of those
+    /// find the status exactly where it was, so the no-change case is worth skipping. The skip is
+    /// `rereading`'s to decide rather than a comparison written here, because a re-read is only
+    /// ever half the answer: the other half moves when the switch is clicked, for statuses this
+    /// call cannot tell apart.
+    func refreshLaunchAtLoginStatus() {
+        let status = SMAppService.mainApp.status
+        guard let answer = launchAtLogin.rereading(
+            registered: status == .enabled,
+            requiresApproval: status == .requiresApproval
+        ) else { return }
+        launchAtLogin = answer
     }
 
-    func refreshLaunchAtLoginStatus() {
-        // Settings and the onboarding card both re-read this on every activation, and the
-        // assignment is what redraws the switch and its notice, so an answer that has not moved
-        // must not publish a change.
+    /// The answer this run starts from: whatever the system already reports, with nothing asked
+    /// for — the app has not been running long enough to have asked for anything.
+    private static var systemLaunchAtLogin: LaunchAtLoginAnswer {
         let status = SMAppService.mainApp.status
-        guard status != launchAtLoginStatus else { return }
-        launchAtLoginStatus = status
+        return LaunchAtLoginAnswer(
+            registered: status == .enabled,
+            requiresApproval: status == .requiresApproval
+        )
     }
 
     /// Nothing is thrown at the UI: an `SMAppService` failure arrives as a bare OSStatus ("The
@@ -502,7 +512,12 @@ final class AppState: ObservableObject {
     /// not registered — are not failures at all. The status the system reports afterwards is the
     /// honest answer, and `launchAtLoginState` is what the switch renders.
     func setLaunchAtLogin(_ enabled: Bool) {
-        didRequestLaunchAtLogin = enabled
+        // Part of the published answer rather than a flag beside it, because for the two statuses
+        // that `register()`/`unregister()` leave untouched — held for approval, and never
+        // registered at all — the click moves nothing else, and the notice beneath the switch has
+        // to appear and disappear with it. So this assignment is what redraws, not the re-read
+        // below, which will find the status exactly where it left it.
+        launchAtLogin = launchAtLogin.requesting(enabled)
         do {
             if enabled { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }

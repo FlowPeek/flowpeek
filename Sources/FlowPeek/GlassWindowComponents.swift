@@ -52,15 +52,18 @@ struct FlowPeekWindowCloseButton: View {
             .frame(width: 13, height: 13)
             // A 13pt dot is a hard thing to hit, and on these borderless surfaces it is the only
             // visible way out. The padding widens the hittable circle to 23pt; the negative padding
-            // hands the layout its 13pt back, so nothing beside it in the header moves.
+            // hands the layout its 13pt back, so nothing beside it in the header moves. The hover
+            // and the tooltip sit inside that padding rather than on the button, whose frame the
+            // negative padding has shrunk again: a click that lands in the ring has to light the dot
+            // up first, or the pointer is over something that gives no sign it can be pressed.
             .padding(5)
             .contentShape(Circle())
+            .onHover { isHovered = $0 }
+            .help(Text("common.close"))
             .padding(-5)
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
         .accessibilityLabel(Text("common.close"))
-        .help(Text("common.close"))
     }
 }
 

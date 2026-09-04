@@ -29,6 +29,11 @@ struct SettingsView: View {
     /// The centre is its own observable object, so reading it through `app` would never redraw: the
     /// dimmed rows and the AI card's shortcut would keep naming the previous state.
     @ObservedObject private var shortcuts = AppState.shared.shortcuts
+    /// The same defaults key `AppState.isEnabled` writes, read here rather than through `app`: an
+    /// `@AppStorage` living inside an `ObservableObject` publishes nothing, so a row that renders
+    /// the pause through `app` only redraws by accident, when something else in the same turn
+    /// happens to move. Owned by the view, `@AppStorage` observes the store itself.
+    @AppStorage("flowpeek.enabled") private var detectionEnabled = true
     @State private var selection = SettingsSection.general
     @State private var relaunchPrompt: RelaunchPrompt?
     let close: () -> Void
@@ -184,18 +189,17 @@ struct SettingsView: View {
                     statusBadge
                 }
                 HStack {
+                    // The pane is worth offering either way — it is where a grant is reviewed or
+                    // taken back — but it is only the thing to do next while the grant is missing,
+                    // not for something the badge two lines up reports as already given. One
+                    // button, wearing two styles: a copy per style would let the label and the
+                    // action drift apart in a branch nobody is looking at.
                     if app.accessibilityGranted {
-                        // Still worth offering — the pane is where a grant is reviewed or taken
-                        // back — but not as a call to action for something the badge two lines up
-                        // reports as already given.
-                        Button("settings.permission.request") { app.openAccessibilitySettings() }
-                            .buttonStyle(.bordered)
+                        accessibilityPaneButton.buttonStyle(.bordered)
                     } else {
-                        // Turning the switch on is what almost everyone here wants; removing the
-                        // TCC entry destroys a grant, so it must not be the one that looks like
-                        // the default.
-                        Button("settings.permission.request") { app.openAccessibilitySettings() }
-                            .buttonStyle(.borderedProminent)
+                        accessibilityPaneButton.buttonStyle(.borderedProminent)
+                        // Removing the TCC entry destroys a grant, so it must never be the button
+                        // that looks like the default.
                         Button("permission.reset") { app.confirmAccessibilityReset() }
                             .buttonStyle(.bordered)
                     }
@@ -364,7 +368,7 @@ struct SettingsView: View {
                     // switch that is already on, so the pause states its own reason.
                     if !isActive {
                         Label(
-                            String(localized: app.isEnabled ? action.inactiveHintKey : "shortcut.inactive.paused"),
+                            String(localized: detectionEnabled ? action.inactiveHintKey : "shortcut.inactive.paused"),
                             systemImage: "moon.zzz"
                         )
                             .font(.footnote)
@@ -528,6 +532,10 @@ struct SettingsView: View {
             .foregroundStyle(color)
             .frame(width: 34, height: 34)
             .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var accessibilityPaneButton: Button<Text> {
+        Button("settings.permission.request") { app.openAccessibilitySettings() }
     }
 
     private var statusBadge: some View {

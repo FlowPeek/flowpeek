@@ -7,6 +7,7 @@ final class OnboardingCoordinator {
     static let shared = OnboardingCoordinator()
     private var window: NSWindow?
     private var spaceObserver: NSObjectProtocol?
+    private var terminationObserver: NSObjectProtocol?
 
     func show() {
         if let window { window.makeKeyAndOrderFront(nil); return }
@@ -51,6 +52,20 @@ final class OnboardingCoordinator {
         ) { [weak self] _ in
             Task { @MainActor in self?.window?.orderFrontRegardless() }
         }
+        // Quitting with the card still open used to record nothing at all, so a user who granted
+        // permission, ticked a lesson or two and quit for the day was met by the whole flow again at
+        // the next launch. There is no other hook for it: the window is borderless, so AppKit's own
+        // close path is never taken, and the process is torn down without it.
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            // Synchronous rather than a `Task`: the app is already on its way out and a hop to the
+            // next main-actor turn would never run. `queue: .main` is what makes this the main
+            // thread, so the assumption holds.
+            MainActor.assumeIsolated { Self.recordProgress() }
+        }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
@@ -72,15 +87,25 @@ final class OnboardingCoordinator {
     }
 
     private func closeWindow() {
-        // Answering the permission question, either way, is finishing setup: the tutorial is
-        // practice, not a gate. Leaving it unanswered is what earns a second offer at the next
-        // launch, so "I'll decide later" still works and only "I decided" sticks.
-        let app = AppState.shared
-        if app.accessibilityGranted || app.permissionDeclined { app.onboardingComplete = true }
+        Self.recordProgress()
         window?.close()
         window = nil
         if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
         spaceObserver = nil
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
+        terminationObserver = nil
+    }
+
+    /// What the wizard leaves behind, whichever way it goes away. Leaving the permission question
+    /// unanswered is what earns a second offer at the next launch, so "I'll decide later" still
+    /// works and only "I decided" sticks.
+    private static func recordProgress() {
+        let app = AppState.shared
+        guard OnboardingPolicy.recordsCompletion(
+            accessibilityGranted: app.accessibilityGranted,
+            permissionDeclined: app.permissionDeclined
+        ) else { return }
+        app.onboardingComplete = true
     }
 }
 
@@ -96,39 +121,8 @@ private final class OnboardingWindow: NSWindow {
 
 struct OnboardingView: View {
     /// Permission is the only step that can complete itself; the login step is a question, so it
-    /// always waits for an answer.
-    private enum Step: Int, CaseIterable, Comparable {
-        case welcome, permission, launch, tutorial
-
-        static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
-
-        var symbol: String {
-            switch self {
-            case .welcome: "point.3.connected.trianglepath.dotted"
-            case .permission: "hand.point.up.left.and.text"
-            case .launch: "power"
-            case .tutorial: "graduationcap"
-            }
-        }
-
-        var title: String.LocalizationValue {
-            switch self {
-            case .welcome: "onboarding.welcome.title"
-            case .permission: "onboarding.permission.title"
-            case .launch: "onboarding.launch.title"
-            case .tutorial: "tutorial.title"
-            }
-        }
-
-        var message: String.LocalizationValue {
-            switch self {
-            case .welcome: "onboarding.welcome.message"
-            case .permission: "onboarding.permission.message"
-            case .launch: "onboarding.launch.message"
-            case .tutorial: "tutorial.message"
-            }
-        }
-    }
+    /// always waits for an answer. Which step follows which lives in FlowPeekCore.
+    private typealias Step = OnboardingStep
 
     @EnvironmentObject private var app: AppState
     #if DEBUG
@@ -163,10 +157,10 @@ struct OnboardingView: View {
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(.tint)
                     }
-                    Text(String(localized: step.title))
+                    Text(String(localized: step.titleKey(allLessonsAvailable: allLessonsAvailable)))
                         .font(.system(size: 31, weight: .bold, design: .rounded))
                         .multilineTextAlignment(.center)
-                    Text(String(localized: step.message))
+                    Text(String(localized: step.messageKey(allLessonsAvailable: allLessonsAvailable)))
                         .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         .frame(maxWidth: 540)
                         .fixedSize(horizontal: false, vertical: true)
@@ -221,7 +215,7 @@ struct OnboardingView: View {
             .foregroundStyle(.secondary)
             Spacer()
             HStack(spacing: 7) {
-                ForEach(Step.allCases, id: \.rawValue) { candidate in
+                ForEach(Step.visible(permissionSettled: permissionSettled, current: step), id: \.rawValue) { candidate in
                     Capsule()
                         .fill(step == candidate ? Color.accentColor : Color.accentColor.opacity(0.28))
                         .frame(width: step == candidate ? 24 : 8, height: 8)
@@ -349,10 +343,12 @@ struct OnboardingView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button("permission.turn-on") {
-                            app.permissionDeclined = false
-                            step = .permission
-                        }
+                        // Only the way back to the question. Clearing the decline here would answer
+                        // it on the user's behalf, and a user who then backed out without granting
+                        // would be left looking unanswered again — which re-arms the every-launch
+                        // offer the decline exists to switch off. The flag moves when they actually
+                        // grant the permission, or when they press the decline button again.
+                        Button("permission.turn-on") { step = .permission }
                         .controlSize(.small)
                         .padding(.top, 2)
                     }
@@ -468,7 +464,7 @@ struct OnboardingView: View {
     /// Nothing to do on the permission step once it is already granted or already refused, so it is
     /// skipped rather than flashed past — or, in the refused case, walked into again.
     private func advanceFromWelcome() {
-        step = permissionSettled ? .launch : .permission
+        step = Step.afterWelcome(permissionSettled: permissionSettled)
     }
 
     private func advancePastPermission() {
@@ -484,11 +480,7 @@ struct OnboardingView: View {
     }
 
     private func back() {
-        switch step {
-        case .tutorial: step = .launch
-        case .launch: step = permissionSettled ? .welcome : .permission
-        case .permission, .welcome: step = .welcome
-        }
+        step = step.previous(accessibilityGranted: app.accessibilityGranted)
     }
 
     /// The permission question has an answer, whichever one it is.
@@ -498,6 +490,10 @@ struct OnboardingView: View {
 
     private var availableLessons: [TutorialProgress.Lesson] {
         TutorialProgress.Lesson.available(accessibilityGranted: app.accessibilityGranted)
+    }
+
+    private var allLessonsAvailable: Bool {
+        availableLessons.count == TutorialProgress.Lesson.allCases.count
     }
 
     private var waitingMessageKey: String.LocalizationValue {

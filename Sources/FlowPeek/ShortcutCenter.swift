@@ -33,6 +33,11 @@ final class ShortcutCenter: ObservableObject {
     private var isSuspended = false
     /// Bumped by every begin and end, so a watchdog can tell its own session from a later one.
     private var recordingGeneration = 0
+    /// The watchdog for the recording session that is open now, cancelled by the next begin or end
+    /// so a minute of clicking record fields does not leave sixty of them sleeping.
+    private var recordingWatchdog: Task<Void, Never>?
+    /// Whether the live registrations have been built at least once; see `setActiveActions`.
+    private var hasRegistered = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -59,6 +64,13 @@ final class ShortcutCenter: ObservableObject {
     /// The policy's answer, applied. What left the set gives its hot key back to the rest of the
     /// system; what entered it takes one.
     func setActiveActions(_ actions: Set<FlowPeekShortcutAction>) {
+        // `applyEnabledState()` runs on every switch in Settings and from the menu bar, and most of
+        // those do not move this set. Re-registering anyway would drop and re-take every live
+        // Carbon claim — a window in which another app can grab the combination — and redraw the
+        // Shortcuts pane for nothing. The first call still has to register: `activeActions` starts
+        // optimistic, so for a user with every feature on it already equals the policy's answer.
+        guard actions != activeActions || !hasRegistered else { return }
+        hasRegistered = true
         activeActions = actions
         registerAll()
     }
@@ -72,9 +84,10 @@ final class ShortcutCenter: ObservableObject {
         // Everything that can take the keyboard away without a keystroke releases the suspension
         // itself, but a leak here disables every shortcut for the rest of the session with nothing
         // on screen to say so, so it also gets a floor it cannot fall through.
-        Task { [weak self] in
+        recordingWatchdog?.cancel()
+        recordingWatchdog = Task { [weak self] in
             try? await Task.sleep(for: Self.recordingLifetime)
-            guard let self, self.recordingGeneration == session else { return }
+            guard let self, !Task.isCancelled, self.recordingGeneration == session else { return }
             self.endRecording()
         }
         guard !isSuspended else { return }
@@ -86,6 +99,8 @@ final class ShortcutCenter: ObservableObject {
     func endRecording() {
         recordingAction = nil
         recordingGeneration += 1
+        recordingWatchdog?.cancel()
+        recordingWatchdog = nil
         guard isSuspended else { return }
         isSuspended = false
         registerAll()
@@ -169,11 +184,14 @@ final class ShortcutCenter: ObservableObject {
     func resetAll() {
         // Restoring defaults mid-recording used to write shortcuts that `registerAll()` then skipped,
         // because a suspension was still in force; ending it first also drops the field out of
-        // "Press keys", which is what the user asked for by pressing this.
-        endRecording()
+        // "Press keys", which is what the user asked for by pressing this. The defaults go in before
+        // that, though: `endRecording()` registers on the way out, and doing it the other way round
+        // claimed the custom combinations system-wide for the instant before they were discarded.
         shortcuts = .defaults
         persist()
-        registerAll()
+        let wasSuspended = isSuspended
+        endRecording()
+        if !wasSuspended { registerAll() }
     }
 
     func validate(

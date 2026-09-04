@@ -184,11 +184,18 @@ struct SettingsView: View {
                     statusBadge
                 }
                 HStack {
-                    // Turning the switch on is what almost everyone here wants; removing the TCC
-                    // entry destroys a grant, so it must not be the one that looks like the default.
-                    Button("settings.permission.request") { app.openAccessibilitySettings() }
-                        .buttonStyle(.borderedProminent)
-                    if !app.accessibilityGranted {
+                    if app.accessibilityGranted {
+                        // Still worth offering — the pane is where a grant is reviewed or taken
+                        // back — but not as a call to action for something the badge two lines up
+                        // reports as already given.
+                        Button("settings.permission.request") { app.openAccessibilitySettings() }
+                            .buttonStyle(.bordered)
+                    } else {
+                        // Turning the switch on is what almost everyone here wants; removing the
+                        // TCC entry destroys a grant, so it must not be the one that looks like
+                        // the default.
+                        Button("settings.permission.request") { app.openAccessibilitySettings() }
+                            .buttonStyle(.borderedProminent)
                         Button("permission.reset") { app.confirmAccessibilityReset() }
                             .buttonStyle(.bordered)
                     }
@@ -352,9 +359,14 @@ struct SettingsView: View {
                         ShortcutRecorder(action: action, center: shortcuts)
                     }
                     // The recorder stays live so the combination can be set up in advance; what the
-                    // row has to say is that pressing it right now does nothing.
+                    // row has to say is that pressing it right now does nothing. Pausing detection
+                    // dormants every action at once, and the per-action hint would then name a
+                    // switch that is already on, so the pause states its own reason.
                     if !isActive {
-                        Label(String(localized: action.inactiveHintKey), systemImage: "moon.zzz")
+                        Label(
+                            String(localized: app.isEnabled ? action.inactiveHintKey : "shortcut.inactive.paused"),
+                            systemImage: "moon.zzz"
+                        )
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

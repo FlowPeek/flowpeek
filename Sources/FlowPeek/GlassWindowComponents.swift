@@ -50,7 +50,12 @@ struct FlowPeekWindowCloseButton: View {
                     .foregroundStyle(isHovered ? Color.black.opacity(0.7) : Color.primary.opacity(0.45))
             }
             .frame(width: 13, height: 13)
+            // A 13pt dot is a hard thing to hit, and on these borderless surfaces it is the only
+            // visible way out. The padding widens the hittable circle to 23pt; the negative padding
+            // hands the layout its 13pt back, so nothing beside it in the header moves.
+            .padding(5)
             .contentShape(Circle())
+            .padding(-5)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

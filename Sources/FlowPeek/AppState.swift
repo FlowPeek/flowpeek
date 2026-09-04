@@ -489,7 +489,12 @@ final class AppState: ObservableObject {
     }
 
     func refreshLaunchAtLoginStatus() {
-        launchAtLoginStatus = SMAppService.mainApp.status
+        // Settings and the onboarding card both re-read this on every activation, and the
+        // assignment is what redraws the switch and its notice, so an answer that has not moved
+        // must not publish a change.
+        let status = SMAppService.mainApp.status
+        guard status != launchAtLoginStatus else { return }
+        launchAtLoginStatus = status
     }
 
     /// Nothing is thrown at the UI: an `SMAppService` failure arrives as a bare OSStatus ("The

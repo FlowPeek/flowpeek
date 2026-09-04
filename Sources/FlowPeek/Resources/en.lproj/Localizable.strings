@@ -14,6 +14,8 @@
 "onboarding.permission.message" = "Copying a diagram needs no permission. For a button beside text you select in other apps, FlowPeek needs permission to read that selection—nothing else, and nothing leaves this Mac.";
 "tutorial.title" = "Try All Three";
 "tutorial.message" = "FlowPeek has three ways in. Open the practice page and use each one for real — the ticks fill in as you go.";
+"tutorial.title.one" = "Try the Copy Route";
+"tutorial.message.one" = "Copying is the way in that needs no permission. Open the practice page and use it for real — the tick fills in as you go.";
 "tutorial.open-page" = "Open Practice Page";
 "tutorial.skip" = "Finish Anyway";
 "tutorial.page.title" = "FlowPeek practice";
@@ -84,6 +86,7 @@
 "shortcut.inactive.clipboard" = "Turn on “Watch the clipboard” in General to use this.";
 "shortcut.inactive.ai" = "Turn on AI Diagram Generation in the AI tab to use this.";
 "shortcut.inactive.ambient" = "Turn on “Hold to Peek” in General, and allow Accessibility, to use this.";
+"shortcut.inactive.paused" = "Detection is paused. Turn it back on from the FlowPeek menu to use this.";
 "shortcut.error.no-modifier" = "A global shortcut needs at least one of Command, Option, or Control.";
 "shortcut.error.reserved" = "%@ is reserved by macOS.";
 "shortcut.error.already-used" = "Already assigned to “%@”.";

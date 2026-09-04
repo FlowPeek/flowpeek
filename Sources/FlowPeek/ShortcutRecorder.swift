@@ -171,8 +171,24 @@ private struct KeyCaptureView: NSViewRepresentable {
         /// without pressing anything, so nothing else would ever end the recording. The window check
         /// skips the same call arriving during teardown, when the recording is already over.
         override func resignFirstResponder() -> Bool {
-            if window != nil {
-                DispatchQueue.main.async { [weak self] in self?.onCancel?() }
+            guard window != nil else { return true }
+            let cancel = onCancel
+            // Deferred, because ending the recording tears down this very view and AppKit is still
+            // inside `makeFirstResponder` here — but not merely to the next main-queue turn. The
+            // click that takes the keyboard away can be the second click on the record field, which
+            // is the documented way to stop; that button's action arrives on mouse-up, and a cancel
+            // that drains in between ends the session the button is about to toggle, so the click
+            // starts a fresh recording instead of stopping it. Waiting for the button to come back
+            // up leaves the toggle to decide, and `cancelRecording()` is a no-op once it has.
+            Task { @MainActor in
+                // Bounded: a mouse held down for a second is not worth keeping every FlowPeek
+                // shortcut suspended for, and the cancel is safe to run either way.
+                var frames = 0
+                while NSEvent.pressedMouseButtons != 0, frames < 60 {
+                    try? await Task.sleep(for: .milliseconds(16))
+                    frames += 1
+                }
+                cancel?()
             }
             return true
         }

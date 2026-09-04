@@ -99,6 +99,10 @@ public struct MermaidRenderResult: Sendable, Equatable {
     public let scrubbed: [String]
     public let durationMS: Int
     public let cspViolations: [String]
+    /// Which measurement the glue's `adoptGeometry` had to give up on, in the order it tried them.
+    /// `DiagramNotice.estimatedSizeMarker` in here means WebKit refused to measure the drawing and
+    /// the size on screen is the layout box FlowPeek pinned instead.
+    public let measurementFallbacks: [String]
 
     public init(
         svg: String,
@@ -107,7 +111,8 @@ public struct MermaidRenderResult: Sendable, Equatable {
         height: Double,
         scrubbed: [String],
         durationMS: Int,
-        cspViolations: [String] = []
+        cspViolations: [String] = [],
+        measurementFallbacks: [String] = []
     ) {
         self.svg = svg
         self.diagramType = diagramType
@@ -116,9 +121,20 @@ public struct MermaidRenderResult: Sendable, Equatable {
         self.scrubbed = scrubbed
         self.durationMS = durationMS
         self.cspViolations = cspViolations
+        self.measurementFallbacks = measurementFallbacks
     }
 
     public var size: CGSize { CGSize(width: width, height: height) }
+
+    /// What this render is worth saying out loud even though it succeeded. `nil` for the ordinary
+    /// case, which includes most scrubbing.
+    public var notice: DiagramNotice? {
+        DiagramNotice.make(
+            scrubbed: scrubbed,
+            cspViolations: cspViolations,
+            measurementFallbacks: measurementFallbacks
+        )
+    }
 
     /// Scale that fits the diagram into `viewport`, clamped to `DiagramViewport`'s own range.
     public func fitScale(in viewport: CGSize, inset: CGFloat = 36) -> Double {
@@ -128,6 +144,72 @@ public struct MermaidRenderResult: Sendable, Equatable {
         let scale = min(1, min(available.width / width, available.height / height))
         return min(max(Double(scale), 0.2), 5)
     }
+}
+
+/// A diagram that drew, but not quite as its author wrote it. Only the removals a person can
+/// actually see are worth a word: a stripped `@onclick`, a `<script>` that the CSP would never have
+/// run anyway, or an `<animate>` we drop by policy all change nothing on screen, so they stay in
+/// the log where they belong.
+public struct DiagramNotice: Equatable, Sendable {
+    public enum Reason: String, Equatable, Sendable, CaseIterable {
+        /// Pictures, media, or anything else the diagram pointed at over the network.
+        case remoteContentBlocked = "remote-content-blocked"
+        /// mermaid parks the labels it cannot draw as plain SVG text — KaTeX maths above all — in a
+        /// `<foreignObject>`, and the sweep removes those wholesale: the shape survives, its label
+        /// comes out blank.
+        case labelsDropped = "labels-dropped"
+        /// The diagram is on screen at a size FlowPeek supplied, not one WebKit measured.
+        case sizeEstimated = "size-estimated"
+    }
+
+    /// In `Reason.allCases` order, so a diagram with two problems always reads the same way.
+    public let reasons: [Reason]
+    /// The engine's own words, for the small print that makes a bug report possible.
+    public let details: [String]
+
+    /// `adoptGeometry` pushes this once `getBBox()` has refused to answer and the CSS box is all
+    /// that is left to go on.
+    public static let estimatedSizeMarker = "bbox"
+
+    /// Elements whose removal takes visible content with it.
+    static let remoteTags: Set<String> = ["image", "iframe", "object", "embed", "link", "audio", "video", "source"]
+    /// Attributes that pointed somewhere off this Mac. Anchors never appear here: they are unwrapped
+    /// rather than removed, so a linked box keeps its text and only stops being clickable.
+    static let remoteAttributes: Set<String> = ["@href", "@xlink:href", "@src", "@style-url"]
+    static let labelTags: Set<String> = ["foreignobject"]
+
+    public static func make(
+        scrubbed: [String],
+        cspViolations: [String],
+        measurementFallbacks: [String]
+    ) -> DiagramNotice? {
+        let removed = Set(scrubbed.map { $0.lowercased() })
+        var reasons: [Reason] = []
+        if !removed.isDisjoint(with: remoteTags) || !removed.isDisjoint(with: remoteAttributes)
+            || !cspViolations.isEmpty {
+            reasons.append(.remoteContentBlocked)
+        }
+        if !removed.isDisjoint(with: labelTags) { reasons.append(.labelsDropped) }
+        if measurementFallbacks.contains(estimatedSizeMarker) { reasons.append(.sizeEstimated) }
+        guard !reasons.isEmpty else { return nil }
+        return DiagramNotice(reasons: reasons, details: scrubbed + cspViolations + measurementFallbacks)
+    }
+
+    public init(reasons: [Reason], details: [String]) {
+        self.reasons = reasons
+        self.details = details
+    }
+
+    public static let badgeKey = "preview.notice.badge"
+    public static let detailsKey = "preview.notice.details"
+
+    /// Every key this type can emit — the localisation test walks it.
+    public static let localizationKeys: [String] =
+        Reason.allCases.map(\.localizationKey) + [badgeKey, detailsKey]
+}
+
+extension DiagramNotice.Reason {
+    public var localizationKey: String { "preview.notice." + rawValue }
 }
 
 public enum MermaidRenderError: Error, LocalizedError, Equatable, Sendable {
@@ -173,6 +255,26 @@ public enum MermaidRenderError: Error, LocalizedError, Equatable, Sendable {
         case .renderProducedNoSVG: "mermaid.render.error.no-svg"
         case .timedOut: "mermaid.render.error.timed-out"
         case .internalFailure: "mermaid.render.error.internal"
+        }
+    }
+
+    /// The one thing the failure card offers. Retrying a diagram mermaid could not parse fails
+    /// identically every time, so those cases get the text to go and fix instead.
+    public enum Recovery: Equatable, Sendable {
+        case retry
+        case fixSource
+        case none
+    }
+
+    public var recovery: Recovery {
+        switch self {
+        case .engineNotReady, .webContentTerminated, .navigationFailed, .renderProducedNoSVG,
+             .timedOut, .internalFailure:
+            .retry
+        case .parseFailure, .unknownDiagramType, .edgeLimitExceeded, .inputTooLarge:
+            .fixSource
+        case .engineMissing:
+            .none
         }
     }
 
@@ -238,6 +340,7 @@ public struct MermaidGlueResponse: Codable, Equatable, Sendable {
     public var durationMS: Int?
     public var engineVersion: String?
     public var cspViolations: [String]?
+    public var measurementFallbacks: [String]?
 
     public init(
         ok: Bool,
@@ -251,7 +354,8 @@ public struct MermaidGlueResponse: Codable, Equatable, Sendable {
         svg: String? = nil,
         durationMS: Int? = nil,
         engineVersion: String? = nil,
-        cspViolations: [String]? = nil
+        cspViolations: [String]? = nil,
+        measurementFallbacks: [String]? = nil
     ) {
         self.ok = ok
         self.code = code
@@ -265,6 +369,7 @@ public struct MermaidGlueResponse: Codable, Equatable, Sendable {
         self.durationMS = durationMS
         self.engineVersion = engineVersion
         self.cspViolations = cspViolations
+        self.measurementFallbacks = measurementFallbacks
     }
 }
 
@@ -317,7 +422,8 @@ public enum MermaidGlueDecoder {
             height: height,
             scrubbed: response.scrubbed ?? [],
             durationMS: response.durationMS ?? 0,
-            cspViolations: response.cspViolations ?? []
+            cspViolations: response.cspViolations ?? [],
+            measurementFallbacks: response.measurementFallbacks ?? []
         )
     }
 
@@ -418,7 +524,9 @@ public struct MermaidEngineHealth: Sendable, Equatable {
         case .degraded(let detail):
             return String(format: String(localized: "mermaid.engine.degraded"), detail)
         case .broken(let error):
-            return String(format: String(localized: "mermaid.engine.broken"), error.localizedDescription)
+            // `errorDescription` interpolates the engine's own English; the menu bar is the one
+            // place a Korean user meets this string, so it gets the headline instead.
+            return String(format: String(localized: "mermaid.engine.broken"), MermaidFailurePresentation.make(error).headline)
         }
     }
 }

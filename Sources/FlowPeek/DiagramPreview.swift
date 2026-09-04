@@ -11,11 +11,14 @@ final class DiagramViewModel: ObservableObject {
         case idle
         case rendering
         case rendered(MermaidRenderResult)
-        case failed(String)
+        case failed(MermaidFailurePresentation)
     }
 
     @Published var title: String
     @Published private(set) var status: Status = .idle
+    /// Raised beside the title when a diagram drew but not as written. Never blocking: the diagram
+    /// is on screen, and this is the only place FlowPeek admits it is not all of it.
+    @Published private(set) var notice: DiagramNotice?
     @Published private(set) var scale: Double = 1
     @Published private(set) var engine: MermaidEngineView?
 
@@ -53,7 +56,7 @@ final class DiagramViewModel: ObservableObject {
             view.onViewportChange = { [weak self] scale in self?.scale = scale }
             engine = view
         } catch {
-            status = .failed(error.localizedDescription)
+            status = .failed(MermaidFailurePresentation.make(error))
             logger.error("no engine view available: \(error.localizedDescription, privacy: .public)")
             return
         }
@@ -116,6 +119,12 @@ final class DiagramViewModel: ObservableObject {
 
     // MARK: - Rendering
 
+    /// `render()` gives up when there is no engine, and `replaceEngine()` can leave it nil, so the
+    /// button in the failure card has to be allowed to check a view back out first.
+    func retry() {
+        if engine == nil { attach() } else { render() }
+    }
+
     private func render() {
         renderTask?.cancel()
         guard let engine else { return }
@@ -131,6 +140,7 @@ final class DiagramViewModel: ObservableObject {
             renderID: MermaidRenderIdentifier.renderID(Self.renderCounter)
         )
         status = .rendering
+        notice = nil
         renderTask = Task { [weak self] in
             let outcome: Result<MermaidRenderResult, MermaidRenderError>
             do {
@@ -146,6 +156,7 @@ final class DiagramViewModel: ObservableObject {
                 if !result.scrubbed.isEmpty {
                     self.logger.error("scrubbed \(result.scrubbed.joined(separator: ","), privacy: .public) from a rendered diagram")
                 }
+                self.notice = result.notice
                 self.status = .rendered(result)
                 self.needsFit = true
                 self.engine?.fitToStage()
@@ -162,7 +173,8 @@ final class DiagramViewModel: ObservableObject {
                 default:
                     break
                 }
-                self.status = .failed(error.localizedDescription)
+                self.notice = nil
+                self.status = .failed(MermaidFailurePresentation.make(error, source: self.source))
             }
         }
     }
@@ -204,23 +216,107 @@ struct DiagramStage: View {
             if case .rendering = model.status {
                 ProgressView().controlSize(.small)
             }
-            if case .failed(let message) = model.status {
-                ScrollView {
-                    Text(message)
-                        .font(.callout)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: 460, alignment: .leading)
-                }
-                .frame(maxHeight: 220)
-                .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.red.opacity(0.32)))
-                .padding(24)
+            if case .failed(let presentation) = model.status {
+                DiagramFailureView(
+                    presentation: presentation,
+                    source: model.source,
+                    onRetry: { model.retry() }
+                )
             }
         }
         .onChange(of: colorScheme, initial: true) { _, scheme in
             model.update(appearance: scheme == .dark ? .dark : .light)
         }
+    }
+}
+
+/// The failure card. Two tiers, in this order: what went wrong and what to do about it, in the
+/// reader's own language; then, folded away, the engine's own words — a jison caret diagram only
+/// starts to mean something in a fixed-width font, and the "No diagram type detected … for text:"
+/// message carries the whole selection back, which nobody needs to read.
+struct DiagramFailureView: View {
+    let presentation: MermaidFailurePresentation
+    let source: String
+    let onRetry: () -> Void
+
+    @State private var showsDetails = false
+
+    var body: some View {
+        // Nothing here grows without a bound — the headline and the hint are one sentence each, the
+        // quote is clipped at two lines, and only the engine text scrolls — so the card needs no
+        // scroll view of its own, and nesting one would fight the disclosure's.
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(verbatim: presentation.headline)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let quoted = presentation.quotedLine {
+                Text(verbatim: quoted)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            if let hint = presentation.hint {
+                Text(verbatim: hint)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                switch presentation.recovery {
+                case .retry:
+                    Button("preview.failure.retry", action: onRetry)
+                        .buttonStyle(.borderedProminent)
+                case .fixSource:
+                    Button("preview.failure.copy-source") { copy(source) }
+                        .buttonStyle(.borderedProminent)
+                case .none:
+                    EmptyView()
+                }
+                if presentation.engineDetails != nil {
+                    Button("preview.failure.copy-details") { copy(report) }
+                }
+            }
+            .controlSize(.small)
+            if let details = presentation.engineDetails {
+                DisclosureGroup(isExpanded: $showsDetails) {
+                    ScrollView {
+                        Text(verbatim: details)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 110)
+                } label: {
+                    Text("preview.failure.details")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: 460, alignment: .leading)
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.orange.opacity(0.32)))
+        .padding(24)
+    }
+
+    /// The engine text plus the build it came from: everything we would ask for in a bug report.
+    private var report: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        return presentation.diagnosticReport + "\nFlowPeek \(version ?? "?")"
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }
 
@@ -240,7 +336,9 @@ struct MermaidPreviewSurface: View {
             .onDisappear { model.release() }
             .onChange(of: source) { _, value in model.update(source: value) }
             .onChange(of: model.status) { _, status in
-                if case .failed(let message) = status { onFailure?(message) } else { onFailure?(nil) }
+                // The inspector has room for one line, so it gets the headline and the offending
+                // line — never the engine text the card keeps behind its disclosure.
+                if case .failed(let presentation) = status { onFailure?(presentation.plainSummary) } else { onFailure?(nil) }
             }
     }
 }
@@ -434,7 +532,14 @@ struct DiagramPreviewView: View {
     let onPromote: () -> Void
     let onClose: () -> Void
 
+    @State private var showsNotice = false
+
     private var cornerRadius: CGFloat { compact ? 20 : 24 }
+
+    private var hasDiagram: Bool {
+        if case .failed = model.status { return false }
+        return true
+    }
 
     var body: some View {
         FlowPeekGlassSurface(cornerRadius: cornerRadius) {
@@ -456,8 +561,10 @@ struct DiagramPreviewView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let notice = model.notice { noticeBadge(notice) }
             Spacer(minLength: 12)
             zoomCluster
+                .disabled(!hasDiagram)
             if compact {
                 chromeButton("macwindow", help: "preview.open-window", action: onPromote)
                     .padding(.leading, 2)
@@ -484,6 +591,42 @@ struct DiagramPreviewView: View {
         .padding(.vertical, 4)
         .background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
+    }
+
+    /// Quiet on purpose: the diagram did render, so this is a footnote next to its title and never
+    /// a sheet, an alert, or anything that has to be dismissed before reading the diagram.
+    private func noticeBadge(_ notice: DiagramNotice) -> some View {
+        Button { showsNotice.toggle() } label: {
+            Image(systemName: "exclamationmark.shield")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(LocalizedStringKey(DiagramNotice.badgeKey))
+        .accessibilityLabel(Text(LocalizedStringKey(DiagramNotice.badgeKey)))
+        .popover(isPresented: $showsNotice, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(LocalizedStringKey(DiagramNotice.badgeKey)).font(.headline)
+                ForEach(notice.reasons, id: \.self) { reason in
+                    Text(LocalizedStringKey(reason.localizationKey))
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !notice.details.isEmpty {
+                    Text(verbatim: String(
+                        format: String(localized: String.LocalizationValue(DiagramNotice.detailsKey)),
+                        notice.details.joined(separator: ", ")
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(14)
+            .frame(width: 300, alignment: .leading)
+        }
     }
 
     private func chromeButton(

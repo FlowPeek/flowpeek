@@ -1,6 +1,10 @@
 import FlowPeekCore
 import Foundation
+import OSLog
 
+/// The provider's own body never reaches the panel: it is English, it is JSON, and on a rejected key
+/// it can quote the key back. It goes to the log instead, and the reader gets the one sentence that
+/// says what to do. The payload stays on the case so that log line can name what came back.
 enum AIProviderError: LocalizedError {
     case missingKey
     case invalidResponse
@@ -10,12 +14,17 @@ enum AIProviderError: LocalizedError {
         switch self {
         case .missingKey: String(localized: "ai.error.missing-key")
         case .invalidResponse: String(localized: "ai.error.invalid-response")
-        case .server(let status, let message): "HTTP \(status): \(message)"
+        case .server(let status, _):
+            status == 401 || status == 403
+                ? String(localized: "ai.error.unauthorized")
+                : String(format: String(localized: "ai.error.server"), status)
         }
     }
 }
 
 struct AIProviderClient {
+    static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "AI")
+
     let session: URLSession
 
     init(session: URLSession = .shared) { self.session = session }
@@ -26,7 +35,12 @@ struct AIProviderClient {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AIProviderError.invalidResponse }
         guard 200..<300 ~= http.statusCode else {
-            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? String(data: data, encoding: .utf8) ?? "Request failed"
+            // All three providers nest the text under an `error` object, so `["error"] as? String`
+            // never matched and the entire body went through in its place.
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let nested = (object?["error"] as? [String: Any])?["message"] as? String
+            let message = nested ?? String(data: data.prefix(500), encoding: .utf8) ?? ""
+            Self.logger.error("provider rejected the request: HTTP \(http.statusCode, privacy: .public) \(message, privacy: .private)")
             throw AIProviderError.server(http.statusCode, message)
         }
         let text = try extractText(kind: kind, data: data)

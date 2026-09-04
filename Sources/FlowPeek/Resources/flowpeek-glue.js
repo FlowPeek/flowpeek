@@ -155,7 +155,8 @@
         scrubbed: scrubbed,
         svg: live.outerHTML,
         durationMS: Math.round(now() - t0),
-        engineVersion: engineVersion()
+        engineVersion: engineVersion(),
+        measurementFallbacks: geometry.measurementFallbacks
       });
     } catch (e) {
       diagram.replaceChildren();
@@ -287,15 +288,18 @@
   /// Pins the freshly attached SVG to its natural pixel size. mermaid emits `width="100%"` with a
   /// `max-width` in the style attribute, which silently fits-to-width and then fought the zoom.
   function adoptGeometry(svg) {
-    var w = 0, h = 0;
+    var w = 0, h = 0, fallbacks = [];
     try {
       var vb = svg.viewBox && svg.viewBox.baseVal;
       if (vb) { w = vb.width; h = vb.height; }
     } catch (e) { /* fall through to getBBox */ }
     if (!(w > 0 && h > 0)) {
+      fallbacks.push("viewbox");
       try { var bb = svg.getBBox(); w = bb.width; h = bb.height; } catch (e2) { /* keep zero */ }
     }
-    if (!(w > 0 && h > 0)) { w = svg.clientWidth || 0; h = svg.clientHeight || 0; }
+    // Last resort: the CSS box, which is the size we imposed rather than the size of the drawing.
+    // Swift turns this one into a quiet notice, because it is how a diagram comes out cropped.
+    if (!(w > 0 && h > 0)) { fallbacks.push("bbox"); w = svg.clientWidth || 0; h = svg.clientHeight || 0; }
     if (w > 0 && h > 0) {
       svg.setAttribute("width", String(w));
       svg.setAttribute("height", String(h));
@@ -306,7 +310,7 @@
     }
     vp.w = w;
     vp.h = h;
-    return { width: w, height: h };
+    return { width: w, height: h, measurementFallbacks: fallbacks };
   }
 
   function clearGeometry() {

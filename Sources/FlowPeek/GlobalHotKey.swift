@@ -39,7 +39,11 @@ final class GlobalHotKey {
     private var reference: EventHotKeyRef?
     private var observer: NSObjectProtocol?
 
-    func register(_ shortcut: FlowPeekShortcut, for action: FlowPeekShortcutAction) {
+    /// The returned status is the only witness to a combination another process already owns, so it
+    /// is handed back rather than only logged. Note this begins by dropping any previous claim: a
+    /// caller that gets a failure is left holding nothing and has to put the old shortcut back.
+    @discardableResult
+    func register(_ shortcut: FlowPeekShortcut, for action: FlowPeekShortcutAction) -> OSStatus {
         unregister()
         HotKeyDispatcher.shared.installHandlerIfNeeded()
         identifier = action.hotKeyID
@@ -67,6 +71,7 @@ final class GlobalHotKey {
                 self.onPress?()
             }
         }
+        return status
     }
 
     func unregister() {

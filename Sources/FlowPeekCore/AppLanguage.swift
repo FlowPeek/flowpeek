@@ -41,4 +41,19 @@ public enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         let base = first.split(separator: "-").first.map(String.init) ?? first
         return allCases.first { $0.localeIdentifier == base } ?? .system
     }
+
+    /// The override this app itself wrote, or `.system` when its own domain carries none.
+    /// Deliberately not read through `UserDefaults.standard`, whose search list includes
+    /// `NSGlobalDomain`: that domain always defines `AppleLanguages`, so a fall-through read reports
+    /// the system's language as if the user had chosen it and can never resolve back to `.system`.
+    public static func storedOverride(
+        in defaults: UserDefaults = .standard,
+        bundleIdentifier: String?
+    ) -> AppLanguage {
+        guard let bundleIdentifier,
+              let domain = defaults.persistentDomain(forName: bundleIdentifier),
+              let languages = domain[defaultsKey] as? [String]
+        else { return .system }
+        return stored(in: languages)
+    }
 }

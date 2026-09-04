@@ -43,10 +43,15 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        // Closing the window with a field still recording would leave every global shortcut
+        // suspended for the rest of the session. Idempotent, so it is safe next to `onDisappear`,
+        // which SwiftUI is not guaranteed to run before the window goes away.
+        AppState.shared.shortcuts.endRecording()
         window = nil
     }
 
     private func closeWindow() {
+        AppState.shared.shortcuts.endRecording()
         window?.close()
         window = nil
     }

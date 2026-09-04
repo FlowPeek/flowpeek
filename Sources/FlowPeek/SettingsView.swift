@@ -1,6 +1,5 @@
 import AppKit
 import FlowPeekCore
-import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
@@ -27,10 +26,11 @@ struct SettingsView: View {
     }
 
     @EnvironmentObject private var app: AppState
+    /// The centre is its own observable object, so reading it through `app` would never redraw: the
+    /// dimmed rows and the AI card's shortcut would keep naming the previous state.
+    @ObservedObject private var shortcuts = AppState.shared.shortcuts
     @State private var selection = SettingsSection.general
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var launchError: String?
-    @State private var needsRelaunchForLanguage = false
+    @State private var relaunchPrompt: RelaunchPrompt?
     let close: () -> Void
 
     var body: some View {
@@ -56,9 +56,28 @@ struct SettingsView: View {
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.30), lineWidth: 1))
         .shadow(color: .black.opacity(0.24), radius: 35, y: 16)
         .padding(30)
-        .onAppear { app.refreshPermission() }
+        .onAppear {
+            app.refreshPermission()
+            app.refreshLaunchAtLoginStatus()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             app.refreshPermission()
+            // Approving the login item happens in System Settings, so coming back is the only moment
+            // this window can learn about it.
+            app.refreshLaunchAtLoginStatus()
+        }
+        .alert(
+            relaunchPrompt?.title ?? "",
+            isPresented: Binding(
+                get: { relaunchPrompt != nil },
+                set: { if !$0 { relaunchPrompt = nil } }
+            ),
+            presenting: relaunchPrompt
+        ) { prompt in
+            Button(prompt.restartNow) { app.relaunch() }
+            Button(prompt.later, role: .cancel) {}
+        } message: { prompt in
+            Text(prompt.message)
         }
     }
 
@@ -175,7 +194,7 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 14)
-                    Picker("", selection: languageBinding) {
+                    Picker("settings.language", selection: languageBinding) {
                         ForEach(AppLanguage.allCases) { option in
                             Text(String(localized: option.titleKey)).tag(option)
                         }
@@ -184,7 +203,7 @@ struct SettingsView: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                 }
-                if needsRelaunchForLanguage {
+                if app.needsRelaunchForLanguage {
                     HStack(spacing: 10) {
                         Text("settings.language.relaunch")
                             .font(.footnote)
@@ -208,8 +227,9 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 14)
-                    Toggle("", isOn: $app.clipboardWatchEnabled)
+                    Toggle("settings.clipboard", isOn: $app.clipboardWatchEnabled)
                         .labelsHidden()
+                        .accessibilityHint(Text("settings.clipboard.description"))
                         .onChange(of: app.clipboardWatchEnabled) { _, _ in app.applyEnabledState() }
                 }
             }
@@ -220,7 +240,11 @@ struct SettingsView: View {
                     settingIcon("viewfinder", color: .pink)
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 8) {
-                            Text("settings.ambient").font(.headline)
+                            Text("settings.ambient")
+                                .font(.headline)
+                                // Reads the accessibility tree, so without the grant it is a title
+                                // for something that cannot happen yet.
+                                .foregroundStyle(app.accessibilityGranted ? .primary : .secondary)
                             Text("settings.experimental")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.pink)
@@ -234,9 +258,24 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 14)
-                    Toggle("", isOn: $app.ambientPeekEnabled)
+                    Toggle("settings.ambient", isOn: $app.ambientPeekEnabled)
                         .labelsHidden()
+                        .accessibilityHint(Text("settings.ambient.description"))
                         .onChange(of: app.ambientPeekEnabled) { _, _ in app.applyEnabledState() }
+                }
+                // The preference stays writable while the grant is missing: `applyEnabledState()`
+                // starts the monitor the moment permission lands, and refusing the switch would
+                // leave the user nothing to turn on afterwards.
+                if !app.accessibilityGranted {
+                    HStack(alignment: .top, spacing: 10) {
+                        Label("settings.ambient.needs-permission", systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button("settings.permission.request") { app.openAccessibilitySettings() }
+                            .controlSize(.small)
+                    }
                 }
             }
             .togglesOnTap($app.ambientPeekEnabled)
@@ -252,22 +291,23 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 14)
-                    Toggle("", isOn: $launchAtLogin)
+                    Toggle("settings.launch-at-login", isOn: launchAtLoginBinding)
                         .labelsHidden()
-                        .onChange(of: launchAtLogin) { _, value in
-                            do {
-                                try app.setLaunchAtLogin(value)
-                                launchError = nil
-                            } catch {
-                                launchError = error.localizedDescription
-                            }
-                        }
+                        .accessibilityHint(Text("settings.launch-at-login.description"))
                 }
-                if let launchError {
-                    Text(launchError).font(.footnote).foregroundStyle(.red)
+                if let notice = app.launchAtLoginState.noticeKey {
+                    HStack(alignment: .top, spacing: 10) {
+                        Label(String(localized: notice), systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button("settings.launch-at-login.open-login-items") { app.openLoginItemsSettings() }
+                            .controlSize(.small)
+                    }
                 }
             }
-            .togglesOnTap($launchAtLogin)
+            .togglesOnTap(launchAtLoginBinding)
 
             Label("settings.privacy", systemImage: "lock.shield")
                 .font(.footnote)
@@ -281,11 +321,12 @@ struct SettingsView: View {
             HStack(alignment: .firstTextBaseline) {
                 sectionTitle("settings.shortcuts", description: "settings.shortcuts.description")
                 Spacer()
-                Button("shortcut.reset-all") { app.shortcuts.resetAll() }
-                    .disabled(app.shortcuts.shortcuts.isDefault)
+                Button("shortcut.reset-all") { shortcuts.resetAll() }
+                    .disabled(shortcuts.shortcuts.isDefault)
             }
 
             ForEach(FlowPeekShortcutAction.allCases, id: \.rawValue) { action in
+                let isActive = shortcuts.activeActions.contains(action)
                 settingsCard {
                     HStack(alignment: .top, spacing: 16) {
                         VStack(alignment: .leading, spacing: 4) {
@@ -296,9 +337,18 @@ struct SettingsView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 16)
-                        ShortcutRecorder(action: action, center: app.shortcuts)
+                        ShortcutRecorder(action: action, center: shortcuts)
+                    }
+                    // The recorder stays live so the combination can be set up in advance; what the
+                    // row has to say is that pressing it right now does nothing.
+                    if !isActive {
+                        Label(String(localized: action.inactiveHintKey), systemImage: "moon.zzz")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                .opacity(isActive ? 1 : 0.55)
             }
 
             Label("settings.shortcuts.note", systemImage: "info.circle")
@@ -326,12 +376,19 @@ struct SettingsView: View {
                     settingIcon("wand.and.stars", color: .purple)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("settings.ai.enabled").font(.headline)
-                        Text("settings.ai.shortcut")
+                        Text(String(
+                            format: String(localized: "settings.ai.shortcut"),
+                            shortcuts.shortcuts[.aiPrompt].display
+                        ))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Toggle("", isOn: $app.aiEnabled).labelsHidden()
+                    Toggle("settings.ai.enabled", isOn: $app.aiEnabled)
+                        .labelsHidden()
+                        // The experiment owns its hot key: off means FlowPeek gives the combination
+                        // back to whatever app the user is in.
+                        .onChange(of: app.aiEnabled) { _, _ in app.applyEnabledState() }
                 }
             }
             .togglesOnTap($app.aiEnabled)
@@ -369,8 +426,53 @@ struct SettingsView: View {
     private var languageBinding: Binding<AppLanguage> {
         Binding(
             get: { app.language },
-            set: { needsRelaunchForLanguage = app.apply(language: $0) || needsRelaunchForLanguage }
+            set: { chosen in
+                // Storing a new override is not by itself a reason to restart: picking the language
+                // this process already launched in has nothing to show for a relaunch.
+                guard app.apply(language: chosen), app.needsRelaunchForLanguage else { return }
+                // The window will not re-render in the new language, so the choice looks like it did
+                // nothing. The notice row below survives closing this window now, but it is the row
+                // the user already missed, so the moment of choice asks the question outright.
+                relaunchPrompt = RelaunchPrompt(language: chosen)
+            }
         )
+    }
+
+    /// Reads the system's answer rather than what was asked for: `register()` can succeed straight
+    /// into requires-approval, where the item exists and still never launches.
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { app.launchAtLoginState.isOn },
+            set: { app.setLaunchAtLogin($0) }
+        )
+    }
+
+    /// The alert has to be built by hand: this process is still localized in the language being left
+    /// behind, and asking "Restart now?" in that language is exactly the confusion it exists to end.
+    private struct RelaunchPrompt: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+        let restartNow: String
+        let later: String
+
+        init(language: AppLanguage) {
+            let bundle = Self.bundle(for: language)
+            title = bundle.localizedString(forKey: "settings.language.relaunch.title", value: nil, table: nil)
+            message = bundle.localizedString(forKey: "settings.language.relaunch", value: nil, table: nil)
+            restartNow = bundle.localizedString(forKey: "settings.language.relaunch.action", value: nil, table: nil)
+            later = bundle.localizedString(forKey: "common.later", value: nil, table: nil)
+        }
+
+        /// Falls back to the main bundle for `.system`, and for a language this build has no
+        /// `.lproj` for, which is also what the app itself would resolve to.
+        private static func bundle(for language: AppLanguage) -> Bundle {
+            guard let code = language.localeIdentifier,
+                  let url = Bundle.main.url(forResource: code, withExtension: "lproj"),
+                  let bundle = Bundle(url: url)
+            else { return .main }
+            return bundle
+        }
     }
 
     private func settingsCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {

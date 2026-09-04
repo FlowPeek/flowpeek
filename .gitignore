@@ -7,3 +7,6 @@ xcuserdata/
 *.xcuserstate
 vendor/bundle/
 .bundle/
+
+# Agent worktrees
+.claude/worktrees/

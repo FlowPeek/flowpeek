@@ -151,6 +151,22 @@ public enum ScreenGeometry {
         return CGPoint(x: min(max(origin.x, minX), maxX), y: min(max(origin.y, minY), maxY))
     }
 
+    /// Trims a rectangle to the screen it overlaps most, keeping the coordinates that are on screen
+    /// and dropping only what runs past the edge. `nil` when it overlaps no screen at all.
+    ///
+    /// This is the opposite of `clamp` and exists for decoration drawn around someone else's text: a
+    /// code block taller than the display used to be *translated* onto the screen, which put the
+    /// outline around whatever text happened to be 245 pt higher up. Deliberately `frame` rather
+    /// than `visibleFrame` — a block legitimately extends under the Dock and behind the menu bar.
+    public static func clip(_ rect: CGRect, screenFrames: [CGRect]) -> CGRect? {
+        guard isUsable(rect) else { return nil }
+        let overlaps = screenFrames
+            .map { $0.intersection(rect) }
+            .filter { isUsable($0) }
+        guard let clipped = overlaps.max(by: { $0.width * $0.height < $1.width * $1.height }) else { return nil }
+        return clipped
+    }
+
     /// Parks a transient HUD in the top-right of a screen, just under the menu bar: clear of the
     /// content the user is reading, and where FlowPeek's own menu-bar icon already draws the eye.
     public static func indicatorOrigin(size: CGSize, in visibleFrame: CGRect, inset: CGFloat = 16) -> CGPoint {

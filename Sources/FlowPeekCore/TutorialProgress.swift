@@ -37,6 +37,18 @@ public struct TutorialProgress: Equatable, Sendable {
             }
         }
 
+        /// The one lesson whose instructions have to name the peek chord. That chord is rebindable,
+        /// so its row in the catalogue carries a placeholder: spelled out in the string, the copy
+        /// starts lying the moment somebody rebinds it.
+        public var namesPeekShortcut: Bool { self == .ambient }
+
+        /// The lesson's instructions, with the chord as it is bound right now written into them.
+        public func detail(peekShortcut: String) -> String {
+            let text = String(localized: detailKey)
+            guard namesPeekShortcut else { return text }
+            return String(format: text, peekShortcut)
+        }
+
         /// Selecting reads the focused element and pointing walks the accessibility tree; copying
         /// does neither.
         public static let requiringAccessibility: [Self] = [.selection, .ambient]

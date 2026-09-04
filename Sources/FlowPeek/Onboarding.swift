@@ -319,7 +319,7 @@ struct OnboardingView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(String(localized: lesson.titleKey))
                             .font(.callout.weight(.semibold))
-                        Text(String(localized: lesson.detailKey))
+                        Text(lesson.detail(peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -448,7 +448,10 @@ struct OnboardingView: View {
                             // Get out of the way first: this window floats, and it was sitting
                             // squarely on top of the page the user has to drag across.
                             stepAside()
-                            TutorialPractice.open(lessons: availableLessons)
+                            TutorialPractice.open(
+                                lessons: availableLessons,
+                                peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display
+                            )
                         }
                             .controlSize(.large)
                         Button(app.tutorial.isComplete(among: availableLessons) ? "common.start" : "tutorial.skip") { completion() }

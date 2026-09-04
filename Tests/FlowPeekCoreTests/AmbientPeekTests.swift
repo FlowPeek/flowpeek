@@ -42,6 +42,52 @@ final class AmbientPeekTests: XCTestCase {
         ))
     }
 
+    // MARK: - Giving up on an app that will not answer
+
+    func testAnAppIsOnlySuppressedOnceItHasUsedUpEveryStrike() {
+        var backoff = AmbientPeekPolicy.ReadBackoff()
+        let now = Date()
+        XCTAssertFalse(backoff.isSuppressed(pid: 501, now: now))
+        for strike in 1..<AmbientPeekPolicy.ReadBackoff.strikesBeforeBackoff {
+            XCTAssertFalse(backoff.noteAbandoned(pid: 501, now: now), "strike \(strike) is not yet the last")
+            XCTAssertFalse(backoff.isSuppressed(pid: 501, now: now))
+        }
+        XCTAssertTrue(backoff.noteAbandoned(pid: 501, now: now))
+        XCTAssertTrue(backoff.isSuppressed(pid: 501, now: now))
+    }
+
+    func testTheSuppressionLiftsOnTheClockRatherThanWaitingForAnActivation() {
+        var backoff = AmbientPeekPolicy.ReadBackoff()
+        let now = Date()
+        for _ in 0..<AmbientPeekPolicy.ReadBackoff.strikesBeforeBackoff {
+            backoff.noteAbandoned(pid: 501, now: now)
+        }
+        let window = AmbientPeekPolicy.ReadBackoff.window
+        XCTAssertTrue(backoff.isSuppressed(pid: 501, now: now.addingTimeInterval(window - 0.1)))
+        XCTAssertFalse(backoff.isSuppressed(pid: 501, now: now.addingTimeInterval(window)))
+    }
+
+    /// An app that was busy for a moment is not an app to give up on.
+    func testOneCompletedReadClearsTheRecord() {
+        var backoff = AmbientPeekPolicy.ReadBackoff()
+        let now = Date()
+        backoff.noteAbandoned(pid: 501, now: now)
+        backoff.noteAbandoned(pid: 501, now: now)
+        backoff.noteCompleted(pid: 501)
+        XCTAssertFalse(backoff.noteAbandoned(pid: 501, now: now), "the strikes should have been forgotten")
+        XCTAssertFalse(backoff.isSuppressed(pid: 501, now: now))
+    }
+
+    func testStrikesAreCountedPerApplication() {
+        var backoff = AmbientPeekPolicy.ReadBackoff()
+        let now = Date()
+        for _ in 0..<AmbientPeekPolicy.ReadBackoff.strikesBeforeBackoff {
+            backoff.noteAbandoned(pid: 501, now: now)
+        }
+        XCTAssertTrue(backoff.isSuppressed(pid: 501, now: now))
+        XCTAssertFalse(backoff.isSuppressed(pid: 502, now: now))
+    }
+
     // MARK: - Which rectangles are plausible
 
     func testASliverIsNotACodeBlock() {

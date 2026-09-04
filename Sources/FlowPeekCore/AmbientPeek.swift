@@ -29,6 +29,12 @@ public enum AmbientPeekPolicy {
     /// the pointer is still inside the element that was just read.
     public static let movementThreshold: CGFloat = 8
 
+    /// Wall clock for one whole read, checked before every accessibility call. The read itself
+    /// measures 19-31 ms, so this is not a budget an ordinary app can spend; it exists because an
+    /// app that is busy or beachballing answers each call only when its messaging timeout expires,
+    /// and 400 nodes of that is minutes of frozen pointer rather than a slow outline.
+    public static let readBudget: TimeInterval = 0.2
+
     /// Only `.likely` or better raises an outline. A `.weak` match is the kind of thing that fires on
     /// prose containing the word "graph", and an outline that appears over ordinary text is worse
     /// than one that never appears.
@@ -61,6 +67,48 @@ public enum AmbientPeekPolicy {
         guard screen.width > 0, screen.height > 0 else { return false }
         let area = bounds.width * bounds.height
         return area <= screen.width * screen.height * maximumAreaFraction
+    }
+
+    /// Which app to stop reading from, and for how long. One wedged application should cost the
+    /// pointer a few stalls, not a stall every time the pointer moves over it while Option is down.
+    ///
+    /// The window is a clock rather than "until it activates again": a beachballing app is normally
+    /// the frontmost one already, so waiting for an activation would either never lift or lift on
+    /// the first click somewhere else and change nothing.
+    public struct ReadBackoff: Equatable, Sendable {
+        public static let strikesBeforeBackoff = 3
+        public static let window: TimeInterval = 10
+
+        private var strikes: [pid_t: Int] = [:]
+        private var suppressed: [pid_t: Date] = [:]
+
+        public init() {}
+
+        public func isSuppressed(pid: pid_t, now: Date) -> Bool {
+            guard let until = suppressed[pid] else { return false }
+            return now < until
+        }
+
+        /// A read that ran out of budget. Returns whether that tipped this app into the backoff.
+        @discardableResult
+        public mutating func noteAbandoned(pid: pid_t, now: Date) -> Bool {
+            suppressed = suppressed.filter { $0.value > now }
+            let count = (strikes[pid] ?? 0) + 1
+            guard count >= Self.strikesBeforeBackoff else {
+                strikes[pid] = count
+                return false
+            }
+            strikes[pid] = nil
+            suppressed[pid] = now.addingTimeInterval(Self.window)
+            return true
+        }
+
+        /// Any read that finished inside its budget clears the app's record: an app that was busy
+        /// for a moment is not an app to give up on.
+        public mutating func noteCompleted(pid: pid_t) {
+            strikes[pid] = nil
+            suppressed[pid] = nil
+        }
     }
 
     /// The single decision the coordinator needs: is this read worth showing?

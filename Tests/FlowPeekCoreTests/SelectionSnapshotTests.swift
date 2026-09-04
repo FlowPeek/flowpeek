@@ -208,6 +208,67 @@ final class SelectionSnapshotTests: XCTestCase {
         XCTAssertEqual(clamped.x + size.width - tiny.maxX, size.width - tiny.width)
     }
 
+    // MARK: - Clipping decoration to the screen
+
+    private let display = CGRect(x: 0, y: 0, width: 1470, height: 956)
+
+    /// The measured failure: a 900 pt block scrolled 240 pt past the bottom edge. Clamping moved the
+    /// whole rectangle up onto the screen and drew the outline 245 pt above the text; clipping keeps
+    /// the block's own x and its surviving edge.
+    func testABlockScrolledPastTheBottomKeepsItsRealCoordinates() {
+        let block = CGRect(x: 220, y: -240, width: 760, height: 900)
+        XCTAssertEqual(
+            ScreenGeometry.clip(block, screenFrames: [display]),
+            CGRect(x: 220, y: 0, width: 760, height: 660)
+        )
+    }
+
+    func testABlockTallerThanTheDisplayIsTrimmedAtBothEnds() {
+        let block = CGRect(x: 100, y: -200, width: 600, height: 1600)
+        XCTAssertEqual(
+            ScreenGeometry.clip(block, screenFrames: [display]),
+            CGRect(x: 100, y: 0, width: 600, height: 956)
+        )
+    }
+
+    func testABlockRunningOffTheTopAndTheRightIsTrimmedOnBothAxes() {
+        let block = CGRect(x: 1200, y: 800, width: 600, height: 400)
+        XCTAssertEqual(
+            ScreenGeometry.clip(block, screenFrames: [display]),
+            CGRect(x: 1200, y: 800, width: 270, height: 156)
+        )
+    }
+
+    func testAFullyVisibleBlockComesBackUntouched() {
+        let block = CGRect(x: 280, y: 212, width: 760, height: 146)
+        XCTAssertEqual(ScreenGeometry.clip(block, screenFrames: [display, leftSecondary]), block)
+    }
+
+    func testClippingPicksTheScreenTheBlockMostlySitsOn() {
+        let block = CGRect(x: -300, y: 400, width: 400, height: 200)
+        XCTAssertEqual(
+            ScreenGeometry.clip(block, screenFrames: [display, leftSecondary]),
+            CGRect(x: -300, y: 400, width: 300, height: 200)
+        )
+    }
+
+    func testABlockOnNoScreenAtAllHasNothingToOutline() {
+        XCTAssertNil(ScreenGeometry.clip(CGRect(x: 9_000, y: 9_000, width: 300, height: 100), screenFrames: [display]))
+        XCTAssertNil(ScreenGeometry.clip(CGRect(x: 10, y: 10, width: 300, height: 100), screenFrames: []))
+        XCTAssertNil(ScreenGeometry.clip(.zero, screenFrames: [display]))
+    }
+
+    /// The sliver a caller has to reject: clipping happily returns 4 pt of a block, which is not
+    /// worth framing.
+    func testABarelyVisibleBlockClipsToSomethingUnderTheMinimumSize() {
+        let sliver = ScreenGeometry.clip(
+            CGRect(x: 200, y: -896, width: 760, height: 900),
+            screenFrames: [display]
+        )
+        XCTAssertEqual(sliver?.height, 4)
+        XCTAssertLessThan(sliver!.height, AmbientPeekPolicy.minimumSize.height)
+    }
+
     // MARK: - Transient indicator placement
 
     func testIndicatorSitsInTheTopRightOfTheScreenItIsGiven() {

@@ -7,12 +7,17 @@ public enum ShortcutActivationPolicy {
     public static func activeActions(
         isEnabled: Bool,
         clipboardWatchEnabled: Bool,
-        aiEnabled: Bool
+        aiEnabled: Bool,
+        ambientPeekEnabled: Bool = false,
+        accessibilityGranted: Bool = false
     ) -> Set<FlowPeekShortcutAction> {
         guard isEnabled else { return [] }
         var actions: Set<FlowPeekShortcutAction> = []
         if clipboardWatchEnabled { actions.insert(.previewClipboard) }
         if aiEnabled { actions.insert(.aiPrompt) }
+        // Ambient peek reads the accessibility tree, so without the grant the feature cannot raise
+        // an outline at all and its chord — ⌥Space, a character people type — must stay where it is.
+        if ambientPeekEnabled && accessibilityGranted { actions.insert(.ambientPeek) }
         return actions
     }
 }

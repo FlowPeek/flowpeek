@@ -1,5 +1,6 @@
 "menu.detection.on" = "감지 켜짐";
 "menu.detection.paused" = "감지 일시 정지";
+"menu.preview.reveal" = "미리보기 창 앞으로 가져오기";
 "menu.settings" = "권한 및 설정…";
 "menu.onboarding" = "환영 및 튜토리얼…";
 "menu.permission.refresh" = "접근성 권한 다시 확인";
@@ -25,7 +26,7 @@
 "tutorial.clipboard.title" = "복사";
 "tutorial.clipboard.detail" = "다이어그램을 선택하고 Command-C를 누르세요. 메뉴 막대 근처에 배지가 뜨면 누르거나 표시된 단축키를 씁니다.";
 "tutorial.ambient.title" = "가리키기";
-"tutorial.ambient.detail" = "Option을 누른 채 포인터를 다이어그램 위로 옮기세요. 테두리가 생기면 Option을 계속 누른 상태로 Space를 누릅니다.";
+"tutorial.ambient.detail" = "Option을 누른 채 포인터를 다이어그램 위로 옮기세요. 테두리가 생기면 계속 누른 상태로 %@를 누릅니다.";
 "tutorial.ambient.enable" = "이 실험 기능 켜기";
 "onboarding.launch.title" = "언제든 준비되어 있도록";
 "onboarding.launch.message" = "FlowPeek은 메뉴 막대에 머무르며, 다이어그램을 선택하거나 복사하기 전까지는 아무 일도 하지 않습니다. 로그인할 때 함께 켜두면 늘 그 자리에 있습니다.";
@@ -78,8 +79,11 @@
 "shortcut.preview-clipboard.detail" = "클립보드에서 발견한 다이어그램을 엽니다. 복사할 때 뜨는 배지에도 이 키가 표시됩니다.";
 "shortcut.ai-prompt" = "AI로 생성";
 "shortcut.ai-prompt.detail" = "현재 선택 영역을 맥락으로 제공자에게 보냅니다. AI 실험 기능이 켜져 있을 때만 동작합니다.";
+"shortcut.ambient-peek" = "테두리가 생긴 다이어그램 열기";
+"shortcut.ambient-peek.detail" = "Option을 누른 동안 테두리가 생긴 다이어그램을 엽니다. 홀드해서 엿보기 실험 기능이 켜져 있을 때만 다른 앱에서 이 키를 가져옵니다.";
 "shortcut.inactive.clipboard" = "일반 탭에서 ‘클립보드 감시’를 켜야 사용할 수 있습니다.";
 "shortcut.inactive.ai" = "AI 탭에서 AI 다이어그램 생성을 켜야 사용할 수 있습니다.";
+"shortcut.inactive.ambient" = "일반 탭에서 ‘홀드해서 엿보기’를 켜고 접근성 권한을 허용해야 사용할 수 있습니다.";
 "shortcut.error.no-modifier" = "전역 단축키에는 Command·Option·Control 중 하나 이상이 필요합니다.";
 "shortcut.error.reserved" = "%@은(는) macOS가 선점한 조합입니다.";
 "shortcut.error.already-used" = "이미 ‘%@’에 지정되어 있습니다.";
@@ -98,7 +102,7 @@
 "settings.language.relaunch.action" = "지금 다시 시작";
 "settings.language.relaunch.title" = "언어를 바꾸려면 FlowPeek을 다시 시작할까요?";
 "settings.ambient" = "홀드해서 엿보기";
-"settings.ambient.description" = "Option을 누른 채 다이어그램을 가리키면 테두리가 생기고 ⌥Space로 엽니다. Option을 누르고 있는 동안, 포인터 아래만 읽습니다. 화면을 직접 그리는 앱—예를 들어 캔버스로 출력하는 터미널—은 읽을 텍스트를 노출하지 않으며, 그런 곳에서는 복사가 계속 동작합니다.";
+"settings.ambient.description" = "Option을 누른 채 다이어그램을 가리키면 테두리가 생기고 %@로 엽니다. Option을 누르고 있는 동안, 포인터 아래만 읽습니다. 화면을 직접 그리는 앱—예를 들어 캔버스로 출력하는 터미널—은 읽을 텍스트를 노출하지 않으며, 그런 곳에서는 복사가 계속 동작합니다.";
 "settings.ambient.needs-permission" = "손쉬운 사용 권한이 없으면 아무것도 읽지 못합니다.";
 "ambient.hint.generic" = "머메이드";
 "ambient.hint.help" = "이 다이어그램 열기";

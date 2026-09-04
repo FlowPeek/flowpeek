@@ -98,4 +98,41 @@ final class TutorialProgressTests: XCTestCase {
         XCTAssertEqual(symbols.count, 3)
         XCTAssertEqual(identifiers.count, 3)
     }
+
+    // MARK: - The chord the copy names
+
+    /// Pointing is the one gesture whose instructions have to name a key, and that key is
+    /// rebindable in Settings.
+    func testOnlyThePointingLessonNamesTheChord() {
+        XCTAssertTrue(TutorialProgress.Lesson.ambient.namesPeekShortcut)
+        XCTAssertFalse(TutorialProgress.Lesson.selection.namesPeekShortcut)
+        XCTAssertFalse(TutorialProgress.Lesson.clipboard.namesPeekShortcut)
+    }
+
+    /// Every sentence that names the peek chord takes it as an argument. Spelled out in the
+    /// catalogue — "press Option-Space", "⌥Space opens it" — the copy starts lying the moment the
+    /// chord is rebound, and nothing in the app would notice.
+    func testTheCopyNamingTheChordTakesItAsAnArgumentInBothCatalogs() throws {
+        let keys = ["tutorial.ambient.detail", "settings.ambient.description"]
+        for language in ["en", "ko"] {
+            let contents = try String(contentsOf: Self.catalog(language), encoding: .utf8)
+            for line in contents.components(separatedBy: "\n") {
+                guard let key = keys.first(where: { line.hasPrefix("\"\($0)\" = ") }) else { continue }
+                XCTAssertTrue(line.contains("%@"), "\(language).lproj: \(key) has to be given the chord")
+                XCTAssertFalse(line.contains("⌥Space"), "\(language).lproj: \(key) spells the chord out")
+                XCTAssertFalse(line.contains("Option-Space"), "\(language).lproj: \(key) spells the chord out")
+            }
+            for key in keys {
+                XCTAssertTrue(contents.contains("\"\(key)\" = "), "\(language).lproj is missing \(key)")
+            }
+        }
+    }
+
+    private static func catalog(_ language: String) -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // FlowPeekCoreTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // repository root
+            .appendingPathComponent("Sources/FlowPeek/Resources/\(language).lproj/Localizable.strings")
+    }
 }

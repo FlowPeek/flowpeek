@@ -315,6 +315,9 @@ final class MermaidWebViewPool {
     static let capacity = 2
 
     private var idle: [MermaidEngineView] = []
+    /// How many warm views the pool still holds. The lifecycle tests assert against it: a preview
+    /// that was closed has to have handed its engine back, or the next one starts cold.
+    var idleCount: Int { idle.count }
     private var cachedScripts: [WKUserScript]?
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Renderer")
     private(set) var health: MermaidEngineHealth?

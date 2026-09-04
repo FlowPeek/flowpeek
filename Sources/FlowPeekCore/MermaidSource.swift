@@ -27,6 +27,10 @@ public struct MermaidSource: Equatable, Sendable {
     public let text: String
 
     public init(rawValue: String, requireRecognizedDiagram: Bool = true) throws {
+        // The detector declines to examine anything this large and hands back nothing, which would
+        // otherwise be reported as an empty selection rather than an oversized one.
+        let raw = rawValue.utf16.count
+        guard raw <= MermaidDetector.maximumInputCharacters else { throw ValidationError.tooLarge(raw) }
         let detection = MermaidDetector.detect(rawValue)
         let normalized = detection.extractedSource
         guard !normalized.isEmpty else { throw ValidationError.empty }

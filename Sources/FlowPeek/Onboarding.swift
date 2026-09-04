@@ -2,15 +2,25 @@ import AppKit
 import FlowPeekCore
 import SwiftUI
 
+/// Which door the window is being opened by.
+///
+/// A returning user who asked for the tutorial is not being set up again: the wizard's steps are
+/// behind them, and the difference decides whether the window offers a way backwards into them.
+enum OnboardingEntry {
+    case setup
+    case tutorial
+}
+
 @MainActor
 final class OnboardingCoordinator {
     static let shared = OnboardingCoordinator()
     private var window: NSWindow?
     private var spaceObserver: NSObjectProtocol?
 
-    func show() {
+    func show(entry: OnboardingEntry = .setup) {
         if let window { window.makeKeyAndOrderFront(nil); return }
         let view = OnboardingView(
+            entry: entry,
             completion: { [weak self] in
                 AppState.shared.onboardingComplete = true
                 self?.closeWindow()
@@ -131,18 +141,39 @@ struct OnboardingView: View {
     }
 
     @EnvironmentObject private var app: AppState
-    #if DEBUG
-    @State private var step: Step = ProcessInfo.processInfo.arguments.contains("--onboarding-tutorial")
-        ? .tutorial
-        : .welcome
-    #else
-    @State private var step: Step = .welcome
-    #endif
+    @State private var step: Step
     @State private var permissionFlow = AccessibilityPermissionFlow(isGranted: false)
+    /// Whether the practice page has been opened from here. The nudges are only honest once it has:
+    /// before that, a lesson that has produced nothing has produced nothing because the text it
+    /// talks about is not on screen yet.
+    @State private var openedPracticePage = false
+    @State private var nudge = false
+    private let entry: OnboardingEntry
     let completion: () -> Void
     let close: () -> Void
     /// Moves the window out of the way, because the practice page is the thing being pointed at.
     let stepAside: () -> Void
+
+    init(
+        entry: OnboardingEntry = .setup,
+        completion: @escaping () -> Void,
+        close: @escaping () -> Void,
+        stepAside: @escaping () -> Void
+    ) {
+        self.entry = entry
+        self.completion = completion
+        self.close = close
+        self.stepAside = stepAside
+        #if DEBUG
+        let debugTutorial = ProcessInfo.processInfo.arguments.contains("--onboarding-tutorial")
+        #else
+        let debugTutorial = false
+        #endif
+        _step = State(initialValue: entry == .tutorial || debugTutorial ? .tutorial : .welcome)
+    }
+
+    /// Opened for the tutorial alone, rather than as the last step of setup.
+    private var isRevisit: Bool { entry == .tutorial }
 
     var body: some View {
         ZStack {
@@ -220,14 +251,18 @@ struct OnboardingView: View {
             .font(.subheadline)
             .foregroundStyle(.secondary)
             Spacer()
-            HStack(spacing: 7) {
-                ForEach(Step.allCases, id: \.rawValue) { candidate in
-                    Capsule()
-                        .fill(step == candidate ? Color.accentColor : Color.accentColor.opacity(0.28))
-                        .frame(width: step == candidate ? 24 : 8, height: 8)
+            // Suppressed on a revisit: four dots for a four-step wizard the user is not in implies
+            // three steps still to come, and none of them is there.
+            if !isRevisit {
+                HStack(spacing: 7) {
+                    ForEach(Step.allCases, id: \.rawValue) { candidate in
+                        Capsule()
+                            .fill(step == candidate ? Color.accentColor : Color.accentColor.opacity(0.28))
+                            .frame(width: step == candidate ? 24 : 8, height: 8)
+                    }
                 }
+                .animation(.snappy, value: step)
             }
-            .animation(.snappy, value: step)
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
@@ -314,17 +349,59 @@ struct OnboardingView: View {
     private var tutorialCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(availableLessons) { lesson in
+                let state = app.tutorial[lesson]
+                let canFire = lesson.canFire(ambientPeekEnabled: app.ambientPeekEnabled)
+                // Progress outlives the switch: somebody who passed this lesson and later turned
+                // the experiment back off has still passed it, and hiding the tick behind an "off"
+                // badge would tell them otherwise.
+                let blocked = !canFire && state != .done
                 HStack(alignment: .top, spacing: 12) {
-                    stateBadge(app.tutorial[lesson])
+                    // The badge carries the row's state for VoiceOver, which cannot see a stroke
+                    // colour: the lesson is its label and waiting/noticed/missed/done its value.
+                    stateBadge(state, blocked: blocked)
+                        .accessibilityElement()
+                        .accessibilityLabel(Text(String(localized: lesson.titleKey)))
+                        .accessibilityValue(Text(String(localized: blocked ? "tutorial.state.off" : state.titleKey)))
+                        .accessibilityAddTraits(state == .done ? [.isSelected] : [])
                     VStack(alignment: .leading, spacing: 3) {
                         Text(String(localized: lesson.titleKey))
                             .font(.callout.weight(.semibold))
+                            // Already the badge's label; without this the lesson name is read twice.
+                            .accessibilityHidden(true)
                         Text(lesson.detail(peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        if !canFire, let reason = lesson.switchedOffReasonKey {
+                            Text(String(localized: reason))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        // The gesture happened and the text was refused. Says which part to change,
+                        // because the drag itself looked fine to the person who made it.
+                        if state == .missed, let missed = lesson.missedKey {
+                            Label(String(localized: missed), systemImage: "exclamationmark.circle")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if nudge, canFire, state == .waiting {
+                            Label(String(localized: lesson.nudgeKey), systemImage: "questionmark.circle")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if lesson == .ambient, !app.ambientPeekEnabled {
-                            Button("tutorial.ambient.enable") { app.enableAmbientPeek() }
+                            // Prominent because it is not an aside: nothing in this row can happen
+                            // until it is pressed.
+                            Button("tutorial.ambient.enable") {
+                                app.enableAmbientPeek()
+                                // The page already in the browser still carries the sentence saying
+                                // this route is off, and that sentence is now wrong.
+                                if openedPracticePage { openPracticePage() }
+                            }
+                                .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
                                 .padding(.top, 2)
                         }
@@ -365,26 +442,63 @@ struct OnboardingView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22)))
         .animation(.snappy, value: app.tutorial)
+        .task(id: openedPracticePage) {
+            guard openedPracticePage else { return }
+            // Long enough that somebody working through the page in order finishes before it
+            // appears, short enough to catch somebody sitting in front of a page where nothing
+            // happened and no longer sure whether to try again.
+            try? await Task.sleep(for: .seconds(45))
+            nudge = true
+        }
+        .onChange(of: app.tutorial) { previous, current in announce(previous, current) }
     }
 
-    /// Waiting, noticed, opened. The middle state matters: it tells the user FlowPeek saw their
+    /// Waiting, noticed, missed, opened — plus the row that cannot report anything because its
+    /// gesture is switched off. The noticed state matters most: it tells the user FlowPeek saw their
     /// text, which is the half of the interaction that is otherwise invisible.
-    private func stateBadge(_ state: TutorialProgress.State) -> some View {
+    private func stateBadge(_ state: TutorialProgress.State, blocked: Bool) -> some View {
         ZStack {
-            switch state {
-            case .waiting:
-                Circle().strokeBorder(.secondary.opacity(0.45), lineWidth: 1.5)
-            case .detected:
-                Circle().strokeBorder(Color.accentColor, lineWidth: 1.5)
-                Circle().fill(Color.accentColor).frame(width: 7, height: 7)
-            case .done:
-                Circle().fill(.green)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
+            if blocked {
+                Image(systemName: "slash.circle")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            } else {
+                switch state {
+                case .waiting:
+                    Circle().strokeBorder(.secondary.opacity(0.45), lineWidth: 1.5)
+                case .detected:
+                    Circle().strokeBorder(Color.accentColor, lineWidth: 1.5)
+                    Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+                case .missed:
+                    Circle().strokeBorder(.orange, lineWidth: 1.5)
+                    Image(systemName: "exclamationmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.orange)
+                case .done:
+                    Circle().fill(.green)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                }
             }
         }
         .frame(width: 18, height: 18)
+    }
+
+    /// "The ticks fill in as you go" is the card's whole promise, and a tick filling in is silent:
+    /// VoiceOver re-reads a row only if the user navigates back to it, and by then they have already
+    /// had to guess whether the gesture worked.
+    private func announce(_ previous: TutorialProgress, _ current: TutorialProgress) {
+        guard let changed = availableLessons.first(where: { previous[$0] != current[$0] }) else { return }
+        let sentence = "\(String(localized: changed.titleKey)): \(String(localized: current[changed].titleKey))"
+        NSAccessibility.post(
+            element: NSApp.keyWindow ?? NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: sentence,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ]
+        )
     }
 
     private var footer: some View {
@@ -413,7 +527,7 @@ struct OnboardingView: View {
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             HStack {
-                if step > .welcome { Button("common.back") { back() } }
+                if showsBackButton { Button("common.back") { back() } }
                 Spacer()
                 switch step {
                 case .welcome:
@@ -444,19 +558,35 @@ struct OnboardingView: View {
                         .controlSize(.large)
                 case .tutorial:
                     HStack(spacing: 10) {
+                        // Only once there is something to clear. Progress outlives the window now,
+                        // so a returning user meets their own ticks and needs a way to mean "I want
+                        // to practise this again" rather than reading a finished list.
+                        if app.tutorial != TutorialProgress() {
+                            Button("tutorial.restart") {
+                                app.resetTutorial()
+                                nudge = false
+                                openedPracticePage = false
+                            }
+                            .controlSize(.large)
+                        }
                         Button("tutorial.open-page") {
                             // Get out of the way first: this window floats, and it was sitting
                             // squarely on top of the page the user has to drag across.
                             stepAside()
-                            TutorialPractice.open(
-                                lessons: availableLessons,
-                                peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display
-                            )
+                            openPracticePage()
                         }
                             .controlSize(.large)
-                        Button(app.tutorial.isComplete(among: availableLessons) ? "common.start" : "tutorial.skip") { completion() }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
+                        // A recap must not re-run the completion write, and "Finish Anyway" is
+                        // nonsense addressed to somebody who finished setup days ago.
+                        if isRevisit {
+                            Button("common.close") { close() }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.large)
+                        } else {
+                            Button(app.tutorial.isComplete(among: availableLessons) ? "common.start" : "tutorial.skip") { completion() }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.large)
+                        }
                     }
                 }
             }
@@ -471,24 +601,47 @@ struct OnboardingView: View {
         step = permissionSettled ? .launch : .permission
     }
 
+    /// Back to the checklist on a revisit: the permission step is a detour the tutorial itself
+    /// offered, not a stage of a setup flow the returning user is walking through.
+    private var permissionDestination: Step { isRevisit ? .tutorial : .launch }
+
     private func advancePastPermission() {
-        guard step != .launch else { return }
-        step = .launch
+        guard step != permissionDestination else { return }
+        step = permissionDestination
     }
 
     /// Declining is a step forward, not a dismissal: the login question and the tutorial are still
     /// worth asking, and the clipboard lesson still works.
     private func decline() {
         app.permissionDeclined = true
-        step = .launch
+        step = permissionDestination
+    }
+
+    /// On a revisit the tutorial is the root of the window, so there is nothing behind it to go
+    /// back to — walking a returning user into the permission wizard is not what they asked for.
+    private var showsBackButton: Bool {
+        isRevisit ? step != .tutorial : step > .welcome
     }
 
     private func back() {
+        if isRevisit { step = .tutorial; return }
         switch step {
         case .tutorial: step = .launch
         case .launch: step = permissionSettled ? .welcome : .permission
         case .permission, .welcome: step = .welcome
         }
+    }
+
+    /// One opener, because what the page prints depends on which lessons are on offer and whether
+    /// the pointing experiment is on. A second copy of that argument list is how the page and this
+    /// checklist end up describing two different sets of gestures.
+    private func openPracticePage() {
+        openedPracticePage = true
+        TutorialPractice.open(
+            lessons: availableLessons,
+            peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display,
+            ambientEnabled: app.ambientPeekEnabled
+        )
     }
 
     /// The permission question has an answer, whichever one it is.

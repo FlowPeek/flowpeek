@@ -29,7 +29,19 @@ final class AppState: ObservableObject {
     @Published private(set) var hasPromotedPreview = false
     @Published private(set) var engineHealth: MermaidEngineHealth?
     /// Which of the three routes the user has exercised. Drives the onboarding tutorial.
-    @Published private(set) var tutorial = TutorialProgress()
+    ///
+    /// Written back on every change rather than at the end, because the tutorial is quit halfway
+    /// through: without this, a relaunch — including the one at login the setup flow just asked for
+    /// — hands the returning user three empty circles for gestures they have already done.
+    @Published private(set) var tutorial = TutorialProgress(
+        persisted: UserDefaults.standard.dictionary(forKey: AppState.tutorialProgressKey) as? [String: String] ?? [:]
+    ) {
+        didSet {
+            guard tutorial != oldValue else { return }
+            UserDefaults.standard.set(tutorial.persisted, forKey: AppState.tutorialProgressKey)
+        }
+    }
+    private static let tutorialProgressKey = "flowpeek.tutorial.progress"
     /// The override written into this app's own defaults domain; applied on the next launch.
     @Published var language: AppLanguage = AppLanguage.storedOverride(
         bundleIdentifier: Bundle.main.bundleIdentifier
@@ -340,6 +352,11 @@ final class AppState: ObservableObject {
                 head=\(String(snapshot.text.prefix(80)), privacy: .private)
                 """
             )
+            // The partial drag: a selection that starts mid-diagram has lost the starter line
+            // detection needs, so no button appears and the tutorial row would sit at "not tried"
+            // for as long as the user keeps trying. Only for text off the practice page — a
+            // half-selected diagram in the user's own document is not the tutorial's business.
+            if isEnabled, TutorialSample.appearsIn(snapshot.text) { tutorial.noteMissed(.selection) }
             overlay.hide()
             lastDetection = nil
             return

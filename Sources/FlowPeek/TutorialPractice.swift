@@ -16,27 +16,21 @@ enum TutorialPractice {
         category: "Tutorial"
     )
 
-    static let sample = """
-    flowchart TD
-      A[Copy or select this] --> B{FlowPeek notices}
-      B -- overlay button --> C[Preview]
-      B -- badge --> C
-      B -- hold Option --> C
-    """
-
     /// Writes the page under Caches rather than a temporary directory the system may sweep while
     /// the browser still has it open. Only FlowPeek's own sample text is written; nothing of the
     /// user's is ever put on disk.
     ///
     /// `lessons` is what the page teaches. Without the Accessibility grant that is the clipboard
     /// step alone: printing "a small button appears beside it" for a drag that can never raise one
-    /// turns the practice page into evidence that the app is broken.
+    /// turns the practice page into evidence that the app is broken. `ambientEnabled` is the same
+    /// argument one switch further in — pointing ships off, and the page cannot offer the switch.
     static func open(
         lessons: [TutorialProgress.Lesson] = TutorialProgress.Lesson.allCases,
-        peekShortcut: String
+        peekShortcut: String,
+        ambientEnabled: Bool
     ) {
         do {
-            let url = try write(lessons: lessons, peekShortcut: peekShortcut)
+            let url = try write(lessons: lessons, peekShortcut: peekShortcut, ambientEnabled: ambientEnabled)
             if !NSWorkspace.shared.open(url) {
                 logger.error("no application accepted \(url.lastPathComponent, privacy: .public)")
                 NSSound.beep()
@@ -47,7 +41,11 @@ enum TutorialPractice {
         }
     }
 
-    private static func write(lessons: [TutorialProgress.Lesson], peekShortcut: String) throws -> URL {
+    private static func write(
+        lessons: [TutorialProgress.Lesson],
+        peekShortcut: String,
+        ambientEnabled: Bool
+    ) throws -> URL {
         let directory = try FileManager.default.url(
             for: .cachesDirectory,
             in: .userDomainMask,
@@ -56,17 +54,31 @@ enum TutorialPractice {
         ).appendingPathComponent(Bundle.main.bundleIdentifier ?? "FlowPeek", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("practice.html")
-        try html(lessons: lessons, peekShortcut: peekShortcut).write(to: url, atomically: true, encoding: .utf8)
+        try html(lessons: lessons, peekShortcut: peekShortcut, ambientEnabled: ambientEnabled)
+            .write(to: url, atomically: true, encoding: .utf8)
         return url
     }
 
-    private static func html(lessons: [TutorialProgress.Lesson], peekShortcut: String) -> String {
+    private static func html(
+        lessons: [TutorialProgress.Lesson],
+        peekShortcut: String,
+        ambientEnabled: Bool
+    ) -> String {
         // Localized through the app catalogue so the practice page speaks the same language as the
         // onboarding window it was opened from.
         let title = String(localized: "tutorial.page.title")
-        let intro = String(localized: "tutorial.page.intro")
+        let blocked = lessons.filter { !$0.canFire(ambientPeekEnabled: ambientEnabled) }
+        // "Every gesture below behaves exactly as it will from now on" is a lie the moment one of
+        // them is switched off, and it is the sentence the reader trusts when nothing happens.
+        let intro = String(localized: blocked.isEmpty ? "tutorial.page.intro" : "tutorial.page.intro.blocked")
+        let hint = String(localized: "tutorial.page.hint")
         let steps = lessons
-            .map { "<li>\(escape($0.detail(peekShortcut: peekShortcut)))</li>" }
+            .map { lesson in
+                if blocked.contains(lesson), let switchedOff = lesson.switchedOffDetailKey {
+                    return "<li class=\"locked\">\(escape(String(localized: switchedOff)))</li>"
+                }
+                return "<li>\(escape(lesson.detail(peekShortcut: peekShortcut)))</li>"
+            }
             .joined(separator: "\n    ")
         let closing = String(localized: lessons.count > 1 ? "tutorial.page.closing" : "tutorial.page.closing.one")
 
@@ -83,10 +95,14 @@ enum TutorialPractice {
           p.intro { color: color-mix(in srgb, currentColor 62%, transparent); margin: 0 0 28px }
           pre { font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
                 background: color-mix(in srgb, currentColor 7%, transparent);
-                padding: 22px 24px; border-radius: 12px; margin: 0 0 28px;
-                white-space: pre; overflow-x: auto }
+                padding: 22px 24px; border-radius: 12px; margin: 0 0 10px;
+                white-space: pre; overflow-x: auto; cursor: pointer }
+          pre:hover, pre:focus { outline: 2px solid color-mix(in srgb, currentColor 28%, transparent) }
+          p.hint { font-size: 13px; color: color-mix(in srgb, currentColor 62%, transparent);
+                   margin: 0 0 28px }
           ol { padding-left: 22px; margin: 0 0 28px }
           li { margin-bottom: 10px }
+          li.locked { opacity: .55 }
           kbd { font: 12px ui-monospace, monospace; padding: 2px 6px; border-radius: 5px;
                 background: color-mix(in srgb, currentColor 12%, transparent) }
           p.closing { color: color-mix(in srgb, currentColor 62%, transparent); margin: 0 }
@@ -94,7 +110,8 @@ enum TutorialPractice {
         <body><main>
           <h1>\(escape(title))</h1>
           <p class="intro">\(escape(intro))</p>
-          <pre>\(escape(sample))</pre>
+          <pre tabindex="0" onclick="getSelection().selectAllChildren(this)">\(escape(TutorialSample.text))</pre>
+          <p class="hint">\(escape(hint))</p>
           <ol>
             \(steps)
           </ol>

@@ -1,6 +1,5 @@
 import AppKit
 import FlowPeekCore
-import ServiceManagement
 import SwiftUI
 
 @MainActor
@@ -140,8 +139,6 @@ struct OnboardingView: View {
     @State private var step: Step = .welcome
     #endif
     @State private var permissionFlow = AccessibilityPermissionFlow(isGranted: false)
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var launchError: String?
     let completion: () -> Void
     let close: () -> Void
     /// Moves the window out of the way, because the practice page is the thing being pointed at.
@@ -197,6 +194,7 @@ struct OnboardingView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             app.refreshPermission()
+            app.refreshLaunchAtLoginStatus()
         }
         .task(id: step) {
             guard step == .permission else { return }
@@ -277,20 +275,37 @@ struct OnboardingView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 14)
-                Toggle("", isOn: $launchAtLogin)
+                Toggle("onboarding.launch.toggle", isOn: launchAtLoginBinding)
                     .labelsHidden()
-                    .onChange(of: launchAtLogin) { _, value in applyLaunchAtLogin(value) }
+                    .accessibilityHint(Text("onboarding.launch.detail"))
             }
-            if let launchError {
-                Text(launchError).font(.footnote).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+            if let notice = app.launchAtLoginState.noticeKey {
+                HStack(alignment: .top, spacing: 10) {
+                    Label(String(localized: notice), systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button("settings.launch-at-login.open-login-items") { app.openLoginItemsSettings() }
+                        .controlSize(.small)
+                }
             }
         }
         .padding(18)
         .frame(maxWidth: 540, alignment: .leading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22)))
-        .togglesOnTap($launchAtLogin, cornerRadius: 18)
+        .togglesOnTap(launchAtLoginBinding, cornerRadius: 18)
+    }
+
+    /// Reads the system's answer rather than what was asked for, so the switch cannot claim a state
+    /// macOS refused — and cannot go stale when the user approves the login item in System Settings
+    /// while this window is still open.
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { app.launchAtLoginState.isOn },
+            set: { app.setLaunchAtLogin($0) }
+        )
     }
 
     /// The lessons that can actually be passed, each ticked only when a preview really opened by
@@ -480,17 +495,6 @@ struct OnboardingView: View {
 
     private var availableLessons: [TutorialProgress.Lesson] {
         TutorialProgress.Lesson.available(accessibilityGranted: app.accessibilityGranted)
-    }
-
-    private func applyLaunchAtLogin(_ enabled: Bool) {
-        do {
-            try app.setLaunchAtLogin(enabled)
-            launchError = nil
-        } catch {
-            launchError = error.localizedDescription
-            // The switch must not claim a state the system refused.
-            launchAtLogin = SMAppService.mainApp.status == .enabled
-        }
     }
 
     private var waitingMessageKey: String.LocalizationValue {

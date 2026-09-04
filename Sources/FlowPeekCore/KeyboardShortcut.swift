@@ -31,6 +31,9 @@ public struct FlowPeekShortcut: Equatable, Hashable, Codable, Sendable {
         case noAnchoringModifier
         case reservedByTheSystem(String)
         case alreadyUsed(action: String)
+        /// Only the OS can report this one: `RegisterEventHotKey` refused the combination because
+        /// another process already holds it. No list of ours could know.
+        case claimedByAnotherApp(String)
 
         public var errorDescription: String? {
             switch self {
@@ -40,6 +43,8 @@ public struct FlowPeekShortcut: Equatable, Hashable, Codable, Sendable {
                 "\(name) is reserved by macOS."
             case .alreadyUsed(let action):
                 "That shortcut is already assigned to \(action)."
+            case .claimedByAnotherApp(let name):
+                "Another app is already using \(name)."
             }
         }
 
@@ -49,6 +54,7 @@ public struct FlowPeekShortcut: Equatable, Hashable, Codable, Sendable {
             case .noAnchoringModifier: "shortcut.error.no-modifier"
             case .reservedByTheSystem: "shortcut.error.reserved"
             case .alreadyUsed: "shortcut.error.already-used"
+            case .claimedByAnotherApp: "shortcut.error.claimed"
             }
         }
 
@@ -57,6 +63,7 @@ public struct FlowPeekShortcut: Equatable, Hashable, Codable, Sendable {
             case .noAnchoringModifier: nil
             case .reservedByTheSystem(let name): name
             case .alreadyUsed(let action): action
+            case .claimedByAnotherApp(let name): name
             }
         }
     }
@@ -95,15 +102,30 @@ public struct FlowPeekShortcut: Equatable, Hashable, Codable, Sendable {
         let modifiers: Modifiers
     }
 
-    /// Combinations macOS will never hand over. Registering them appears to succeed and then never
-    /// fires, which reads as a broken shortcut, so they are refused up front.
+    /// Combinations macOS will never hand over. `RegisterEventHotKey` returns `noErr` for every one
+    /// of them and then the key is swallowed by the system before it can reach us, so the status the
+    /// caller now checks cannot see this class at all — only refusing them up front can.
     private static let reserved: [Reserved: String] = [
         Reserved(keyCode: 0x31, modifiers: [.command]): "⌘Space",
         Reserved(keyCode: 0x31, modifiers: [.command, .option]): "⌥⌘Space",
+        Reserved(keyCode: 0x31, modifiers: [.control]): "⌃Space",
+        Reserved(keyCode: 0x31, modifiers: [.control, .option]): "⌃⌥Space",
         Reserved(keyCode: 0x30, modifiers: [.command]): "⌘Tab",
         Reserved(keyCode: 0x30, modifiers: [.command, .shift]): "⇧⌘Tab",
         Reserved(keyCode: 0x0C, modifiers: [.command]): "⌘Q",
         Reserved(keyCode: 0x35, modifiers: [.command, .option]): "⌥⌘Esc",
+        // Screenshots.
+        Reserved(keyCode: 0x14, modifiers: [.command, .shift]): "⇧⌘3",
+        Reserved(keyCode: 0x15, modifiers: [.command, .shift]): "⇧⌘4",
+        Reserved(keyCode: 0x17, modifiers: [.command, .shift]): "⇧⌘5",
+        Reserved(keyCode: 0x16, modifiers: [.command, .shift]): "⇧⌘6",
+        // Mission Control, App Exposé and the Spaces switch.
+        Reserved(keyCode: 0x7E, modifiers: [.control]): "⌃↑",
+        Reserved(keyCode: 0x7D, modifiers: [.control]): "⌃↓",
+        Reserved(keyCode: 0x7B, modifiers: [.control]): "⌃←",
+        Reserved(keyCode: 0x7C, modifiers: [.control]): "⌃→",
+        // The Help menu search field.
+        Reserved(keyCode: 0x2C, modifiers: [.command, .shift]): "⇧⌘/",
     ]
 
     // MARK: - Key names
@@ -168,6 +190,15 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         switch self {
         case .previewClipboard: "shortcut.preview-clipboard.detail"
         case .aiPrompt: "shortcut.ai-prompt.detail"
+        }
+    }
+
+    /// Names the switch that has to be on before this shortcut can do anything, for the rows whose
+    /// feature is currently off.
+    public var inactiveHintKey: String.LocalizationValue {
+        switch self {
+        case .previewClipboard: "shortcut.inactive.clipboard"
+        case .aiPrompt: "shortcut.inactive.ai"
         }
     }
 }

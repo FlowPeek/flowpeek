@@ -59,6 +59,14 @@ struct ShortcutRecorder: View {
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.trailing)
                     .fixedSize(horizontal: false, vertical: true)
+            } else if center.unavailableActions.contains(action) {
+                // Not transient like `error`: the clash can appear long after the shortcut was
+                // recorded, whenever the app that owns the combination is next installed or started.
+                Text("shortcut.unavailable")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .overlay {
@@ -66,12 +74,18 @@ struct ShortcutRecorder: View {
                 KeyCaptureView(
                     onCapture: capture,
                     onModifiers: { pressedModifiers = $0 },
-                    onCancel: stopRecording
+                    onCancel: cancelRecording
                 )
                 .frame(width: 0, height: 0)
             }
         }
-        .onDisappear { if isRecording { stopRecording() } }
+        .onDisappear { cancelRecording() }
+        // Key events only reach the first responder of the active app's key window, so a field left
+        // recording while the user works elsewhere can never capture anything — and until it stops,
+        // every FlowPeek shortcut stays suspended.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            cancelRecording()
+        }
         .onChange(of: center.recordingAction) { _, current in
             // Another field took the keyboard; drop this one's transient state.
             if current != action { pressedModifiers = [] }
@@ -96,6 +110,14 @@ struct ShortcutRecorder: View {
     private func stopRecording() {
         pressedModifiers = []
         center.endRecording()
+    }
+
+    /// Every "the field lost the keyboard" route lands here, and each has to check first: by the time
+    /// one of them fires another field may already own the recording, and ending it would strand
+    /// that one instead.
+    private func cancelRecording() {
+        guard isRecording else { return }
+        stopRecording()
     }
 
     /// Core names the failure; the app owns the catalogue, matching how `mermaid.error.*` is handled.
@@ -144,6 +166,16 @@ private struct KeyCaptureView: NSViewRepresentable {
         var onCancel: (() -> Void)?
 
         override var acceptsFirstResponder: Bool { true }
+
+        /// The stranded case Escape cannot reach: the user clicked somewhere else in the window
+        /// without pressing anything, so nothing else would ever end the recording. The window check
+        /// skips the same call arriving during teardown, when the recording is already over.
+        override func resignFirstResponder() -> Bool {
+            if window != nil {
+                DispatchQueue.main.async { [weak self] in self?.onCancel?() }
+            }
+            return true
+        }
 
         override func performKeyEquivalent(with event: NSEvent) -> Bool {
             handle(event)

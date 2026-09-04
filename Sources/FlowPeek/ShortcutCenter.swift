@@ -12,16 +12,27 @@ final class ShortcutCenter: ObservableObject {
     /// Exactly one field can be recording: a second one would leave the first stuck showing "Press
     /// keys" while quietly losing its claim on the suspension.
     @Published private(set) var recordingAction: FlowPeekShortcutAction?
+    /// Actions whose stored combination the OS refused to hand over, which in practice means another
+    /// process already owns it. Rebuilt on every registration, so a clash that appears months after
+    /// the shortcut was recorded still shows up.
+    @Published private(set) var unavailableActions: Set<FlowPeekShortcutAction> = []
+    /// Which actions may hold a hot key at all, per `ShortcutActivationPolicy`.
+    @Published private(set) var activeActions = Set(FlowPeekShortcutAction.allCases)
 
     /// What each action does. Assigned once at start-up; re-registration does not disturb it.
     var handlers: [FlowPeekShortcutAction: () -> Void] = [:]
 
     private static let storageKey = "flowpeek.shortcuts"
+    /// A field left recording holds every shortcut down, so the suspension gets an outer bound. Long
+    /// enough that clicking the field and then thinking is not cut short and silently reverted.
+    private static let recordingLifetime = Duration.seconds(60)
 
     private let defaults: UserDefaults
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "HotKey")
     private var hotKeys: [FlowPeekShortcutAction: GlobalHotKey] = [:]
     private var isSuspended = false
+    /// Bumped by every begin and end, so a watchdog can tell its own session from a later one.
+    private var recordingGeneration = 0
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -45,10 +56,27 @@ final class ShortcutCenter: ObservableObject {
         hotKeys.removeAll()
     }
 
+    /// The policy's answer, applied. What left the set gives its hot key back to the rest of the
+    /// system; what entered it takes one.
+    func setActiveActions(_ actions: Set<FlowPeekShortcutAction>) {
+        activeActions = actions
+        registerAll()
+    }
+
     /// Frees the keyboard for one field. Any field already recording is dropped first, so the
     /// suspension always has exactly one owner and can never be left dangling.
     func beginRecording(_ action: FlowPeekShortcutAction) {
         recordingAction = action
+        recordingGeneration += 1
+        let session = recordingGeneration
+        // Everything that can take the keyboard away without a keystroke releases the suspension
+        // itself, but a leak here disables every shortcut for the rest of the session with nothing
+        // on screen to say so, so it also gets a floor it cannot fall through.
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.recordingLifetime)
+            guard let self, self.recordingGeneration == session else { return }
+            self.endRecording()
+        }
         guard !isSuspended else { return }
         isSuspended = true
         unregisterAll()
@@ -57,22 +85,42 @@ final class ShortcutCenter: ObservableObject {
 
     func endRecording() {
         recordingAction = nil
+        recordingGeneration += 1
         guard isSuspended else { return }
         isSuspended = false
         registerAll()
         logger.debug("hot keys resumed")
     }
 
-    private func register(_ action: FlowPeekShortcutAction) {
+    /// `noErr` when the OS actually handed the combination over. A dormant action reports `noErr`
+    /// too: it holds nothing on purpose, which is not a failure.
+    @discardableResult
+    private func register(_ action: FlowPeekShortcutAction) -> OSStatus {
+        guard activeActions.contains(action) else {
+            hotKeys[action]?.unregister()
+            hotKeys[action] = nil
+            unavailableActions.remove(action)
+            return noErr
+        }
         let hotKey = hotKeys[action] ?? GlobalHotKey()
         hotKey.onPress = { [weak self] in self?.handlers[action]?() }
-        hotKey.register(shortcuts[action], for: action)
+        let status = hotKey.register(shortcuts[action], for: action)
         hotKeys[action] = hotKey
+        note(status, for: action)
+        return status
+    }
+
+    private func note(_ status: OSStatus, for action: FlowPeekShortcutAction) {
+        if status == noErr {
+            unavailableActions.remove(action)
+        } else {
+            unavailableActions.insert(action)
+        }
     }
 
     // MARK: - Editing
 
-    /// `nil` on success. On failure nothing is stored and nothing is re-registered.
+    /// `nil` on success. On failure nothing is stored and the previous claim is put back.
     @discardableResult
     func assign(
         keyCode: UInt16,
@@ -81,9 +129,32 @@ final class ShortcutCenter: ObservableObject {
     ) -> FlowPeekShortcut.ValidationError? {
         var updated = shortcuts
         if let error = updated.assign(keyCode: keyCode, modifiers: modifiers, to: action) { return error }
+        let candidate = updated[action]
+        // Ask the OS before storing anything: `RegisterEventHotKey` is the only thing that knows
+        // whether another process already owns the combination. This runs while recording still has
+        // every FlowPeek hot key suspended, so a refusal can only be coming from outside the app.
+        let hotKey = hotKeys[action] ?? GlobalHotKey()
+        hotKey.onPress = { [weak self] in self?.handlers[action]?() }
+        let status = hotKey.register(candidate, for: action)
+        guard status == noErr else {
+            hotKey.unregister()
+            hotKeys[action] = nil
+            // Not while recording: `endRecording()` puts every claim back, and re-claiming the old
+            // combination now would fire the action instead of letting the user record it.
+            if !isSuspended { register(action) }
+            logger.info("\(candidate.display, privacy: .public) refused: OSStatus \(status, privacy: .public)")
+            return .claimedByAnotherApp(candidate.display)
+        }
+        hotKeys[action] = hotKey
         shortcuts = updated
         persist()
-        register(action)
+        note(status, for: action)
+        if isSuspended || !activeActions.contains(action) {
+            // The probe only borrowed the combination: while recording every claim is down, and a
+            // dormant feature must not hold one at all. `register(_:)` takes it for real later.
+            hotKey.unregister()
+            hotKeys[action] = nil
+        }
         return nil
     }
 
@@ -96,6 +167,10 @@ final class ShortcutCenter: ObservableObject {
     }
 
     func resetAll() {
+        // Restoring defaults mid-recording used to write shortcuts that `registerAll()` then skipped,
+        // because a suspension was still in force; ending it first also drops the field out of
+        // "Press keys", which is what the user asked for by pressing this.
+        endRecording()
         shortcuts = .defaults
         persist()
         registerAll()

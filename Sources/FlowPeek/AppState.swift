@@ -26,10 +26,18 @@ final class AppState: ObservableObject {
     @Published private(set) var engineHealth: MermaidEngineHealth?
     /// Which of the three routes the user has exercised. Drives the onboarding tutorial.
     @Published private(set) var tutorial = TutorialProgress()
-    /// Mirrors `AppleLanguages` in this app's defaults domain; applied on the next launch.
-    @Published var language: AppLanguage = AppLanguage.stored(
-        in: UserDefaults.standard.stringArray(forKey: AppLanguage.defaultsKey)
+    /// The override written into this app's own defaults domain; applied on the next launch.
+    @Published var language: AppLanguage = AppLanguage.storedOverride(
+        bundleIdentifier: Bundle.main.bundleIdentifier
     )
+    /// What this process was actually localized with, read before anything can change it. The
+    /// difference between the two is the pending relaunch, which is why the notice survives closing
+    /// the Settings window and disappears by itself if the user picks their original language back.
+    private let launchLanguage = AppLanguage.storedOverride(bundleIdentifier: Bundle.main.bundleIdentifier)
+    /// What macOS reports about the login item, which is not the same thing as what the user asked
+    /// for: a registration can succeed straight into `.requiresApproval`.
+    @Published private(set) var launchAtLoginStatus = SMAppService.mainApp.status
+    private var didRequestLaunchAtLogin = false
 
     let selectionMonitor = SelectionMonitor()
     let overlay = SelectionOverlayCoordinator()
@@ -89,8 +97,9 @@ final class AppState: ObservableObject {
             .aiPrompt: { [weak self] in self?.presentAIPrompt() },
             .previewClipboard: { [weak self] in self?.previewCopied() },
         ]
-        shortcuts.registerAll()
         startEngine()
+        // Registers the hot keys as well, and only the ones whose feature is on — which is why there
+        // is no `registerAll()` here: it would claim ⌥⌘M for a moment even with AI switched off.
         applyEnabledState()
         refreshPermission()
         #if DEBUG
@@ -146,6 +155,15 @@ final class AppState: ObservableObject {
             indicator.hide()
             highlight.hide()
         }
+        // Also the one place that claims and releases the global hot keys: a registered hot key is
+        // taken from every other app, so a shortcut whose feature is switched off must not hold one.
+        shortcuts.setActiveActions(
+            ShortcutActivationPolicy.activeActions(
+                isEnabled: isEnabled,
+                clipboardWatchEnabled: clipboardWatchEnabled,
+                aiEnabled: aiEnabled
+            )
+        )
     }
 
     func refreshPermission() {
@@ -176,17 +194,23 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Writes the override and reports whether a relaunch is needed to see it.
+    /// True while the running process is localized in something other than the stored choice.
+    var needsRelaunchForLanguage: Bool { language != launchLanguage }
+
+    /// Writes the override and reports whether it changed anything. Compared against what is on disk
+    /// rather than against `language`: picking the language the OS already uses is a real override to
+    /// write — it has to survive the user changing the system language later — even though the
+    /// visible answer does not move.
     @discardableResult
     func apply(language newValue: AppLanguage) -> Bool {
-        guard newValue != language else { return false }
+        let previous = AppLanguage.storedOverride(bundleIdentifier: Bundle.main.bundleIdentifier)
         language = newValue
         if let stored = newValue.storedValue {
             UserDefaults.standard.set(stored, forKey: AppLanguage.defaultsKey)
         } else {
             UserDefaults.standard.removeObject(forKey: AppLanguage.defaultsKey)
         }
-        return true
+        return newValue != previous
     }
 
     /// Same mechanism the permission flow uses: a fresh instance, then terminate this one.
@@ -399,13 +423,53 @@ final class AppState: ObservableObject {
     }
 
     func presentAIPrompt() {
-        guard aiEnabled, let selection = lastSelection, !selection.text.isEmpty else { return }
+        // Belt and braces: with the activation policy in force this key is not even registered while
+        // the experiment is off, so there is nothing to explain here.
+        guard aiEnabled else { return }
+        guard let selection = lastSelection, !selection.text.isEmpty else {
+            // The prompt has nothing to work from, and saying nothing at all is what made the
+            // shortcut look broken.
+            previews.showMessage(
+                title: String(localized: "preview.error.title"),
+                message: String(
+                    format: String(localized: "ai.no-selection"),
+                    shortcuts.shortcuts[.aiPrompt].display
+                )
+            )
+            return
+        }
         AIPromptCoordinator.shared.show(context: selection.text)
     }
 
-    func setLaunchAtLogin(_ enabled: Bool) throws {
-        if enabled { try SMAppService.mainApp.register() }
-        else { try SMAppService.mainApp.unregister() }
+    var launchAtLoginState: LaunchAtLoginState {
+        LaunchAtLoginState.resolve(
+            registered: launchAtLoginStatus == .enabled,
+            requiresApproval: launchAtLoginStatus == .requiresApproval,
+            requestedOn: didRequestLaunchAtLogin
+        )
+    }
+
+    func refreshLaunchAtLoginStatus() {
+        launchAtLoginStatus = SMAppService.mainApp.status
+    }
+
+    /// Nothing is thrown at the UI: an `SMAppService` failure arrives as a bare OSStatus ("The
+    /// operation couldn't be completed. (… error 1.)"), and the benign cases — already registered,
+    /// not registered — are not failures at all. The status the system reports afterwards is the
+    /// honest answer, and `launchAtLoginState` is what the switch renders.
+    func setLaunchAtLogin(_ enabled: Bool) {
+        didRequestLaunchAtLogin = enabled
+        do {
+            if enabled { try SMAppService.mainApp.register() }
+            else { try SMAppService.mainApp.unregister() }
+        } catch {
+            logger.error("login item \(enabled ? "register" : "unregister", privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+        }
+        refreshLaunchAtLoginStatus()
+    }
+
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     private func updateAccessibilityState(_ granted: Bool) {

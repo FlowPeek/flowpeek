@@ -47,6 +47,43 @@ final class KeyboardShortcutTests: XCTestCase {
         XCTAssertNil(FlowPeekShortcut.validate(keyCode: 0x31, modifiers: [.command, .control]))
     }
 
+    /// These return `noErr` from `RegisterEventHotKey` and are then swallowed before they reach the
+    /// app, so the registration status cannot see them and this list is the only defence.
+    func testTheSilentlySwallowedSystemCombinationsAreRefusedToo() {
+        let cases: [(UInt16, FlowPeekShortcut.Modifiers, String)] = [
+            (0x14, [.command, .shift], "⇧⌘3"),
+            (0x15, [.command, .shift], "⇧⌘4"),
+            (0x17, [.command, .shift], "⇧⌘5"),
+            (0x16, [.command, .shift], "⇧⌘6"),
+            (0x31, [.control], "⌃Space"),
+            (0x31, [.control, .option], "⌃⌥Space"),
+            (0x7E, [.control], "⌃↑"),
+            (0x7D, [.control], "⌃↓"),
+            (0x7B, [.control], "⌃←"),
+            (0x7C, [.control], "⌃→"),
+            (0x2C, [.command, .shift], "⇧⌘/"),
+        ]
+        for (keyCode, modifiers, name) in cases {
+            XCTAssertEqual(
+                FlowPeekShortcut.validate(keyCode: keyCode, modifiers: modifiers),
+                .reservedByTheSystem(name),
+                name
+            )
+            // Each name is the combination the user pressed, not a guess.
+            XCTAssertEqual(FlowPeekShortcut(keyCode: keyCode, modifiers: modifiers).display, name)
+        }
+        // Adding Command to the screenshot keys leaves them assignable.
+        XCTAssertNil(FlowPeekShortcut.validate(keyCode: 0x14, modifiers: [.command, .option]))
+    }
+
+    /// The OS is the only witness to this one, so core just carries the name through to the catalogue.
+    func testAShortcutAnotherAppOwnsNamesTheCombinationForTheCatalogue() {
+        let error = FlowPeekShortcut.ValidationError.claimedByAnotherApp("⌥⌘M")
+        XCTAssertEqual(error.localizationKey, "shortcut.error.claimed")
+        XCTAssertEqual(error.localizationArgument, "⌥⌘M")
+        XCTAssertNotNil(error.errorDescription)
+    }
+
     func testAClashNamesTheActionAlreadyHoldingTheShortcut() {
         let taken = [FlowPeekShortcut(keyCode: m, modifiers: [.command, .option]): "Generate with AI"]
         XCTAssertEqual(

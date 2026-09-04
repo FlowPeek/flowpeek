@@ -54,6 +54,22 @@ final class ClipboardMonitor {
         logger.info("clipboard watch stopped")
     }
 
+    /// What is on the pasteboard right now, for the paths the user asked for by pressing something.
+    /// Deliberately does not touch `lastChangeCount`: reading here must not swallow the badge the
+    /// poller is about to raise for the same copy, and it has to work while the watch is stopped.
+    func currentText() -> String? {
+        guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// The one thing FlowPeek ever puts on the pasteboard, and it goes through the same pasteboard
+    /// the reads use: written to `NSPasteboard.general` directly it would land where an injected
+    /// pasteboard cannot see it, and `currentText()` would report the clipboard as still empty.
+    func write(_ text: String) {
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
     /// Exposed for tests and for the "check now" path; safe to call at any time.
     func poll() {
         let changeCount = pasteboard.changeCount

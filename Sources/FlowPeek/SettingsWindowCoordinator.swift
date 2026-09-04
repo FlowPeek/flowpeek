@@ -5,19 +5,24 @@ import SwiftUI
 final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowCoordinator()
     private var window: NSWindow?
+    /// Kept so a window that is already open can be sent to a different pane. Typed as `AnyView`
+    /// because the alternative is spelling out the modifier chain SwiftUI infers for the root view.
+    private var controller: NSHostingController<AnyView>?
 
-    func show() {
+    /// `section` is what the caller wants looked at, not a preference: the menu bar's shortcut row
+    /// asks for the Shortcuts pane, and an already-open window is re-rooted there rather than left
+    /// on whatever the user was last reading.
+    func show(section: SettingsView.SettingsSection = .general) {
         if let window {
+            controller?.rootView = rootView(section: section)
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
             return
         }
 
-        let controller = NSHostingController(
-            rootView: SettingsView(close: { [weak self] in self?.closeWindow() })
-                .environmentObject(AppState.shared)
-        )
+        let controller = NSHostingController(rootView: rootView(section: section))
+        self.controller = controller
         let window = SettingsWindow(contentViewController: controller)
         window.title = String(localized: "settings.window.title")
         window.styleMask = [.borderless, .closable, .fullSizeContentView]
@@ -42,18 +47,27 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
         window.orderFrontRegardless()
     }
 
+    private func rootView(section: SettingsView.SettingsSection) -> AnyView {
+        AnyView(
+            SettingsView(section: section, close: { [weak self] in self?.closeWindow() })
+                .environmentObject(AppState.shared)
+        )
+    }
+
     func windowWillClose(_ notification: Notification) {
         // Closing the window with a field still recording would leave every global shortcut
         // suspended for the rest of the session. Idempotent, so it is safe next to `onDisappear`,
         // which SwiftUI is not guaranteed to run before the window goes away.
         AppState.shared.shortcuts.endRecording()
         window = nil
+        controller = nil
     }
 
     private func closeWindow() {
         AppState.shared.shortcuts.endRecording()
         window?.close()
         window = nil
+        controller = nil
     }
 }
 

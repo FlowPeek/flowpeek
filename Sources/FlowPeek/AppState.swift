@@ -28,6 +28,13 @@ final class AppState: ObservableObject {
     /// front of it there was nothing left that could raise it again.
     @Published private(set) var hasPromotedPreview = false
     @Published private(set) var engineHealth: MermaidEngineHealth?
+    /// True while the canary is running. The verdict is cleared for the duration, so the menu shows
+    /// "checking" rather than a verdict that is being re-taken.
+    @Published private(set) var isCheckingEngine = false
+    /// What the status item draws, and what the menu says in words. Recomputed rather than derived
+    /// in the view: `isEnabled` is `@AppStorage`, which publishes nothing from inside a class, so a
+    /// computed property would leave the icon showing the state before the toggle.
+    @Published private(set) var menuBarStatus: MenuBarStatus = .armed
     /// Which of the three routes the user has exercised. Drives the onboarding tutorial.
     ///
     /// Written back on every change rather than at the end, because the tutorial is quit halfway
@@ -72,6 +79,9 @@ final class AppState: ObservableObject {
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Renderer")
     private var lastDetection: (text: String, detection: MermaidDetection)?
+    /// Polls `AXIsProcessTrusted()`, because the grant can go away while the app runs and macOS
+    /// posts nothing an app may rely on to say so.
+    private var permissionPollTimer: Timer?
     /// The most recent copied diagram, kept in memory only, replaced by the next copy.
     private var copied: MermaidSource?
     /// The block the ambient outline is currently drawn around, in memory only.
@@ -128,6 +138,7 @@ final class AppState: ObservableObject {
         // is no `registerAll()` here: it would claim ⌥⌘M for a moment even with AI switched off.
         applyEnabledState()
         refreshPermission()
+        schedulePermissionPoll()
         #if DEBUG
         let forceOnboarding = ProcessInfo.processInfo.arguments.contains("--force-onboarding")
         #else
@@ -148,6 +159,8 @@ final class AppState: ObservableObject {
     }
 
     func stop() {
+        permissionPollTimer?.invalidate()
+        permissionPollTimer = nil
         selectionMonitor.stop()
         clipboard.stop()
         ambient.stop()
@@ -195,10 +208,61 @@ final class AppState: ObservableObject {
                 accessibilityGranted: accessibilityGranted
             )
         )
+        refreshMenuBarStatus()
     }
 
     func refreshPermission() {
         updateAccessibilityState(AXIsProcessTrusted())
+    }
+
+    private func refreshMenuBarStatus() {
+        let resolved = MenuBarStatus.resolve(
+            engineUsable: engineHealth?.isUsable ?? true,
+            accessibilityGranted: accessibilityGranted,
+            permissionDeclined: permissionDeclined,
+            isEnabled: isEnabled,
+            clipboardWatchEnabled: clipboardWatchEnabled
+        )
+        // Assigned only when it moves: this also runs from the permission poll, and `@Published`
+        // republishes an identical value, which would redraw the status item on a timer.
+        guard resolved != menuBarStatus else { return }
+        menuBarStatus = resolved
+    }
+
+    /// The two things an answer to the permission question moves that nothing else would notice:
+    /// `permissionDeclined` is `@AppStorage`, which publishes nothing from inside a class, so the
+    /// icon would keep the state before the click until the next poll — and the cadence of that
+    /// poll is itself a question about whether an answer is still outstanding.
+    func permissionAnswerDidChange() {
+        refreshMenuBarStatus()
+        schedulePermissionPoll()
+    }
+
+    /// Three seconds while the permission question is still open, ten once it has an answer.
+    /// Someone standing in System Settings waiting for the switch to take effect notices three; a
+    /// revocation is rare enough that hearing about it within ten is what matters, and
+    /// `AXIsProcessTrusted()` still goes out to the TCC daemon, so the idle case gets the cheaper
+    /// cadence.
+    private static let ungrantedPollInterval: TimeInterval = 3
+    private static let grantedPollInterval: TimeInterval = 10
+
+    /// A decline is an answer. Someone who said "continue without it" and works from the clipboard
+    /// is not waiting for a switch to take effect, so they get the idle cadence for the life of the
+    /// process rather than a tccd round-trip on the main actor every three seconds.
+    var permissionPollInterval: TimeInterval {
+        accessibilityGranted || permissionDeclined ? Self.grantedPollInterval : Self.ungrantedPollInterval
+    }
+
+    private func schedulePermissionPoll() {
+        let interval = permissionPollInterval
+        if let existing = permissionPollTimer, existing.timeInterval == interval { return }
+        permissionPollTimer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshPermission() }
+        }
+        timer.tolerance = interval / 2
+        RunLoop.main.add(timer, forMode: .common)
+        permissionPollTimer = timer
     }
 
     func requestAccessibility() {
@@ -395,18 +459,79 @@ final class AppState: ObservableObject {
         )
     }
 
+    /// The key the onboarding tutorial teaches, so it has to answer whenever it is pressed. The
+    /// pasteboard is read live here and the watcher's own switches are not consulted: they govern
+    /// the unasked-for badge, not a key the user pressed, and gating this on them is what made the
+    /// shortcut silent for every diagram copied before FlowPeek was watching.
     func previewCopied() {
         indicator.hide()
-        guard let copied else { return }
-        let title = String(localized: "preview.error.title")
-        if let engineHealth, !engineHealth.isUsable {
-            previews.showMessage(title: title, message: engineHealth.menuDescription ?? "")
-            return
+        switch ClipboardPreviewPolicy.decide(
+            pasteboardText: clipboard.currentText(),
+            hasCachedDiagram: copied != nil
+        ) {
+        case .preview(let source):
+            // Kept so the badge and this path can never name different diagrams.
+            copied = source
+            showCopied(source)
+        case .previewCached:
+            if let copied { showCopied(copied) }
+        case .refused(let error):
+            // The same specific sentence every other route gives for the same input. Reported here
+            // rather than opening the remembered copy, which would answer the key with a different
+            // diagram under the same title and say nothing about the one on the pasteboard.
+            previews.showMessage(
+                title: String(localized: "clipboard.error.title"),
+                message: localizedUserMessage(error)
+            )
+        case .nothingToPreview:
+            // Saying nothing is what the user reads as a broken app, and a panel that only
+            // explains itself is a dead end, so it also offers something to press the key against.
+            previews.showMessage(
+                title: String(localized: "clipboard.empty.title"),
+                message: emptyClipboardMessage,
+                action: (title: String(localized: "clipboard.empty.copy-sample"), handler: { [weak self] in
+                    self?.copySampleDiagram()
+                })
+            )
         }
+    }
+
+    /// The combination that opens this route, or `nil` while nothing holds one. A dormant or
+    /// clashing action has no registered hot key, so naming its stored chord would advertise a key
+    /// that goes nowhere — and this panel is reachable from a menu row that is always enabled.
+    var clipboardShortcutDisplay: String? {
+        guard shortcuts.activeActions.contains(.previewClipboard),
+              !shortcuts.unavailableActions.contains(.previewClipboard) else { return nil }
+        return shortcuts.shortcuts[.previewClipboard].display
+    }
+
+    /// Two sentences rather than one with an empty slot: the chord is rendered from the store when
+    /// there is one to render, and the version without it names the menu row instead — from the
+    /// same catalogue key the menu draws, so the panel cannot send the user looking for a command
+    /// under a name nothing in the menu uses.
+    private var emptyClipboardMessage: String {
+        guard let chord = clipboardShortcutDisplay else {
+            return String(
+                format: String(localized: "clipboard.empty.message.no-shortcut"),
+                String(localized: "menu.preview-clipboard")
+            )
+        }
+        return String(format: String(localized: "clipboard.empty.message"), chord)
+    }
+
+    private func showCopied(_ source: MermaidSource) {
         tutorial.noteOpened(.clipboard)
         previews.showQuick(
-            document: DiagramDocument(title: String(localized: "diagram.clipboard-title"), source: copied)
+            document: DiagramDocument(title: String(localized: "diagram.clipboard-title"), source: source)
         )
+    }
+
+    /// Turns the empty-clipboard panel into a working demonstration: one more press of the same key
+    /// now opens something. Writing it also bumps `changeCount`, so the badge fires too — which is
+    /// exactly what a real copy looks like.
+    private func copySampleDiagram() {
+        clipboard.write(TutorialSample.text)
+        previewCopied()
     }
 
     /// An outline is only ever drawn; opening the diagram still takes a deliberate key or click.
@@ -464,10 +589,6 @@ final class AppState: ObservableObject {
         guard let candidate = ambientCandidate else { return }
         ambientCandidate = nil
         let title = String(localized: "preview.error.title")
-        if let engineHealth, !engineHealth.isUsable {
-            previews.showMessage(title: title, message: engineHealth.menuDescription ?? "")
-            return
-        }
         do {
             let source = try MermaidSource(rawValue: candidate.detection.extractedSource)
             tutorial.noteOpened(.ambient)
@@ -483,11 +604,11 @@ final class AppState: ObservableObject {
 
     func render(_ snapshot: SelectionSnapshot) {
         overlay.hide()
+        // No pre-emptive engine gate: the launch canary can fail once for reasons that have nothing
+        // to do with this diagram, and the preview itself reports a real failure specifically — and
+        // offers Try Again — where this reported the menu-bar line under "Cannot Preview This
+        // Selection" and blamed the selection for the rest of the session.
         let title = String(localized: "preview.error.title")
-        if let engineHealth, !engineHealth.isUsable {
-            previews.showMessage(title: title, message: engineHealth.menuDescription ?? "")
-            return
-        }
         let cached = lastDetection.flatMap { $0.text == snapshot.text ? $0.detection : nil }
         let detection = cached ?? MermaidDetector.detect(snapshot.text)
         do {
@@ -506,10 +627,25 @@ final class AppState: ObservableObject {
     private func startEngine() {
         let pool = MermaidWebViewPool.shared
         pool.warmUp()
+        // Cleared before the await so a verdict that is being re-taken cannot be displayed as the
+        // current one. Nothing gates on it any more, so a `nil` health blocks nothing either.
+        engineHealth = nil
+        isCheckingEngine = true
+        refreshMenuBarStatus()
         Task { [weak self] in
             let health = await pool.runSelfTest(theme: MermaidThemeFactory.current())
             self?.engineHealth = health
+            self?.isCheckingEngine = false
+            self?.refreshMenuBarStatus()
         }
+    }
+
+    /// A canary can fail once for reasons that have nothing to do with the engine — login-time
+    /// memory pressure, a WebContent process that lost a race — and the verdict used to stand for
+    /// the whole session with no way to take it again short of quitting.
+    func recheckEngine() {
+        guard !isCheckingEngine else { return }
+        startEngine()
     }
 
     func presentAIPrompt() {
@@ -581,17 +717,38 @@ final class AppState: ObservableObject {
         SMAppService.openSystemSettingsLoginItems()
     }
 
-    private func updateAccessibilityState(_ granted: Bool) {
-        let becameGranted = granted && !accessibilityGranted
-        let becameRevoked = !granted && accessibilityGranted
-        accessibilityGranted = granted
+    /// The single reaction to the grant moving, in either direction. Not private: taking the grant
+    /// away and giving it back is otherwise only possible from System Settings, and this is the path
+    /// a revoke has to survive.
+    func updateAccessibilityState(_ granted: Bool) {
+        let changed = granted != accessibilityGranted
+        // Every assignment here is guarded, because this now runs from a timer: `@Published`
+        // republishes an identical value and `@AppStorage` writes the defaults again, so an
+        // unguarded pass would redraw the app and touch the disk every few seconds.
+        if changed { accessibilityGranted = granted }
         if granted {
-            accessibilityNeedsRepair = false
+            if accessibilityNeedsRepair { accessibilityNeedsRepair = false }
             // Granting answers the question the decline was an answer to, so a later revoke gets
             // the full offer back rather than being silently treated as still-declined.
-            permissionDeclined = false
+            if permissionDeclined { permissionDeclined = false }
         }
-        if becameGranted && isEnabled { selectionMonitor.restart() }
-        if becameRevoked { selectionMonitor.stop(); forgetSelection() }
+        // Unconditional, because the verdict can move while `changed` does not: clearing a decline
+        // the moment the grant arrives is exactly that case.
+        refreshMenuBarStatus()
+        guard changed else { return }
+        // Both AX monitors install global event monitors while trusted and keep them after the
+        // grant is gone, delivering nothing; and a monitor installed untrusted stays deaf even once
+        // the switch is on. Tearing both down and letting `applyEnabledState()` decide which to
+        // start again is what makes a re-grant revive every route rather than only the selection
+        // one, and a revoke stop the outline as well as the button.
+        selectionMonitor.stop()
+        ambient.stop()
+        if !granted {
+            forgetSelection()
+            highlight.hide()
+        }
+        applyEnabledState()
+        // The two directions want different cadences, and this is where the direction changes.
+        schedulePermissionPoll()
     }
 }

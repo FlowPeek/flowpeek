@@ -41,7 +41,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "C40FBCDD665F5E3F9C1A7F7E2A54A3E8"
+               BlueprintIdentifier = "6A05B2E713F7EB13D902E532402DFFB0"
                BuildableName = "FlowPeekCoreTests.xctest"
                BlueprintName = "FlowPeekCoreTests"
                ReferencedContainer = "container:FlowPeek.xcodeproj">
@@ -51,7 +51,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "63AEF0D880CE81FC313DB46C2A62A8FC"
+               BlueprintIdentifier = "4A72FBD062AB33D45A552A02AD10AD24"
                BuildableName = "FlowPeekRendererTests.xctest"
                BlueprintName = "FlowPeekRendererTests"
                ReferencedContainer = "container:FlowPeek.xcodeproj">

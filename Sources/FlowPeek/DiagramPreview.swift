@@ -526,15 +526,27 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     }
 
     /// The engine could not run, or the selection failed validation: say why, in a panel. This is
-    /// the branch that used to be `NSSound.beep()`.
-    func showMessage(title: String, message: String) {
+    /// the branch that used to be `NSSound.beep()`. `action`, when given, is the one thing worth
+    /// pressing here — a panel that can only be dismissed is a dead end.
+    func showMessage(title: String, message: String, action: (title: String, handler: () -> Void)? = nil) {
         closeQuick()
         quickPanelIsDiagram = false
         let panel = makePanel(
             size: Self.messageSize,
             minSize: Self.messageSize,
             title: title,
-            content: PreviewMessageView(title: title, message: message) { [weak self] in self?.closeQuick() }
+            content: PreviewMessageView(
+                title: title,
+                message: message,
+                action: action.map { given in
+                    (title: given.title, handler: { [weak self] in
+                        // The panel is what the action replaces, and leaving it behind the diagram
+                        // it just produced would keep the dismissal monitors installed for both.
+                        self?.closeQuick()
+                        given.handler()
+                    })
+                }
+            ) { [weak self] in self?.closeQuick() }
         )
         quickPanel = panel
         installDismissMonitors()
@@ -902,6 +914,7 @@ struct DiagramPreviewView: View {
 struct PreviewMessageView: View {
     let title: String
     let message: String
+    var action: (title: String, handler: () -> Void)?
     let onClose: () -> Void
 
     var body: some View {
@@ -917,6 +930,11 @@ struct PreviewMessageView: View {
                         .font(.callout)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let action {
+                    Button(action.title, action: action.handler)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                 }
             }
             .padding(20)

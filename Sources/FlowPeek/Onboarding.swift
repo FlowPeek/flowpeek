@@ -438,7 +438,7 @@ struct OnboardingView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         // Only the way back to the question. Clearing the decline here would answer
                         // it on the user's behalf, and a user who then backed out without granting
-                        // would be left looking unanswered again — which re-arms the every-launch
+                        // would be left looking unanswered again -- which re-arms the every-launch
                         // offer the decline exists to switch off. The flag moves when they actually
                         // grant the permission, or when they press the decline button again.
                         Button("permission.turn-on") { step = .permission }
@@ -635,11 +635,15 @@ struct OnboardingView: View {
     /// worth asking, and the clipboard lesson still works.
     private func decline() {
         app.permissionDeclined = true
+        // The icon and the poll both key off this answer, and it is the user's own click: leaning on
+        // the next poll to notice would leave the warning triangle up for as long as three seconds
+        // after they chose to live without the grant.
+        app.permissionAnswerDidChange()
         step = permissionDestination
     }
 
     /// On a revisit the tutorial is the root of the window, so there is nothing behind it to go
-    /// back to — walking a returning user into the permission wizard is not what they asked for.
+    /// back to -- walking a returning user into the permission wizard is not what they asked for.
     private var showsBackButton: Bool {
         isRevisit ? step != .tutorial : step > .welcome
     }

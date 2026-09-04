@@ -3,7 +3,9 @@ import FlowPeekCore
 import SwiftUI
 
 struct SettingsView: View {
-    private enum SettingsSection: String, CaseIterable {
+    /// Not private: the menu bar's "Change Shortcuts…" row opens this window on a named pane, and
+    /// the pane it wants is the whole point of that row.
+    enum SettingsSection: String, CaseIterable {
         case general
         case shortcuts
         case ai
@@ -34,9 +36,14 @@ struct SettingsView: View {
     /// the pause through `app` only redraws by accident, when something else in the same turn
     /// happens to move. Owned by the view, `@AppStorage` observes the store itself.
     @AppStorage("flowpeek.enabled") private var detectionEnabled = true
-    @State private var selection = SettingsSection.general
+    @State private var selection: SettingsSection
     @State private var relaunchPrompt: RelaunchPrompt?
     let close: () -> Void
+
+    init(section: SettingsSection = .general, close: @escaping () -> Void) {
+        _selection = State(initialValue: section)
+        self.close = close
+    }
 
     /// The card's own copy names the chord that opens an outlined diagram, and that chord is
     /// rebindable on the next tab along, so it is read from the store rather than spelled out in

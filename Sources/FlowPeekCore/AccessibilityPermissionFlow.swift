@@ -13,7 +13,10 @@ public struct AccessibilityPermissionFlow: Equatable, Sendable {
     }
 
     public var shouldComplete: Bool { phase == .granted }
-    public var shouldOfferRelaunch: Bool { phase == .waitingForUser && unconfirmedChecks >= 8 }
+    /// Counted in one-second polls. Finding the FlowPeek row in the Accessibility list takes most
+    /// people longer than the eight checks this used to allow, so the offer arrived while they were
+    /// still scrolling and read as "something went wrong".
+    public var shouldOfferRelaunch: Bool { phase == .waitingForUser && unconfirmedChecks >= 45 }
 
     public mutating func beginWaitingForSystemSettings() {
         guard phase != .granted else { return }

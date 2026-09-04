@@ -1,6 +1,7 @@
 "menu.detection.on" = "감지 켜짐";
 "menu.detection.paused" = "감지 일시 정지";
 "menu.settings" = "권한 및 설정…";
+"menu.onboarding" = "환영 및 튜토리얼…";
 "menu.permission.refresh" = "접근성 권한 다시 확인";
 "menu.update" = "업데이트 확인…";
 "menu.about" = "FlowPeek 정보";
@@ -8,8 +9,8 @@
 "onboarding.window.title" = "FlowPeek 시작하기";
 "onboarding.welcome.title" = "Mermaid를 선택하는 순간, 미리보기";
 "onboarding.welcome.message" = "브라우저나 앱에서 Mermaid 문법을 드래그해 선택하면 바로 옆에 나타나는 버튼으로 네이티브 미리보기를 열 수 있습니다. 선택 내용은 기기 밖으로 나가지 않습니다.";
-"onboarding.permission.title" = "스위치 하나만 켜면 됩니다";
-"onboarding.permission.message" = "접근성 설정이 자동으로 열립니다. 그곳에서 FlowPeek를 켜면 이 창이 변경을 감지하고 설정을 자동으로 마칩니다.";
+"onboarding.permission.title" = "선택 사항인 스위치 하나";
+"onboarding.permission.message" = "다이어그램 복사는 권한이 필요하지 않습니다. 다른 앱에서 드래그한 텍스트 옆에 버튼까지 띄우려면 그 선택 영역을 읽을 권한이 필요합니다. 그 밖의 것은 읽지 않고, 아무것도 이 Mac 밖으로 나가지 않습니다.";
 "tutorial.title" = "세 가지 모두 해보기";
 "tutorial.message" = "FlowPeek에 닿는 길은 세 가지입니다. 연습 페이지를 열고 실제로 한 번씩 써보세요 — 해낸 만큼 체크가 채워집니다.";
 "tutorial.open-page" = "연습 페이지 열기";
@@ -17,6 +18,8 @@
 "tutorial.page.title" = "FlowPeek 연습";
 "tutorial.page.intro" = "여기는 여러분의 브라우저에 열린 실제 페이지입니다. 아래 동작들은 지금부터 쓰실 그대로 작동합니다.";
 "tutorial.page.closing" = "세 가지 모두 같은 미리보기를 엽니다. Esc로 닫습니다.";
+"tutorial.page.closing.one" = "지금부터 쓰실 그 미리보기가 열립니다. Esc로 닫습니다.";
+"tutorial.locked" = "드래그해서 선택하기와 가리키기는 접근성 스위치가 있어야 동작합니다.";
 "tutorial.selection.title" = "드래그해서 선택";
 "tutorial.selection.detail" = "아래 다이어그램을 드래그하세요. 옆에 작은 버튼이 나타나면 그것을 누릅니다.";
 "tutorial.clipboard.title" = "복사";
@@ -36,6 +39,9 @@
 "permission.refresh" = "권한 상태 다시 확인";
 "permission.step.toggle" = "접근성 목록에서 FlowPeek 스위치 켜기";
 "permission.step.detail" = "FlowPeek는 이미 목록에 추가되어 있습니다. 오른쪽 스위치만 켜세요. macOS가 Touch ID 또는 암호를 요구할 수 있으며, 이후 이 창으로 돌아올 필요는 없습니다.";
+"permission.clipboard-works" = "다이어그램 복사는 이 스위치가 없어도 그대로 동작합니다.";
+"permission.decline" = "권한 없이 계속하기";
+"permission.turn-on" = "접근성 켜기";
 "permission.open-settings" = "접근성 설정 열기";
 "permission.open-again" = "접근성 설정 다시 열기";
 "permission.waiting" = "FlowPeek 스위치를 켜기를 기다리는 중…";
@@ -43,9 +49,13 @@
 "permission.relaunch.help" = "스위치를 이미 켰나요? macOS가 새로 실행된 프로세스에만 권한을 반영하는 경우가 있습니다.";
 "permission.relaunch" = "FlowPeek 다시 실행";
 "permission.reset" = "권한 초기화 후 다시 등록";
+"permission.reset.confirm.title" = "접근성 목록에서 FlowPeek를 제거할까요?";
+"permission.reset.confirm.body" = "이미 허용한 권한까지 함께 지우고 FlowPeek 항목을 목록에서 없앱니다. 이후 스위치를 다시 켜야 합니다. 스위치가 이미 켜져 있는데도 선택 영역을 읽지 못할 때만 필요한 조치입니다.";
+"permission.reset.confirm.action" = "항목 제거";
 "permission.reset.failed" = "접근성 항목을 초기화하지 못했습니다. 목록에서 FlowPeek를 빼기 버튼으로 제거한 뒤 설정을 다시 여세요.";
 "permission.registration.changed" = "현재 FlowPeek 빌드가 이전에 허용한 항목과 일치하지 않습니다. 한 번 초기화한 뒤 새로 등록된 FlowPeek 스위치를 켜세요.";
 "common.back" = "이전";
+"common.cancel" = "취소";
 "common.continue" = "계속";
 "common.start" = "시작하기";
 "settings.accessibility" = "접근성";

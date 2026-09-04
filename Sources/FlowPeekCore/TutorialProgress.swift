@@ -36,6 +36,17 @@ public struct TutorialProgress: Equatable, Sendable {
             case .ambient: "viewfinder"
             }
         }
+
+        /// Selecting reads the focused element and pointing walks the accessibility tree; copying
+        /// does neither.
+        public static let requiringAccessibility: [Self] = [.selection, .ambient]
+
+        /// Which lessons can actually be passed. Copying is the whole tutorial for someone who
+        /// declined the grant, and teaching a gesture that cannot produce an overlay — a drag whose
+        /// button never appears — is worse than not offering it at all.
+        public static func available(accessibilityGranted: Bool) -> [Self] {
+            accessibilityGranted ? allCases : allCases.filter { !requiringAccessibility.contains($0) }
+        }
     }
 
     public enum State: Equatable, Sendable {
@@ -58,11 +69,21 @@ public struct TutorialProgress: Equatable, Sendable {
     }
 
     public var isComplete: Bool {
-        Lesson.allCases.allSatisfy { self[$0] == .done }
+        isComplete(among: Lesson.allCases)
     }
 
     public var completedCount: Int {
-        Lesson.allCases.count { self[$0] == .done }
+        completedCount(among: Lesson.allCases)
+    }
+
+    /// Completion measured against the lessons on offer, so a user without Accessibility can finish
+    /// honestly instead of being told they gave up on two gestures that were never available.
+    public func isComplete(among lessons: [Lesson]) -> Bool {
+        lessons.allSatisfy { self[$0] == .done }
+    }
+
+    public func completedCount(among lessons: [Lesson]) -> Int {
+        lessons.count { self[$0] == .done }
     }
 
     /// Records that FlowPeek noticed something. Never demotes a finished lesson: having opened a

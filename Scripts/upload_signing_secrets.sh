@@ -37,9 +37,22 @@ if [[ -n "${FLOWPEEK_P12:-}" ]]; then
   [[ -f "$FLOWPEEK_P12" ]] || { print -u2 "No such file: $FLOWPEEK_P12"; exit 1; }
   cp "$FLOWPEEK_P12" "$archive"
   print "Using $FLOWPEEK_P12"
-  print -n "Password for that .p12: "
-  read -rs password
-  print ""
+  if [[ -n "${FLOWPEEK_P12_PASSWORD:-}" ]]; then
+    password="$FLOWPEEK_P12_PASSWORD"
+  elif [[ -r /dev/tty ]]; then
+    # Read from the terminal directly: stdin is not a tty when this runs under a tool or a pipe,
+    # and a plain `read` there gets EOF and silently yields an empty password.
+    print -n "Password for that .p12: "
+    read -rs password < /dev/tty
+    print ""
+  else
+    print -u2 "No terminal to prompt on. Pass the password without putting it in your history:"
+    print -u2 "  FLOWPEEK_P12='$FLOWPEEK_P12' FLOWPEEK_P12_PASSWORD=\"\$(read -rs p </dev/tty; print -r -- \$p)\" \\"
+    print -u2 "    zsh Scripts/upload_signing_secrets.sh"
+    print -u2 "or simply prefix the command with a space so zsh keeps it out of history."
+    exit 1
+  fi
+  [[ -n "$password" ]] || { print -u2 "Empty password; nothing to verify against."; exit 1; }
 else
   available=$(security find-identity -v -p codesigning | grep "Developer ID Application" || true)
   if [[ -z "$available" ]]; then

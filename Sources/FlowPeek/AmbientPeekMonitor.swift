@@ -37,6 +37,7 @@ final class AmbientPeekMonitor {
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Ambient")
     private var flagsMonitor: Any?
+    private var localFlagsMonitor: Any?
     private var moveMonitor: Any?
     private var keyMonitor: Any?
     private var isEngaged = false
@@ -50,10 +51,17 @@ final class AmbientPeekMonitor {
     }()
 
     func start() {
-        guard flagsMonitor == nil else { return }
+        guard flagsMonitor == nil, localFlagsMonitor == nil else { return }
         flagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
             let engaged = event.modifierFlags.intersection(Self.significantModifiers) == Self.modifier
             Task { @MainActor in self?.setEngaged(engaged) }
+        }
+        // The global monitor is blind to events delivered to FlowPeek itself, which is exactly the
+        // case once a preview has opened, so the same change is observed locally too.
+        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
+            let engaged = event.modifierFlags.intersection(Self.significantModifiers) == Self.modifier
+            Task { @MainActor in self?.setEngaged(engaged) }
+            return event
         }
         moveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
             Task { @MainActor in self?.pointerMoved() }
@@ -67,8 +75,9 @@ final class AmbientPeekMonitor {
     }
 
     func stop() {
-        [flagsMonitor, moveMonitor, keyMonitor].compactMap { $0 }.forEach(NSEvent.removeMonitor)
+        [flagsMonitor, localFlagsMonitor, moveMonitor, keyMonitor].compactMap { $0 }.forEach(NSEvent.removeMonitor)
         flagsMonitor = nil
+        localFlagsMonitor = nil
         moveMonitor = nil
         keyMonitor = nil
         setEngaged(false)
@@ -100,6 +109,13 @@ final class AmbientPeekMonitor {
         // the activation then had nothing left to open. The outline is dismissed by whoever handles
         // the activation, which needs the candidate first.
         showing = false
+        // The peek is spent. Opening the preview makes FlowPeek the active application, and a global
+        // monitor never sees events delivered to its own app -- so the modifier's key-up went to the
+        // preview and this monitor stayed engaged for good, redrawing the hint on every mouse move
+        // long after the key was released. Disengaging here means the next press re-arms it.
+        isEngaged = false
+        lastPointer = nil
+        lastRead = nil
         onActivate?()
     }
 
@@ -110,6 +126,13 @@ final class AmbientPeekMonitor {
     }
 
     private func evaluate() {
+        // Belt and braces for the same missed-key-up problem: whatever the monitors saw, the live
+        // modifier state is the truth, so a stale engagement corrects itself on the next event
+        // rather than persisting until the app is relaunched.
+        guard NSEvent.modifierFlags.intersection(Self.significantModifiers) == Self.modifier else {
+            setEngaged(false)
+            return
+        }
         let pointer = NSEvent.mouseLocation
         let now = Date()
         guard AmbientPeekPolicy.shouldRead(

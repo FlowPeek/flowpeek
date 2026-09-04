@@ -266,6 +266,21 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var model: DiagramViewModel?
     private var dismissMonitors: [Any] = []
+    /// The message panel reuses `quickPanel` but has a fixed size, so its frame is never stored.
+    private var quickPanelIsDiagram = false
+    /// Surfaces whose layout has settled. The resizes that happen while a surface is being built
+    /// are FlowPeek's own; recording them made the remembered size grow with every open.
+    private var shownSurfaces: Set<PreviewSizeMemory.Surface> = []
+    /// Long enough for SwiftUI's first layout passes to finish, short enough that a user cannot
+    /// have finished a resize drag inside it.
+    private static let settleDelay: Duration = .milliseconds(400)
+
+    private func markSettled(_ surface: PreviewSizeMemory.Surface) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.settleDelay)
+            self?.shownSurfaces.insert(surface)
+        }
+    }
 
     private static let quickSize = CGSize(width: 720, height: 520)
     private static let quickMinSize = CGSize(width: 360, height: 260)
@@ -273,13 +288,59 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     private static let windowMinSize = CGSize(width: 480, height: 340)
     private static let messageSize = CGSize(width: 460, height: 240)
 
+    /// The size the user last dragged this surface to, or nil if they never have.
+    private func rememberedSize(for surface: PreviewSizeMemory.Surface) -> CGSize? {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: surface.widthKey) != nil,
+              defaults.object(forKey: surface.heightKey) != nil else { return nil }
+        return CGSize(
+            width: defaults.double(forKey: surface.widthKey),
+            height: defaults.double(forKey: surface.heightKey)
+        )
+    }
+
+    private func remember(_ size: CGSize, for surface: PreviewSizeMemory.Surface, minimum: CGSize) {
+        guard PreviewSizeMemory.shouldRemember(size, minimum: minimum) else { return }
+        UserDefaults.standard.set(Double(size.width), forKey: surface.widthKey)
+        UserDefaults.standard.set(Double(size.height), forKey: surface.heightKey)
+    }
+
+    /// Where the preview is about to appear, so a size saved on a large display is capped here.
+    private func targetVisibleFrame() -> CGRect? {
+        ScreenGeometry.visibleFrame(
+            containing: NSEvent.mouseLocation,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame)
+        ) ?? NSScreen.main?.visibleFrame
+    }
+
+    private func openingSize(
+        for surface: PreviewSizeMemory.Surface,
+        fallback: CGSize,
+        minimum: CGSize
+    ) -> CGSize {
+        PreviewSizeMemory.size(
+            stored: rememberedSize(for: surface),
+            fallback: fallback,
+            minimum: minimum,
+            visibleFrame: targetVisibleFrame()
+        )
+    }
+
+    /// Which surface a window belongs to, or nil for the fixed-size message panel.
+    private func surface(of window: NSWindow) -> PreviewSizeMemory.Surface? {
+        if window === quickPanel, quickPanelIsDiagram { return .quick }
+        if window === self.window { return .window }
+        return nil
+    }
+
     func showQuick(document: DiagramDocument) {
         closeQuick()
         let model = DiagramViewModel(document: document)
         self.model = model
         model.attach()
+        quickPanelIsDiagram = true
         let panel = makePanel(
-            size: Self.quickSize,
+            size: openingSize(for: .quick, fallback: Self.quickSize, minimum: Self.quickMinSize),
             minSize: Self.quickMinSize,
             title: document.title,
             content: DiagramPreviewView(
@@ -292,12 +353,14 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         quickPanel = panel
         installDismissMonitors()
         panel.makeKeyAndOrderFront(nil)
+        markSettled(.quick)
     }
 
     /// The engine could not run, or the selection failed validation: say why, in a panel. This is
     /// the branch that used to be `NSSound.beep()`.
     func showMessage(title: String, message: String) {
         closeQuick()
+        quickPanelIsDiagram = false
         let panel = makePanel(
             size: Self.messageSize,
             minSize: Self.messageSize,
@@ -312,8 +375,9 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     func promote() {
         guard let model else { return }
         dismissQuickPanel()
+        let opening = openingSize(for: .window, fallback: Self.windowSize, minimum: Self.windowMinSize)
         let window = FlowPeekGlassWindow(
-            contentRect: CGRect(origin: .zero, size: Self.windowSize),
+            contentRect: CGRect(origin: .zero, size: opening),
             styleMask: [.borderless, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -325,7 +389,9 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         window.isMovableByWindowBackground = true
         window.animationBehavior = .documentWindow
         window.collectionBehavior = [.fullScreenPrimary, .managed]
-        window.contentViewController = NSHostingController(
+        // See `makePanel`: a hosting controller would re-impose SwiftUI's fitting size on every
+        // layout and the window could not be resized at all.
+        let hosting = NSHostingView(
             rootView: DiagramPreviewView(
                 model: model,
                 compact: false,
@@ -333,9 +399,10 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
                 onClose: { [weak self] in self?.closeWindow() }
             )
         )
-        // NSHostingController resizes the window to the SwiftUI fitting size, which collapses a
-        // 1000x720 window to ~87x111 — the content size has to be re-imposed afterwards.
-        window.setContentSize(Self.windowSize)
+        hosting.frame = CGRect(origin: .zero, size: opening)
+        hosting.autoresizingMask = [.width, .height]
+        window.contentView = hosting
+        window.setFrame(CGRect(origin: window.frame.origin, size: opening), display: false)
         window.contentMinSize = Self.windowMinSize
         window.center()
         window.isReleasedWhenClosed = false
@@ -343,11 +410,34 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         self.window = window
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        markSettled(.window)
     }
 
-    func selectionDidChange() { closeQuick() }
+    #if DEBUG
+    /// Appends to the file named by FLOWPEEK_TRACE, so a dismissal can be attributed to the path
+    /// that caused it instead of guessed at. Does nothing unless that variable is set.
+    private func trace(_ what: String) {
+        guard let path = ProcessInfo.processInfo.environment["FLOWPEEK_TRACE"] else { return }
+        let line = "\(String(format: "%.3f", Date().timeIntervalSince1970)) \(what)\n"
+        if let handle = FileHandle(forWritingAtPath: path) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        } else {
+            try? line.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+    }
+    #else
+    private func trace(_ what: String) {}
+    #endif
+
+    func selectionDidChange() {
+        trace("selectionDidChange")
+        closeQuick()
+    }
 
     func closeQuick() {
+        trace("closeQuick")
         dismissQuickPanel()
         if window == nil { releaseModel() }
     }
@@ -362,13 +452,27 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
 
     // MARK: - NSWindowDelegate
 
+    /// Any resize after the surface is on screen, not just the end of a live drag: a size set by
+    /// zooming, by another window manager, or through accessibility is just as much the size the
+    /// user chose, and none of those produce a live-resize notification.
+    func windowDidResize(_ notification: Notification) {
+        guard let resized = notification.object as? NSWindow,
+              let surface = surface(of: resized),
+              shownSurfaces.contains(surface) else { return }
+        let size = resized.frame.size
+        trace("resize \(surface.rawValue) \(Int(size.width))x\(Int(size.height))")
+        remember(size, for: surface, minimum: surface == .quick ? Self.quickMinSize : Self.windowMinSize)
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let closing = notification.object as? NSWindow else { return }
         if closing === quickPanel {
+            shownSurfaces.remove(.quick)
             quickPanel = nil
             removeDismissMonitors()
             if window == nil { releaseModel() }
         } else if closing === window {
+            shownSurfaces.remove(.window)
             window = nil
             if quickPanel == nil { releaseModel() }
         }
@@ -394,9 +498,15 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         panel.isMovableByWindowBackground = true
         panel.animationBehavior = .utilityWindow
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        panel.contentViewController = NSHostingController(rootView: content)
-        // Same collapse as `promote()`: 720x520 became ~215x111 without this.
-        panel.setContentSize(size)
+        // A hosting *view*, not a hosting controller. A controller pushes SwiftUI's fitting size
+        // onto the window on every layout, so the surface was not really resizable: a resize to
+        // 900x640 collapsed straight back to 320x220, which is exactly the minimum in
+        // `DiagramPreviewView`'s frame. The window owns its size; SwiftUI fills it.
+        let hosting = NSHostingView(rootView: content)
+        hosting.frame = CGRect(origin: .zero, size: size)
+        hosting.autoresizingMask = [.width, .height]
+        panel.contentView = hosting
+        panel.setFrame(CGRect(origin: panel.frame.origin, size: size), display: false)
         panel.contentMinSize = minSize
         panel.center()
         panel.isReleasedWhenClosed = false
@@ -420,13 +530,26 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     private func installDismissMonitors() {
         removeDismissMonitors()
         if let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown], handler: { [weak self] _ in
-            Task { @MainActor in self?.closeQuick() }
+            let location = NSEvent.mouseLocation
+            Task { @MainActor in
+                // Clicking or dragging inside the preview is interaction with the preview. Without
+                // this the resize edge dismissed the very panel being resized.
+                guard !OwnWindowHitTest.contains(location) else {
+                    self?.trace("mouseDown ignored (own window)")
+                    return
+                }
+                self?.trace("mouseDown dismiss")
+                self?.closeQuick()
+            }
         }) { dismissMonitors.append(global) }
         // A local monitor never fires for a non-activating panel: the key window belongs to another
         // application, so the Escape key has to be observed globally.
         if let global = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown], handler: { [weak self] event in
             guard event.keyCode == 53 else { return }
-            Task { @MainActor in self?.closeQuick() }
+            Task { @MainActor in
+                self?.trace("escape dismiss")
+                self?.closeQuick()
+            }
         }) { dismissMonitors.append(global) }
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.keyDown], handler: { [weak self] event in
             guard event.keyCode == 53 else { return event }

@@ -24,11 +24,25 @@ final class SelectionMonitor {
     private var activationObserver: NSObjectProtocol?
     private var terminationObserver: NSObjectProtocol?
     private var generation = 0
+    /// Set while the left button is down on one of FlowPeek's own surfaces. A resize or a move of
+    /// the preview ends its drag well outside that surface, so testing the release point was not
+    /// enough -- the gesture has to be judged by where it began.
+    private var dragBeganOnOwnWindow = false
 
     func start() {
         if mouseUpMonitor == nil {
             mouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp], handler: { [weak self] _ in
-                Task { @MainActor in self?.captureAfterSettling() }
+                let location = NSEvent.mouseLocation
+                Task { @MainActor in
+                    guard let self else { return }
+                    // A drag that began on one of FlowPeek's own surfaces is not a text selection:
+                    // resizing or moving the preview used to end here as a capture, which reported a
+                    // selection change and closed the very panel being resized.
+                    let ownGesture = self.dragBeganOnOwnWindow || OwnWindowHitTest.contains(location)
+                    self.dragBeganOnOwnWindow = false
+                    guard !ownGesture else { return }
+                    self.captureAfterSettling()
+                }
             })
         }
         if dismissalMonitor == nil {
@@ -38,7 +52,12 @@ final class SelectionMonitor {
                 let location = NSEvent.mouseLocation
                 Task { @MainActor in
                     guard let self else { return }
+                    let onOwnWindow = OwnWindowHitTest.contains(location)
+                    if event.type == .leftMouseDown { self.dragBeganOnOwnWindow = onOwnWindow }
                     if event.type == .leftMouseDown, self.isPointOnOverlay?(location) == true { return }
+                    // Scrolling or clicking inside a FlowPeek surface is interaction with FlowPeek,
+                    // never a reason to take its own overlay away.
+                    if onOwnWindow { return }
                     self.dismissOverlay(reason: Self.reason(for: event.type))
                 }
             }

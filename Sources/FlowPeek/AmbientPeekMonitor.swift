@@ -9,8 +9,9 @@ import OSLog
 ///
 /// Measured: a hit-test plus a bounded descent costs 19-31 ms, and in web content the hit element's
 /// `AXFrame` is the code block's own rectangle -- 760x146 for a `<pre>` -- so the outline lands
-/// exactly on the text. Apps that render text themselves (a canvas terminal, Monaco without
-/// `editor.accessibilitySupport`) expose no text here at all; the clipboard watch covers those.
+/// exactly on the text. An editor that exposes only its focused document, VS Code among them, has
+/// nothing under the pointer to read and is served by the caret fallback instead. Apps that render
+/// text themselves (a canvas terminal) expose neither; the clipboard watch covers those.
 @MainActor
 final class AmbientPeekMonitor {
     var onCandidate: ((AmbientCandidate) -> Void)?
@@ -166,7 +167,19 @@ final class AmbientPeekMonitor {
             return
         }
 
-        let outcome = read(at: pointer, in: application, deadline: now + AmbientPeekPolicy.readBudget)
+        // Chromium and Electron hand out an accessibility tree of empty `AXGroup`s until this is
+        // set: measured in VS Code, the descent found zero text before it and the document
+        // immediately after. Memoised per pid and shared with the selection route, which warms the
+        // same processes when they activate -- so an app the user has been working in is usually
+        // already warm by the time Option goes down. The renderer switches over asynchronously, so
+        // the first hold after a cold launch can still read nothing; the next one reads.
+        //
+        // The deadline is taken after it, not from `now`: this is one message sent once per app,
+        // and charging it to a budget that exists to survive a wedged app would spend the budget on
+        // the setup and leave nothing for the read it enables.
+        AccessibilityTreeWarmUp.shared.warmUp(pid)
+
+        let outcome = read(at: pointer, in: application, deadline: Date() + AmbientPeekPolicy.readBudget)
         // Stamped when the read *finishes*: timed from the start, a 200 ms read would already be
         // past the debounce by the time it returned and the next pointer move would re-run it.
         lastRead = Date()
@@ -230,15 +243,15 @@ final class AmbientPeekMonitor {
         let frames = NSScreen.screens.map(\.frame)
         guard let flip = ScreenGeometry.flipReference(screenFrames: frames) else { return .nothing }
 
+        let screen = ScreenGeometry.visibleFrame(containing: pointer, visibleFrames: frames)?.size
+            ?? frames.first?.size
+            ?? .zero
+
         var hit: AXUIElement?
         let axPoint = ScreenGeometry.appKitToAX(pointer, flipReference: flip)
         guard AXUIElementCopyElementAtPosition(systemWide, Float(axPoint.x), Float(axPoint.y), &hit) == .success,
               let hit else { return Date() < deadline ? .nothing : .abandoned }
         _ = AXUIElementSetMessagingTimeout(hit, Self.messagingTimeout)
-
-        let screen = ScreenGeometry.visibleFrame(containing: pointer, visibleFrames: frames)?.size
-            ?? frames.first?.size
-            ?? .zero
 
         // The hit-test returns the innermost element, which in a code block is often one line or
         // one syntax-highlighted token: reading only that yields a fragment, and a fragment that
@@ -289,7 +302,106 @@ final class AmbientPeekMonitor {
                 applicationName: application.localizedName
             ) { return .found(candidate) }
         }
+        // Nothing under the pointer reads as a diagram. In an editor that is the normal answer
+        // rather than a "no", so the caret gets one attempt on what is left of the same budget --
+        // but only while the pointer really is over that editor. The fallback reads the frontmost
+        // application's own focused document, and pointing at a Finder window with an editor
+        // frontmost would otherwise put an outline where the pointer has never been.
+        // `AXUIElementGetPid` is a local lookup rather than a message to the other process.
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(hit, &owner) == .success, owner == application.processIdentifier else {
+            return Date() < deadline ? .nothing : .abandoned
+        }
+        return caretRead(in: application, screen: screen, flip: flip, frames: frames, deadline: deadline)
+    }
+
+    /// The read the descent cannot do. VS Code's editor exposes the whole file as the focused
+    /// `AXTextArea`'s `AXValue` -- 30031 characters for a 2000-line document, with real newlines,
+    /// unvirtualised -- and hands out nothing at all through the elements under the pointer.
+    ///
+    /// So this anchors on the caret, which it has to: `AXTextMarkerForPosition` is advertised and
+    /// answers nil, `AXBoundsForRange` answers 0x0 at (0,1080), `AXStringForRange` answers nil, and
+    /// every line's `AXTextMarkerRangeForLine` bounds is the whole editor rectangle -- so there is
+    /// no attribute left that maps a pointer to a line, and a binary search has nothing to search.
+    /// In an editor the caret is where the user is working, so the hint names it and the outline
+    /// frames the caret's line or the pane rather than pretending to frame the block.
+    ///
+    /// Kept as a fallback and never a primary read: in Chrome the same marker attributes answer,
+    /// but with no newlines between block elements ("Introduction#Event Modeling (EM) is..."), which
+    /// is worse than what the descent already gets there.
+    private func caretRead(
+        in application: NSRunningApplication,
+        screen: CGSize,
+        flip: CGFloat,
+        frames: [CGRect],
+        deadline: Date
+    ) -> Read {
+        let app = AXUIElementCreateApplication(application.processIdentifier)
+        _ = AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
+        guard let focused = element(app, kAXFocusedUIElementAttribute as String, before: deadline) else {
+            return Date() < deadline ? .nothing : .abandoned
+        }
+        _ = AXUIElementSetMessagingTimeout(focused, Self.messagingTimeout)
+        // A focused button or list is not a document, and reading its value would anchor the peek
+        // on whatever label it carries.
+        guard let role = string(focused, kAXRoleAttribute as String, before: deadline),
+              role == "AXTextArea" || role == "AXTextField" else {
+            return Date() < deadline ? .nothing : .abandoned
+        }
+        // Without a selection range there is no anchor at all: the pointer cannot be placed, so a
+        // document that will not say where its caret is has no position to slice around.
+        guard let document = string(focused, kAXValueAttribute as String, before: deadline),
+              !document.isEmpty,
+              let selected = range(focused, kAXSelectedTextRangeAttribute as String, before: deadline),
+              let slice = DocumentCaretSlicer.slice(document: document, caret: selected.location) else {
+            return Date() < deadline ? .nothing : .abandoned
+        }
+
+        for axFrame in outlineFrames(of: focused, hasSelection: selected.length > 0, before: deadline) {
+            let bounds = AmbientPeekPolicy.grownToMinimum(ScreenGeometry.axToAppKit(axFrame, flipReference: flip))
+            // Same refusal as the climb: the highlight declines to draw a sliver, and the monitor
+            // must not believe an outline is showing when none was drawn -- the peek chord would
+            // then open a diagram nobody framed.
+            guard let visible = ScreenGeometry.clip(bounds, screenFrames: frames),
+                  visible.width >= AmbientPeekPolicy.minimumSize.width,
+                  visible.height >= AmbientPeekPolicy.minimumSize.height else { continue }
+            guard let candidate = AmbientPeekPolicy.candidate(
+                slice: slice,
+                bounds: bounds,
+                screen: screen,
+                applicationName: application.localizedName
+            ) else { continue }
+            // Offsets and sizes only: the document itself is never logged.
+            logger.debug(
+                """
+                caret anchor in \(application.localizedName ?? "an app", privacy: .public): \
+                \(slice.range.length, privacy: .public) characters at offset \
+                \(slice.range.location, privacy: .public) of \(document.utf16.count, privacy: .public)
+                """
+            )
+            return .found(candidate)
+        }
         return Date() < deadline ? .nothing : .abandoned
+    }
+
+    /// Where the caret's outline can go, best first.
+    ///
+    /// The selected marker range's bounds is the only geometry VS Code answers with -- measured
+    /// 185x68 at (703,167) for a 31-character selection -- and it is asked for only when something
+    /// is actually selected, which is the case it was measured in. Then the focused element's own
+    /// frame, which is the caret's line (1078x18 at (703,219)), and then the element above it, the
+    /// editor's rectangle. None of the three is the diagram's own box; no attribute reports that.
+    private func outlineFrames(of focused: AXUIElement, hasSelection: Bool, before deadline: Date) -> [CGRect] {
+        var frames: [CGRect] = []
+        if hasSelection,
+           let markers = attribute(focused, "AXSelectedTextMarkerRange", before: deadline),
+           let bounds = rect(focused, parameterized: "AXBoundsForTextMarkerRange", argument: markers, before: deadline) {
+            frames.append(bounds)
+        }
+        if let frame = rect(focused, "AXFrame", before: deadline) { frames.append(frame) }
+        if let parent = parent(of: focused, before: deadline),
+           let frame = rect(parent, "AXFrame", before: deadline) { frames.append(frame) }
+        return frames
     }
 
     /// Rebuilds lines from the pieces' own frames. Joining every piece with a newline splits a
@@ -358,11 +470,22 @@ final class AmbientPeekMonitor {
     }
 
     private func parent(of element: AXUIElement, before deadline: Date) -> AXUIElement? {
+        self.element(element, kAXParentAttribute as String, before: deadline)
+    }
+
+    private func element(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> AXUIElement? {
+        guard let value = self.attribute(element, attribute, before: deadline),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return unsafeDowncast(value, to: AXUIElement.self)
+    }
+
+    /// The raw value, for the one attribute FlowPeek never looks inside: an `AXTextMarkerRange` is
+    /// opaque and is only ever handed straight back as the argument to `AXBoundsForTextMarkerRange`.
+    private func attribute(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CFTypeRef? {
         guard Date() < deadline else { return nil }
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-        return unsafeDowncast(value, to: AXUIElement.self)
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
+        return value
     }
 
     /// Every accessibility call is a synchronous message to another process, so the clock is checked
@@ -376,14 +499,49 @@ final class AmbientPeekMonitor {
     }
 
     private func rect(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CGRect? {
+        guard let value = self.attribute(element, attribute, before: deadline) else { return nil }
+        return Self.cgRect(value)
+    }
+
+    private func rect(
+        _ element: AXUIElement,
+        parameterized attribute: String,
+        argument: CFTypeRef,
+        before deadline: Date
+    ) -> CGRect? {
         guard Date() < deadline else { return nil }
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        guard AXUIElementCopyParameterizedAttributeValue(
+            element,
+            attribute as CFString,
+            argument,
+            &value
+        ) == .success, let value else { return nil }
+        return Self.cgRect(value)
+    }
+
+    private static func cgRect(_ value: CFTypeRef) -> CGRect? {
+        guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         let axValue = unsafeDowncast(value, to: AXValue.self)
         guard AXValueGetType(axValue) == .cgRect else { return nil }
         var rect = CGRect.zero
         guard AXValueGetValue(axValue, .cgRect, &rect) else { return nil }
         return rect
+    }
+
+    /// `AXSelectedTextRange` arrives as a `CFRange` whose location counts UTF-16 code units of the
+    /// element's own value -- measured loc=45 len=31 in VS Code -- which is the unit
+    /// `DocumentCaretSlicer` slices in.
+    private func range(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CFRange? {
+        guard let value = self.attribute(element, attribute, before: deadline),
+              CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        let axValue = unsafeDowncast(value, to: AXValue.self)
+        guard AXValueGetType(axValue) == .cfRange else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
+        // A negative location is not a position in any document; a caret is clamped by the slicer,
+        // but this is nonsense rather than staleness.
+        guard range.location >= 0 else { return nil }
+        return range
     }
 }

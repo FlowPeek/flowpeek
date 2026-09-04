@@ -32,6 +32,7 @@ final class AmbientHighlightCoordinator {
 
         model.keyword = candidate.detection.diagramKeyword
         model.shortcut = shortcut
+        model.anchor = candidate.anchor
 
         let chrome = Self.hintBarHeight + Self.gap
         let panel = panel ?? makePanel()
@@ -136,6 +137,10 @@ final class AmbientHighlightModel: ObservableObject {
     @Published var shortcut = ""
     @Published var outlineHeight: CGFloat = 0
     @Published var placement: Placement = .above
+    /// What the frame is actually around. A caret-anchored read frames the line or the pane the
+    /// caret is in, never the block, so the hint says where the diagram came from instead of
+    /// letting the outline claim to be drawn around it.
+    @Published var anchor: AmbientCandidate.Anchor = .pointer
 }
 
 private struct AmbientHighlightView: View {
@@ -182,6 +187,12 @@ private struct AmbientHighlightView: View {
                 Text(model.keyword ?? String(localized: "ambient.hint.generic"))
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
+                if model.anchor == .caret {
+                    Text(String(localized: "ambient.hint.caret"))
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                        .opacity(0.85)
+                }
                 Text(model.shortcut)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .padding(.horizontal, 5)
@@ -195,6 +206,6 @@ private struct AmbientHighlightView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help("ambient.hint.help")
+        .help(String(localized: model.anchor == .caret ? "ambient.hint.help.caret" : "ambient.hint.help"))
     }
 }

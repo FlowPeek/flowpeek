@@ -3,17 +3,35 @@ import Foundation
 
 /// What the ambient overlay found under the pointer.
 public struct AmbientCandidate: Equatable, Sendable {
+    /// What `bounds` is a rectangle around. Normally the block the pointer is on. An editor that
+    /// exposes only its focused document -- VS Code, and Electron apps generally -- cannot say
+    /// which line the pointer is over, so the diagram is taken from the caret instead and the
+    /// rectangle is the caret's line or the pane around it. The hint has to say so rather than let
+    /// the frame imply it is drawn around the diagram.
+    public enum Anchor: Equatable, Sendable {
+        case pointer
+        case caret
+    }
+
     public let text: String
     public let detection: MermaidDetection
     /// Screen rectangle in AppKit coordinates, already flipped from the accessibility frame.
     public let bounds: CGRect
     public let applicationName: String?
+    public let anchor: Anchor
 
-    public init(text: String, detection: MermaidDetection, bounds: CGRect, applicationName: String?) {
+    public init(
+        text: String,
+        detection: MermaidDetection,
+        bounds: CGRect,
+        applicationName: String?,
+        anchor: Anchor = .pointer
+    ) {
         self.text = text
         self.detection = detection
         self.bounds = bounds
         self.applicationName = applicationName
+        self.anchor = anchor
     }
 }
 
@@ -127,6 +145,45 @@ public enum AmbientPeekPolicy {
             detection: detection,
             bounds: bounds,
             applicationName: applicationName
+        )
+    }
+
+    /// The same decision for a diagram already sliced out of a document. The slicer has run the
+    /// detector to find the block at all, and running it a second time on the way out is work for
+    /// nothing -- the caret route tries several rectangles before one is drawable.
+    public static func candidate(
+        slice: CaretDiagramSlice,
+        bounds: CGRect,
+        screen: CGSize,
+        applicationName: String?
+    ) -> AmbientCandidate? {
+        guard slice.text.count <= maximumCharacters else { return nil }
+        guard isPlausible(bounds: bounds, screen: screen) else { return nil }
+        guard slice.detection.confidence >= minimumConfidence else { return nil }
+        return AmbientCandidate(
+            text: slice.text,
+            detection: slice.detection,
+            bounds: bounds,
+            applicationName: applicationName,
+            anchor: .caret
+        )
+    }
+
+    /// Grows a rectangle about its centre until it is at least big enough to draw.
+    ///
+    /// The caret route has nothing block-shaped to offer: the caret's own line measured 1078x18,
+    /// and `minimumSize` is 24 points tall, so every rectangle the editor answers with would be
+    /// refused and the outline would never appear. Growing it keeps the line it frames and leaves
+    /// the plausibility limits -- which is what stops a whole window being outlined -- untouched.
+    public static func grownToMinimum(_ bounds: CGRect) -> CGRect {
+        guard ScreenGeometry.isUsable(bounds) else { return bounds }
+        let width = max(bounds.width, minimumSize.width)
+        let height = max(bounds.height, minimumSize.height)
+        return CGRect(
+            x: bounds.midX - width / 2,
+            y: bounds.midY - height / 2,
+            width: width,
+            height: height
         )
     }
 }

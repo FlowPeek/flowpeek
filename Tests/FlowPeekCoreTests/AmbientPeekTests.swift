@@ -181,4 +181,61 @@ final class AmbientPeekTests: XCTestCase {
         XCTAssertFalse(candidate!.detection.extractedSource.contains("```"))
         XCTAssertTrue(candidate!.detection.extractedSource.hasPrefix("flowchart TD"))
     }
+
+    // MARK: - The caret route
+
+    func testAPointerReadIsAnchoredOnThePointer() {
+        let candidate = AmbientPeekPolicy.candidate(
+            text: block,
+            bounds: CGRect(x: 280, y: 212, width: 760, height: 146),
+            screen: screen,
+            applicationName: "Google Chrome"
+        )
+        XCTAssertEqual(candidate?.anchor, .pointer)
+    }
+
+    func testASlicedDiagramIsAnchoredOnTheCaretSoTheHintCanSaySo() throws {
+        let document = "Intro\n\n```mermaid\n\(block)\n```\n"
+        let slice = try XCTUnwrap(DocumentCaretSlicer.slice(document: document, caret: 20))
+        let candidate = AmbientPeekPolicy.candidate(
+            slice: slice,
+            bounds: CGRect(x: 703, y: 219, width: 1078, height: 24),
+            screen: screen,
+            applicationName: "Code"
+        )
+        XCTAssertEqual(candidate?.anchor, .caret)
+        XCTAssertEqual(candidate?.detection.expectedType, "flowchart-v2")
+        XCTAssertEqual(candidate?.text, slice.text)
+    }
+
+    func testASlicedDiagramInAnImplausibleBoxIsStillRefused() throws {
+        let document = "```mermaid\n\(block)\n```\n"
+        let slice = try XCTUnwrap(DocumentCaretSlicer.slice(document: document, caret: 0))
+        XCTAssertNil(AmbientPeekPolicy.candidate(
+            slice: slice,
+            bounds: CGRect(x: 0, y: 0, width: 1800, height: 1000),
+            screen: screen,
+            applicationName: "Code"
+        ))
+    }
+
+    /// The caret's own line measured 1078x18, and `minimumSize` is 24 points tall, so without this
+    /// every rectangle the editor offers is refused and no outline is ever drawn.
+    func testALineHeightRectangleIsGrownAboutItsCentreUntilItCanBeDrawn() {
+        let line = CGRect(x: 703, y: 219, width: 1078, height: 18)
+        let grown = AmbientPeekPolicy.grownToMinimum(line)
+        XCTAssertEqual(grown.height, AmbientPeekPolicy.minimumSize.height)
+        XCTAssertEqual(grown.width, 1078)
+        XCTAssertEqual(grown.midX, line.midX)
+        XCTAssertEqual(grown.midY, line.midY)
+        XCTAssertTrue(AmbientPeekPolicy.isPlausible(bounds: grown, screen: screen))
+        XCTAssertFalse(AmbientPeekPolicy.isPlausible(bounds: line, screen: screen))
+    }
+
+    func testGrowingLeavesARectangleThatIsAlreadyBigEnoughAloneAndRefusesNonsense() {
+        let block = CGRect(x: 280, y: 212, width: 760, height: 146)
+        XCTAssertEqual(AmbientPeekPolicy.grownToMinimum(block), block)
+        XCTAssertEqual(AmbientPeekPolicy.grownToMinimum(.zero), .zero)
+        XCTAssertEqual(AmbientPeekPolicy.grownToMinimum(.infinite), .infinite)
+    }
 }

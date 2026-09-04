@@ -190,6 +190,45 @@ final class SelectionMonitor {
     }
 }
 
+/// Chromium and Electron expose a tree of empty groups until `AXManualAccessibility` is set on the
+/// application element, and switch their renderers over asynchronously afterwards -- so this is
+/// done when an app activates and memoised per pid rather than repeated on every read.
+///
+/// One instance for the whole app, because both routes into a preview need the same processes warm
+/// and the switch is one shared boolean per target: a per-route memo would let the selection route
+/// turn a tree off while the ambient route still believed it was on. Both routes stop together --
+/// `AppState.applyEnabledState` starts and stops them from the same grant -- so releasing here on
+/// the selection monitor's stop cannot pull the tree out from under an ambient read.
+@MainActor
+final class AccessibilityTreeWarmUp {
+    static let shared = AccessibilityTreeWarmUp()
+
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Selection")
+    private var enabledProcesses: Set<pid_t> = []
+
+    func warmUp(_ pid: pid_t) {
+        guard pid > 0, pid != ProcessInfo.processInfo.processIdentifier, !enabledProcesses.contains(pid) else { return }
+        let app = AXUIElementCreateApplication(pid)
+        _ = AXUIElementSetMessagingTimeout(app, AccessibilitySelectionReader.messagingTimeout)
+        let error = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        enabledProcesses.insert(pid)
+        logger.debug(
+            "AXManualAccessibility enabled for pid \(pid) -> \(AccessibilitySelectionReader.name(error), privacy: .public)"
+        )
+    }
+
+    func forget(_ pid: pid_t) {
+        if enabledProcesses.remove(pid) != nil { logger.debug("pruned accessibility memo for terminated pid \(pid)") }
+    }
+
+    func release() {
+        for pid in enabledProcesses {
+            _ = AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXManualAccessibility" as CFString, kCFBooleanFalse)
+        }
+        enabledProcesses.removeAll()
+    }
+}
+
 @MainActor
 final class AccessibilitySelectionReader {
     /// The system default was measured at ~1.52 s per call; a wedged target app blocked one full read for
@@ -201,7 +240,6 @@ final class AccessibilitySelectionReader {
     private static let webAreaSearchLimit = 400
 
     fileprivate let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Selection")
-    private var enabledProcesses: Set<pid_t> = []
     private lazy var systemWide: AXUIElement = {
         let element = AXUIElementCreateSystemWide()
         _ = AXUIElementSetMessagingTimeout(element, Self.messagingTimeout)
@@ -210,27 +248,11 @@ final class AccessibilitySelectionReader {
 
     // MARK: - Accessibility tree lifecycle
 
-    /// Chromium switches its renderers into full accessibility mode asynchronously, so this is done at
-    /// activation time and memoised per pid rather than repeated on every mouse-up.
-    func warmUp(_ pid: pid_t) {
-        guard pid > 0, pid != ProcessInfo.processInfo.processIdentifier, !enabledProcesses.contains(pid) else { return }
-        let app = AXUIElementCreateApplication(pid)
-        _ = AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
-        let error = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        enabledProcesses.insert(pid)
-        logger.debug("AXManualAccessibility enabled for pid \(pid) -> \(Self.name(error), privacy: .public)")
-    }
+    func warmUp(_ pid: pid_t) { AccessibilityTreeWarmUp.shared.warmUp(pid) }
 
-    func forget(_ pid: pid_t) {
-        if enabledProcesses.remove(pid) != nil { logger.debug("pruned accessibility memo for terminated pid \(pid)") }
-    }
+    func forget(_ pid: pid_t) { AccessibilityTreeWarmUp.shared.forget(pid) }
 
-    func releaseAccessibilityTrees() {
-        for pid in enabledProcesses {
-            _ = AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXManualAccessibility" as CFString, kCFBooleanFalse)
-        }
-        enabledProcesses.removeAll()
-    }
+    func releaseAccessibilityTrees() { AccessibilityTreeWarmUp.shared.release() }
 
     // MARK: - Reading
 
@@ -447,7 +469,7 @@ final class AccessibilitySelectionReader {
         return rect
     }
 
-    private static func name(_ error: AXError) -> String {
+    fileprivate static func name(_ error: AXError) -> String {
         switch error {
         case .success: "success"
         case .failure: "failure"

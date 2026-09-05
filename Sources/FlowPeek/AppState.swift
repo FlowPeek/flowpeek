@@ -794,19 +794,22 @@ final class AppState: ObservableObject {
     /// not registered — are not failures at all. The status the system reports afterwards is the
     /// honest answer, and `launchAtLoginState` is what the switch renders.
     func setLaunchAtLogin(_ enabled: Bool) {
-        // Part of the published answer rather than a flag beside it, because for the two statuses
-        // that `register()`/`unregister()` leave untouched — held for approval, and never
-        // registered at all — the click moves nothing else, and the notice beneath the switch has
-        // to appear and disappear with it. So this assignment is what redraws, not the re-read
-        // below, which will find the status exactly where it left it.
-        launchAtLogin = launchAtLogin.requesting(enabled)
         do {
             if enabled { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
         } catch {
             logger.error("login item \(enabled ? "register" : "unregister", privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
         }
-        refreshLaunchAtLoginStatus()
+        // What was asked for and what the system reports afterwards are two halves of one answer,
+        // put together in Core: for the two statuses `register()`/`unregister()` leave untouched —
+        // held for approval, and never registered at all — the click is the only half that moves,
+        // and the notice beneath the switch has to appear and disappear with it.
+        let status = SMAppService.mainApp.status
+        launchAtLogin = launchAtLogin.requesting(
+            enabled,
+            thenReading: status == .enabled,
+            requiresApproval: status == .requiresApproval
+        )
     }
 
     func openLoginItemsSettings() {

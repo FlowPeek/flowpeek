@@ -87,6 +87,21 @@ public struct LaunchAtLoginAnswer: Equatable, Sendable {
         )
     }
 
+    /// The whole of what a click on the switch leaves behind: the request goes in first and the
+    /// system is re-read afterwards, which is the order `register()`/`unregister()` forces. One call
+    /// rather than the two halves spelled out at the call site, because the order *is* the rule —
+    /// a re-read that runs first, or a caller that returns early because the status has not moved,
+    /// throws away the only half of the answer a requires-approval item can move — and a rule
+    /// assembled at the call site is a rule nothing can check.
+    public func requesting(
+        _ enabled: Bool,
+        thenReading registered: Bool,
+        requiresApproval: Bool
+    ) -> LaunchAtLoginAnswer {
+        let requested = requesting(enabled)
+        return requested.rereading(registered: registered, requiresApproval: requiresApproval) ?? requested
+    }
+
     /// The answer after re-reading the system, or `nil` when there is nothing new to draw. Settings
     /// and the onboarding card both re-read on every activation and most of those find the same
     /// thing twice, so the no-change case is worth spotting — but only this way round. A re-read

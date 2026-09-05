@@ -20,7 +20,12 @@ final class OnboardingCoordinator {
     /// checklist reads as a menu item that does nothing.
     private var openEntry: OnboardingEntry?
     private var spaceObserver: NSObjectProtocol?
-    private var terminationObserver: NSObjectProtocol?
+    /// Quitting with the card still open records what the user got through, which is a rule the
+    /// window itself has no way to express: it is borderless, so AppKit's own close path is never
+    /// taken and the process goes away without it.
+    private lazy var quitGuard = OnboardingQuitGuard(
+        quitNotification: NSApplication.willTerminateNotification
+    ) { Self.recordProgress() }
 
     func show(entry: OnboardingEntry = .setup) {
         if let window, openEntry == entry { window.makeKeyAndOrderFront(nil); return }
@@ -70,22 +75,7 @@ final class OnboardingCoordinator {
         ) { [weak self] _ in
             Task { @MainActor in self?.window?.orderFrontRegardless() }
         }
-        // Quitting with the card still open used to record nothing at all, so a user who granted
-        // permission, ticked a lesson or two and quit for the day was met by the whole flow again at
-        // the next launch. There is no other hook for it: the window is borderless, so AppKit's own
-        // close path is never taken, and the process is torn down without it.
-        terminationObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: nil
-        ) { _ in
-            // Synchronous rather than a `Task`: the app is already on its way out and a hop to the
-            // next main-actor turn would never run. `queue: nil` is the delivery that promises that
-            // — the block runs on the thread that posted the notification, which for
-            // `willTerminate` is the main one, so the isolation assumption holds too. Handing it a
-            // queue instead would be free to enqueue the block for a turn that never comes.
-            MainActor.assumeIsolated { Self.recordProgress() }
-        }
+        quitGuard.windowOpened()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
@@ -107,7 +97,7 @@ final class OnboardingCoordinator {
     }
 
     private func closeWindow() {
-        Self.recordProgress()
+        quitGuard.windowClosed()
         // The checklist is what made a refused selection worth a second look; with it gone, the
         // rejected branch of `receive` -- which every ordinary selection in every app takes -- has
         // nothing left to ask.
@@ -117,8 +107,6 @@ final class OnboardingCoordinator {
         openEntry = nil
         if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
         spaceObserver = nil
-        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
-        terminationObserver = nil
     }
 
     /// What the wizard leaves behind, whichever way it goes away. Leaving the permission question

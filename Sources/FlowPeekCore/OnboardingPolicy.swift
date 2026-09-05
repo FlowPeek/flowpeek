@@ -107,3 +107,55 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
         allCases.filter { $0 != .permission || !accessibilityGranted || current == .permission }
     }
 }
+
+/// Keeps `completionAfterDismissal` honest for the one exit AppKit does not announce: the user
+/// quits with the card still on screen. The wizard's window is borderless, so its close path is
+/// never taken and the process is torn down with the answer unwritten — a user who granted
+/// permission, ticked a lesson or two and quit for the day was then met by the whole flow again at
+/// the next launch. So the window arms a listener for the quit while it is up and hands it back the
+/// moment it goes away, and everything about that bookkeeping lives here rather than beside the
+/// AppKit window it belongs to, where nothing can reach it.
+@MainActor
+public final class OnboardingQuitGuard {
+    private let center: NotificationCenter
+    private let quitNotification: Notification.Name
+    private let record: () -> Void
+    private var observer: (any NSObjectProtocol)?
+
+    /// True exactly while a quit would still be recorded.
+    public var isWatchingForQuit: Bool { observer != nil }
+
+    public init(
+        center: NotificationCenter = .default,
+        quitNotification: Notification.Name,
+        record: @escaping () -> Void
+    ) {
+        self.center = center
+        self.quitNotification = quitNotification
+        self.record = record
+    }
+
+    /// Idempotent, because the window is rebuilt rather than re-pointed whenever the menu opens it
+    /// by the other door: a second listener would write the same answer twice on the way out and,
+    /// worse, outlive the token the first one was remembered by.
+    public func windowOpened() {
+        guard observer == nil else { return }
+        observer = center.addObserver(forName: quitNotification, object: nil, queue: nil) { [weak self] _ in
+            // Synchronous rather than a `Task`: the app is already on its way out and a hop to the
+            // next main-actor turn would never run. `queue: nil` is the delivery that promises that
+            // — the block runs on the thread that posted the notification, which for a termination
+            // notice is the main one, so the isolation assumption holds too. Handing it a queue
+            // instead would be free to enqueue the block for a turn that never comes.
+            MainActor.assumeIsolated { self?.record() }
+        }
+    }
+
+    /// Records, then stops listening: a wizard that is already gone must not write anything again
+    /// at the next quit, whenever that happens to be.
+    public func windowClosed() {
+        record()
+        guard let observer else { return }
+        center.removeObserver(observer)
+        self.observer = nil
+    }
+}

@@ -223,3 +223,26 @@ final class KeyboardShortcutTests: XCTestCase {
         XCTAssertEqual(restored[.previewClipboard], FlowPeekShortcutAction.previewClipboard.defaultShortcut)
     }
 }
+
+/// What a dormant shortcut row says about itself. The row is drawn from the action, so the wording
+/// has to be the action's answer rather than a condition spelled out beside it in the view.
+final class ShortcutInactiveHintTests: XCTestCase {
+    /// Detection off dormants every action at once, whichever switches are on: sending the user to
+    /// the clipboard switch they never touched is an instruction that changes nothing.
+    func testAPausedAppNamesThePauseForEveryAction() {
+        for action in FlowPeekShortcutAction.allCases {
+            XCTAssertEqual(action.inactiveHintKey(detectionPaused: true), "shortcut.inactive.paused", "\(action)")
+        }
+    }
+
+    /// Running but switched off: the row names that action's own switch, and each is a different one.
+    func testARunningAppNamesTheActionsOwnSwitch() {
+        for action in FlowPeekShortcutAction.allCases {
+            XCTAssertEqual(action.inactiveHintKey(detectionPaused: false), action.inactiveHintKey, "\(action)")
+        }
+        XCTAssertEqual(
+            Set(FlowPeekShortcutAction.allCases.map { String(describing: $0.inactiveHintKey(detectionPaused: false)) }).count,
+            FlowPeekShortcutAction.allCases.count
+        )
+    }
+}

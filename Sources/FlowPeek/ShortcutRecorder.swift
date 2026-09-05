@@ -166,7 +166,10 @@ private struct KeyCaptureView: NSViewRepresentable {
         var onCancel: (() -> Void)?
         /// The cancel this view is waiting to hand over, kept so a second resignation replaces it
         /// instead of stacking another waiter beside it.
-        private var deferredCancel: Task<Void, Never>?
+        private var pendingCancel: (() -> Void)?
+        /// What the wait is listening to, and the floor under it.
+        private var mouseUpMonitor: Any?
+        private var cancelDeadline: Task<Void, Never>?
 
         override var acceptsFirstResponder: Bool { true }
 
@@ -175,7 +178,6 @@ private struct KeyCaptureView: NSViewRepresentable {
         /// skips the same call arriving during teardown, when the recording is already over.
         override func resignFirstResponder() -> Bool {
             guard window != nil else { return true }
-            let cancel = onCancel
             // Deferred, because ending the recording tears down this very view and AppKit is still
             // inside `makeFirstResponder` here — but not merely to the next main-queue turn. The
             // click that takes the keyboard away can be the second click on the record field, which
@@ -184,21 +186,60 @@ private struct KeyCaptureView: NSViewRepresentable {
             // starts a fresh recording instead of stopping it. Waiting for the button to come back
             // up leaves the toggle to decide, and `cancelRecording()` is a no-op once it has.
             // One wait per field, replacing any still in flight: AppKit can resign the same view
-            // more than once for a single click, and every extra waiter is another run of frames
-            // holding the shortcuts down for a cancel that has already been decided.
-            deferredCancel?.cancel()
-            deferredCancel = Task { @MainActor in
-                // Bounded: a mouse held down for a second is not worth keeping every FlowPeek
-                // shortcut suspended for, and the cancel is safe to run either way.
-                var frames = 0
-                while NSEvent.pressedMouseButtons != 0, frames < 60 {
-                    try? await Task.sleep(for: .milliseconds(16))
-                    if Task.isCancelled { return }
-                    frames += 1
-                }
-                cancel?()
+            // more than once for a single click, and every extra waiter is another cancel already
+            // decided.
+            dropWait()
+            pendingCancel = onCancel
+            guard NSEvent.pressedMouseButtons != 0 else {
+                // Nothing is held, so there is no mouse-up on its way to wait for: the keyboard, or
+                // the pane going away, took the responder. Still a turn late, to get off the
+                // `makeFirstResponder` this is standing inside.
+                Task { @MainActor [weak self] in self?.handOverCancel() }
+                return true
+            }
+            // Watched rather than polled. The wait used to re-read `NSEvent.pressedMouseButtons`
+            // every 16 ms for up to a second — sixty main-actor wakeups to learn something the event
+            // stream announces once, and up to a frame of shortcuts held down after the button was
+            // already back up. A local monitor sees the mouse-up before the window does, and the
+            // hop below still leaves the record field's own action to run first.
+            mouseUpMonitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.leftMouseUp, .rightMouseUp, .otherMouseUp]
+            ) { [weak self] event in
+                Task { @MainActor in self?.handOverCancel() }
+                return event
+            }
+            // The floor under it: a drag that ends over another application delivers its mouse-up
+            // there, where a local monitor never sees it, and without this every FlowPeek shortcut
+            // would stay suspended for the rest of the session. A second is well past any click.
+            cancelDeadline = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self?.handOverCancel()
             }
             return true
+        }
+
+        /// The recording can also end by a route that has nothing to do with this wait — Escape, or
+        /// the Settings window closing — and that takes this view out of its window. Whatever it was
+        /// waiting for is moot, and a monitor nobody is left to remove would sit in the event stream
+        /// for the rest of the session.
+        override func viewDidMoveToWindow() {
+            if window == nil { dropWait() }
+        }
+
+        /// Whichever of the two gets here first, exactly once.
+        private func handOverCancel() {
+            let cancel = pendingCancel
+            dropWait()
+            cancel?()
+        }
+
+        private func dropWait() {
+            pendingCancel = nil
+            cancelDeadline?.cancel()
+            cancelDeadline = nil
+            if let mouseUpMonitor { NSEvent.removeMonitor(mouseUpMonitor) }
+            mouseUpMonitor = nil
         }
 
         override func performKeyEquivalent(with event: NSEvent) -> Bool {

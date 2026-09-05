@@ -247,3 +247,85 @@ final class OnboardingStepTests: XCTestCase {
         }
     }
 }
+
+/// The wizard's answer is written when it goes away, and quitting with it still on screen is one of
+/// the ways it goes away. Driven through a notification centre of this test's own, so the real
+/// application's termination notice is never involved.
+@MainActor
+final class OnboardingQuitGuardTests: XCTestCase {
+    private let quit = Notification.Name("OnboardingQuitGuardTests.quit")
+
+    private func makeGuard(_ center: NotificationCenter, recording: @escaping () -> Void) -> OnboardingQuitGuard {
+        OnboardingQuitGuard(center: center, quitNotification: quit, record: recording)
+    }
+
+    /// The whole reason the hook exists: granting permission, ticking a lesson and quitting for the
+    /// day used to record nothing, so the entire flow was waiting again at the next launch.
+    func testQuittingWithTheCardStillOpenRecordsWhatTheUserGotThrough() {
+        let center = NotificationCenter()
+        var records = 0
+        let hook = makeGuard(center) { records += 1 }
+
+        hook.windowOpened()
+        XCTAssertTrue(hook.isWatchingForQuit)
+        center.post(name: quit, object: nil)
+
+        XCTAssertEqual(records, 1)
+    }
+
+    /// Nothing listens before the window is up: a quit during an ordinary session must not answer a
+    /// question the user was never shown.
+    func testQuittingWithNoCardOnScreenWritesNothing() {
+        let center = NotificationCenter()
+        var records = 0
+        let hook = makeGuard(center) { records += 1 }
+
+        XCTAssertFalse(hook.isWatchingForQuit)
+        center.post(name: quit, object: nil)
+
+        XCTAssertEqual(records, 0)
+    }
+
+    /// Closing is the ordinary exit and records on its own; the quit notice covers the other one,
+    /// and is not this one's backstop.
+    func testClosingTheCardRecordsTheAnswerItself() {
+        let center = NotificationCenter()
+        var records = 0
+        let hook = makeGuard(center) { records += 1 }
+
+        hook.windowOpened()
+        hook.windowClosed()
+
+        XCTAssertEqual(records, 1)
+        XCTAssertFalse(hook.isWatchingForQuit)
+    }
+
+    /// And having recorded it, it stops listening: a wizard dismissed hours ago must not answer for
+    /// the user a second time whenever they eventually quit.
+    func testAQuitLongAfterTheCardIsGoneWritesNothingMore() {
+        let center = NotificationCenter()
+        var records = 0
+        let hook = makeGuard(center) { records += 1 }
+
+        hook.windowOpened()
+        hook.windowClosed()
+        center.post(name: quit, object: nil)
+
+        XCTAssertEqual(records, 1)
+    }
+
+    /// Asking for the tutorial while the setup card is up rebuilds the window rather than
+    /// re-pointing it, so the same guard is opened twice. One listener, or the quit records twice
+    /// and the second registration is one nothing holds a token for.
+    func testReopeningTheWindowLeavesOnlyOneListenerBehind() {
+        let center = NotificationCenter()
+        var records = 0
+        let hook = makeGuard(center) { records += 1 }
+
+        hook.windowOpened()
+        hook.windowOpened()
+        center.post(name: quit, object: nil)
+
+        XCTAssertEqual(records, 1)
+    }
+}

@@ -31,11 +31,6 @@ struct SettingsView: View {
     /// The centre is its own observable object, so reading it through `app` would never redraw: the
     /// dimmed rows and the AI card's shortcut would keep naming the previous state.
     @ObservedObject private var shortcuts = AppState.shared.shortcuts
-    /// The same defaults key `AppState.isEnabled` writes, read here rather than through `app`: an
-    /// `@AppStorage` living inside an `ObservableObject` publishes nothing, so a row that renders
-    /// the pause through `app` only redraws by accident, when something else in the same turn
-    /// happens to move. Owned by the view, `@AppStorage` observes the store itself.
-    @AppStorage("flowpeek.enabled") private var detectionEnabled = true
     @State private var selection: SettingsSection
     @State private var relaunchPrompt: RelaunchPrompt?
     let close: () -> Void
@@ -370,12 +365,13 @@ struct SettingsView: View {
                         ShortcutRecorder(action: action, center: shortcuts)
                     }
                     // The recorder stays live so the combination can be set up in advance; what the
-                    // row has to say is that pressing it right now does nothing. Pausing detection
-                    // dormants every action at once, and the per-action hint would then name a
-                    // switch that is already on, so the pause states its own reason.
+                    // row has to say is that pressing it right now does nothing. Which complaint
+                    // that is belongs to the action, not to this row. `app.isEnabled` is
+                    // `@Published`, so the wording follows a pause raised from the menu bar without
+                    // this view holding a second reader of the same defaults key.
                     if !isActive {
                         Label(
-                            String(localized: detectionEnabled ? action.inactiveHintKey : "shortcut.inactive.paused"),
+                            String(localized: action.inactiveHintKey(detectionPaused: !app.isEnabled)),
                             systemImage: "moon.zzz"
                         )
                             .font(.footnote)
@@ -391,6 +387,10 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
         }
+        // The clash line under a recorder is only as fresh as the last registration, and the app
+        // that owns the combination can be installed or started long after this one launched. This
+        // pane is where that line is read, so opening it is the moment to ask again.
+        .onAppear { shortcuts.refreshAvailability() }
     }
 
     private var aiSettings: some View {

@@ -219,6 +219,13 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         case .ambientPeek: "shortcut.inactive.ambient"
         }
     }
+
+    /// Pausing detection dormants every action at once, whatever their own switches say, so the
+    /// per-action hint would then send the user to a switch that is already on. The pause states its
+    /// own reason instead, and it is the same reason for every row.
+    public func inactiveHintKey(detectionPaused: Bool) -> String.LocalizationValue {
+        detectionPaused ? "shortcut.inactive.paused" : inactiveHintKey
+    }
 }
 
 /// The whole assignment table. Pure so the conflict rules can be tested directly.

@@ -143,3 +143,76 @@ final class DiagramExportTests: XCTestCase {
         XCTAssertTrue(page.contains("height:1.000px"))
     }
 }
+
+/// What a screen reader is given instead of the drawing. The words are the diagram's own — the
+/// character data of the `<text>` elements the engine hands back — so this is the one description
+/// that cannot drift from what is on screen.
+final class DiagramNarrationTests: XCTestCase {
+    private let flowchart = """
+    <svg id="fp-1" role="graphics-document document" aria-roledescription="flowchart-v2" viewBox="0 0 100 200">\
+    <style>#fp-1 .node text{fill:#333;font-family:"Helvetica Neue"}</style>\
+    <g class="node"><path d="M0,0 L10,10 L20,0 Z"/><text><tspan>Start</tspan></text></g>\
+    <g class="edgeLabel"><text><tspan>yes</tspan></text></g>\
+    <g class="node"><text><tspan>Order</tspan><tspan>Placed</tspan></text></g>\
+    </svg>
+    """
+
+    func testTheDiagramsOwnWordsAreWhatIsReadOut() {
+        XCTAssertEqual(DiagramNarration.read(flowchart).labels, ["Start", "yes", "Order Placed"])
+    }
+
+    /// mermaid wraps every line of a label in its own `<tspan>`. Dropping the tags without putting
+    /// a boundary in their place turns a two-line node into "OrderPlaced".
+    func testAWrappedLabelDoesNotRunItsLinesTogether() {
+        XCTAssertTrue(DiagramNarration.read(flowchart).labels.contains("Order Placed"))
+    }
+
+    /// The theme is shipped as one `<style>` element inside the SVG, and the drawing itself is
+    /// mostly path data. Neither is anything to say out loud.
+    func testMarkupIsNotMistakenForWords() {
+        let spoken = try? XCTUnwrap(DiagramNarration.read(flowchart).spoken)
+        XCTAssertEqual(spoken, "Start, yes, Order Placed")
+        XCTAssertFalse(spoken?.contains("fill") ?? true)
+        XCTAssertFalse(spoken?.contains("M0,0") ?? true)
+    }
+
+    /// `htmlLabels` is off, but eventmodeling emits every label as a `<foreignObject>` anyway — the
+    /// glue keeps those rather than deleting them, so their text is the diagram's text too.
+    func testAnHTMLLabelIsReadLikeAnyOther() {
+        let svg = "<svg><g><foreignObject><div><span>Ship it</span></div></foreignObject></g></svg>"
+        XCTAssertEqual(DiagramNarration.read(svg).labels, ["Ship it"])
+    }
+
+    /// The engine serialises through the DOM, so a label that was written `A & B` arrives escaped.
+    func testAnEscapedLabelIsSpokenAsItWasWritten() {
+        let svg = "<svg><text><tspan>A &amp; B &#39;n&#39; &lt;C&gt;</tspan></text></svg>"
+        XCTAssertEqual(DiagramNarration.read(svg).labels, ["A & B 'n' <C>"])
+    }
+
+    func testTheKindOfDrawingComesFromTheEnginesOwnRoleDescription() {
+        XCTAssertEqual(DiagramNarration.read(flowchart).kind, "flowchart")
+        XCTAssertEqual(DiagramNarration.kind(in: "<svg aria-roledescription=\"er\"/>"), "er")
+        XCTAssertEqual(DiagramNarration.kind(in: "<svg aria-roledescription=\"class-diagram\"/>"), "class diagram")
+        XCTAssertNil(DiagramNarration.kind(in: "<svg role=\"graphics-document document\"/>"))
+    }
+
+    /// A four-hundred-node chart read out node by node is not a description. It stops, and says it
+    /// stopped, rather than trailing off as if that were the whole diagram.
+    func testAVeryTalkativeDiagramIsCutShortAndSaysSo() throws {
+        let labels = (0..<400).map { "<text><tspan>Step number \($0)</tspan></text>" }.joined()
+        let reading = DiagramNarration.read("<svg>" + labels + "</svg>")
+        XCTAssertEqual(reading.labels.count, DiagramNarration.maximumLabels)
+        XCTAssertTrue(reading.isTruncated)
+        let spoken = try XCTUnwrap(reading.spoken)
+        XCTAssertTrue(spoken.hasSuffix("…"))
+        XCTAssertLessThanOrEqual(spoken.count, DiagramNarration.maximumLength + 1)
+    }
+
+    /// Nothing to read is not the same as a blank value: the caller says so in the reader's own
+    /// language instead of announcing an empty string.
+    func testADrawingWithNoWordsHasNothingToSay() {
+        let reading = DiagramNarration.read("<svg><g><path d=\"M0,0 L1,1\"/><text> </text></g></svg>")
+        XCTAssertTrue(reading.labels.isEmpty)
+        XCTAssertNil(reading.spoken)
+    }
+}

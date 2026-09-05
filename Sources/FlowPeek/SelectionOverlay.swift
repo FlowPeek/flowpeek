@@ -73,6 +73,9 @@ private struct OverlayButton: View {
         }
         .buttonStyle(.plain)
         .help("preview.mermaid")
+        // `.help()` is NSAccessibilityHelp, a hint. This glyph is the whole control, so without a
+        // label the one button the selection route offers announces as an unnamed button.
+        .accessibilityLabel(Text("preview.mermaid"))
         .padding(2)
     }
 }

@@ -252,11 +252,15 @@
 "preview.export.save.png" = "Save as PNG…";
 "preview.export.save.pdf" = "Save as PDF…";
 "preview.export.save.svg" = "Save as SVG…";
+"preview.export.working" = "Exporting…";
 "preview.export.copied" = "Copied";
 "preview.export.saved" = "Saved";
 "preview.export.failed" = "Could not export";
 "preview.background.transparent-canvas" = "Transparent Preview Background";
 "preview.zoom-level" = "Zoom Level";
 "preview.a11y.diagram" = "Diagram: %@";
+"preview.a11y.diagram.typed" = "%1$@ diagram: %2$@";
+"preview.a11y.diagram.wordless" = "This diagram has no text labels.";
 "preview.a11y.diagram.hint" = "Copy Diagram Text in the share menu reads this diagram back as Mermaid.";
 "clipboard.indicator.help" = "Open the copied diagram";
+"clipboard.indicator.a11y" = "Mermaid copied. Press %@ to preview it.";

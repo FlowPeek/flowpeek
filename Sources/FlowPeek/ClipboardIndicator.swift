@@ -187,8 +187,13 @@ private struct ClipboardIndicatorView: View {
         .onDisappear { endHover() }
         .help("clipboard.indicator.help")
         // Without a label VoiceOver reads the three Texts and the key cap glyphs as one run-on
-        // string and never says that any of it is pressable.
-        .accessibilityLabel(Text("clipboard.indicator.title"))
+        // string and never says that any of it is pressable. The label collapses those children,
+        // so it has to carry the key cap itself — naming the shortcut is the badge's whole job,
+        // and it is rendered from the store rather than translated because it is rebindable.
+        .accessibilityLabel(Text(verbatim: String(
+            format: String(localized: "clipboard.indicator.a11y"),
+            model.shortcut
+        )))
         .accessibilityHint(Text("clipboard.indicator.help"))
     }
 

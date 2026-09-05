@@ -17,6 +17,9 @@ final class DiagramViewModel: ObservableObject {
     /// What the last copy or save did, shown for a moment beside the chrome's export menu. ⌘C in a
     /// window with no menu bar is otherwise indistinguishable from a key that does nothing.
     enum ExportFeedback: String {
+        /// A copy is three exports, two of them full WebKit navigations. On a wall-sized diagram
+        /// that is seconds of a chrome strip that looks exactly like a key that did nothing.
+        case working = "preview.export.working"
         case copied = "preview.export.copied"
         case saved = "preview.export.saved"
         case failed = "preview.export.failed"
@@ -27,6 +30,10 @@ final class DiagramViewModel: ObservableObject {
     /// Raised beside the title when a diagram drew but not as written. Never blocking: the diagram
     /// is on screen, and this is the only place FlowPeek admits it is not all of it.
     @Published private(set) var notice: DiagramNotice?
+    /// The drawing as words, which is all a screen reader can be given of it. Read once per render
+    /// rather than from a view's body: the walk covers the whole markup, and a body runs on every
+    /// layout pass the panel takes.
+    @Published private(set) var narration: DiagramNarration.Reading?
     @Published private(set) var scale: Double = 1
     @Published private(set) var engine: MermaidEngineView?
     @Published private(set) var exportFeedback: ExportFeedback?
@@ -38,8 +45,17 @@ final class DiagramViewModel: ObservableObject {
     /// who has already chosen keeps their choice; only the absent key changes meaning.
     @Published var backgroundTransparent = DiagramViewModel.storedTransparency {
         didSet {
-            UserDefaults.standard.set(backgroundTransparent, forKey: DiagramViewModel.transparencyKey)
-            engine?.setBackgroundTransparent(backgroundTransparent)
+            // Only remembered once the canvas has really changed. The transparency goes through a
+            // private WebKit selector, and on a system where that selector is gone the switch would
+            // otherwise carry a checkmark over a canvas that is still solid — and the menu row is
+            // now the only place that state is visible at all.
+            var effective = backgroundTransparent
+            if let engine, !engine.setBackgroundTransparent(effective) {
+                logger.error("the engine kept its own backdrop; the canvas switch cannot be honoured")
+                effective = false
+                backgroundTransparent = false
+            }
+            UserDefaults.standard.set(effective, forKey: DiagramViewModel.transparencyKey)
         }
     }
 
@@ -250,12 +266,20 @@ final class DiagramViewModel: ObservableObject {
         guard let request = exportRequest else { return }
         exportTask?.cancel()
         feedbackTask?.cancel()
-        exportFeedback = nil
+        // Held, not timed out: the work decides when this word goes away.
+        exportFeedback = .working
         exportTask = Task { [weak self] in
             guard let self else { return }
             do {
-                if let feedback = try await work(self.exporter, request) { self.show(feedback) }
+                // A save the user cancelled did its job by doing nothing, and the chrome has to
+                // stop claiming an export is still running either way.
+                if let feedback = try await work(self.exporter, request) {
+                    self.show(feedback)
+                } else {
+                    self.exportFeedback = nil
+                }
             } catch is CancellationError {
+                // A newer export replaced this one and has already put its own word up.
                 return
             } catch {
                 self.logger.error("export failed: \(error.localizedDescription, privacy: .public)")
@@ -300,6 +324,7 @@ final class DiagramViewModel: ObservableObject {
         )
         status = .rendering
         notice = nil
+        narration = nil
         renderTask = Task { [weak self] in
             let outcome: Result<MermaidRenderResult, MermaidRenderError>
             do {
@@ -316,6 +341,7 @@ final class DiagramViewModel: ObservableObject {
                     self.logger.error("scrubbed \(result.scrubbed.joined(separator: ","), privacy: .public) from a rendered diagram")
                 }
                 self.notice = result.notice
+                self.narration = DiagramNarration.read(result.svg)
                 self.didRetryAfterCrash = false
                 self.status = .rendered(result)
                 self.needsFit = true
@@ -347,6 +373,9 @@ final class DiagramViewModel: ObservableObject {
     /// the user never learns the first one died. A timeout is not — re-running the same source buys
     /// another 8 s of spinner to arrive at the same sentence.
     private func recover(from failure: MermaidRenderError, retrying: Bool) {
+        // Whatever comes next, the words of the last drawing are no longer a description of what
+        // is on screen: either a new render replaces them or the failure card takes its place.
+        narration = nil
         do {
             try replaceEngine()
         } catch {
@@ -409,12 +438,11 @@ struct DiagramStage: View {
             // whole diagram announces as an unlabelled web area. The hint names the one form of
             // the diagram that can be read as text.
             .accessibilityElement(children: .contain)
-            .accessibilityLabel(Text(String(
-                format: String(localized: "preview.a11y.diagram"),
-                // The AI window's surface carries no title of its own, and "Diagram: " read out
-                // with nothing after it is worse than the generic name.
-                model.title.isEmpty ? String(localized: "diagram.default-title") : model.title
-            )))
+            .accessibilityLabel(Text(verbatim: accessibilityLabel))
+            // The drawing's own words. Without a value the whole diagram is a name and nothing
+            // else: the engine's tree is reachable, but only by navigating into it node by node,
+            // and the panel is gone by the time a reader has done that.
+            .accessibilityValue(Text(verbatim: accessibilityValue))
             .accessibilityHint(Text("preview.a11y.diagram.hint"))
             if case .rendering = model.status {
                 ProgressView().controlSize(.small)
@@ -430,6 +458,26 @@ struct DiagramStage: View {
         .onChange(of: colorScheme, initial: true) { _, scheme in
             model.update(appearance: scheme == .dark ? .dark : .light)
         }
+    }
+
+    /// The name says what kind of drawing this is and what it is called. The kind comes from the
+    /// engine's own `aria-roledescription` rather than from the source we asked it to draw, so a
+    /// diagram mermaid understood as something else is announced as what it actually drew.
+    private var accessibilityLabel: String {
+        // The AI window's surface carries no title of its own, and "Diagram: " read out with
+        // nothing after it is worse than the generic name.
+        let title = model.title.isEmpty ? String(localized: "diagram.default-title") : model.title
+        guard let kind = model.narration?.kind else {
+            return String(format: String(localized: "preview.a11y.diagram"), title)
+        }
+        return String(format: String(localized: "preview.a11y.diagram.typed"), kind, title)
+    }
+
+    /// Nothing at all until a drawing exists — a value read out over the spinner or the failure
+    /// card would describe the diagram that is no longer on screen.
+    private var accessibilityValue: String {
+        guard let narration = model.narration else { return "" }
+        return narration.spoken ?? String(localized: "preview.a11y.diagram.wordless")
     }
 }
 
@@ -1054,11 +1102,17 @@ struct DiagramPreviewView: View {
             if let notice = model.notice { noticeBadge(notice) }
             Spacer(minLength: 12)
             if let feedback = model.exportFeedback {
-                Text(LocalizedStringKey(feedback.rawValue))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .transition(.opacity)
+                HStack(spacing: 5) {
+                    // The same spinner the stage shows while a render is in flight, for the same
+                    // reason: an export is two more WebKit navigations, and the word alone reads as
+                    // a finished state rather than as one still running.
+                    if feedback == .working { ProgressView().controlSize(.small) }
+                    Text(LocalizedStringKey(feedback.rawValue))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .transition(.opacity)
             }
             exportMenu
             zoomCluster
@@ -1117,7 +1171,7 @@ struct DiagramPreviewView: View {
 
     private var zoomCluster: some View {
         HStack(spacing: 1) {
-            chromeButton("minus", help: "preview.zoom-out", key: "⌘−") { model.zoom(by: 0.8) }
+            chromeButton("minus", help: "preview.zoom-out", command: .zoomOut) { model.zoom(by: 0.8) }
             Text(verbatim: zoomReadout)
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .monospacedDigit()
@@ -1125,10 +1179,10 @@ struct DiagramPreviewView: View {
                 .frame(width: 44)
                 .accessibilityLabel(Text("preview.zoom-level"))
                 .accessibilityValue(Text(verbatim: zoomReadout))
-            chromeButton("plus", help: "preview.zoom-in", key: "⌘+") { model.zoom(by: 1.25) }
+            chromeButton("plus", help: "preview.zoom-in", command: .zoomIn) { model.zoom(by: 1.25) }
             Divider().frame(height: 13).padding(.horizontal, 3)
-            chromeButton("arrow.up.left.and.arrow.down.right", help: "preview.fit", key: "⌘0") { model.fit() }
-            chromeButton("1.magnifyingglass", help: "preview.actual-size", key: "⌘1") { model.actualSize() }
+            chromeButton("arrow.up.left.and.arrow.down.right", help: "preview.fit", command: .fit) { model.fit() }
+            chromeButton("1.magnifyingglass", help: "preview.actual-size", command: .actualSize) { model.actualSize() }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
@@ -1174,13 +1228,15 @@ struct DiagramPreviewView: View {
         }
     }
 
-    /// `key` is appended to the tooltip only on the surface where that key works, and is composed
-    /// here rather than translated: the glyphs are the same in every language, and a shortcut baked
-    /// into a catalogue string is a shortcut nobody can keep truthful.
+    /// The key is read from `PreviewKeyBinding` for *this* surface rather than written here, and
+    /// never translated: the glyphs are the same in every language, and the two surfaces do not
+    /// take the same keys. The panel's are bare — `=`, `-`, `0`, `1` — because it can bind no
+    /// Command combination, and it is also the surface the Option-hover and clipboard routes open,
+    /// so hinting only the window's ⌘ keys left most users with no sign the keyboard works at all.
     private func chromeButton(
         _ symbol: String,
         help: LocalizedStringKey,
-        key: String? = nil,
+        command: PreviewCommand? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -1190,14 +1246,16 @@ struct DiagramPreviewView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(tooltip(help, key: key))
+        .help(tooltip(help, command: command))
         // `.help()` is NSAccessibilityHelp, a hint. Without a label these six glyphs announce as
         // unnamed buttons, which is all a VoiceOver user gets from the whole chrome strip.
         .accessibilityLabel(Text(help))
     }
 
-    private func tooltip(_ help: LocalizedStringKey, key: String?) -> Text {
-        guard let key, !compact else { return Text(help) }
+    private func tooltip(_ help: LocalizedStringKey, command: PreviewCommand?) -> Text {
+        guard let command,
+              let key = PreviewKeyBinding.glyph(for: command, surface: compact ? .panel : .window)
+        else { return Text(help) }
         return Text(help) + Text(verbatim: " (\(key))")
     }
 }

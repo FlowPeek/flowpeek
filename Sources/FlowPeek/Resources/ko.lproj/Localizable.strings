@@ -252,11 +252,15 @@
 "preview.export.save.png" = "PNG로 저장…";
 "preview.export.save.pdf" = "PDF로 저장…";
 "preview.export.save.svg" = "SVG로 저장…";
+"preview.export.working" = "내보내는 중…";
 "preview.export.copied" = "복사됨";
 "preview.export.saved" = "저장됨";
 "preview.export.failed" = "내보낼 수 없습니다";
 "preview.background.transparent-canvas" = "미리보기 배경 투명하게";
 "preview.zoom-level" = "확대 비율";
 "preview.a11y.diagram" = "다이어그램: %@";
+"preview.a11y.diagram.typed" = "%1$@ 다이어그램: %2$@";
+"preview.a11y.diagram.wordless" = "이 다이어그램에는 읽을 수 있는 텍스트가 없습니다.";
 "preview.a11y.diagram.hint" = "공유 메뉴의 '다이어그램 텍스트 복사'를 사용하면 이 다이어그램을 Mermaid 원본으로 다시 읽을 수 있습니다.";
 "clipboard.indicator.help" = "복사한 다이어그램 열기";
+"clipboard.indicator.a11y" = "머메이드 복사됨. %@ 키를 누르면 미리보기가 열립니다.";

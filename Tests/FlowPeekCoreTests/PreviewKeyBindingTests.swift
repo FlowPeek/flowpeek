@@ -167,3 +167,44 @@ final class PreviewKeyBindingTests: XCTestCase {
         )
     }
 }
+
+/// What each surface is allowed to tell the user its keys are. A hint is a promise, and the panel
+/// and the window keep different ones — which is exactly how the chrome got to advertise ⌘0 on a
+/// surface where the working key is a bare `0`.
+final class PreviewKeyGlyphTests: XCTestCase {
+    private let viewport: [PreviewCommand] = [.zoomIn, .zoomOut, .fit, .actualSize]
+
+    /// The panel binds no Command combination, so it must never display one: ⌘C there would be
+    /// delivered to the application the user is typing in, not to the preview.
+    func testThePanelAdvertisesTheBareKeysItReallyTakes() {
+        for command in viewport {
+            let glyph = PreviewKeyBinding.glyph(for: command, surface: .panel)
+            XCTAssertNotNil(glyph, "\(command) works in the panel and has to be discoverable there")
+            XCTAssertFalse(glyph?.contains("⌘") ?? true, "the panel answers no Command combination")
+        }
+        XCTAssertNil(PreviewKeyBinding.glyph(for: .copyImage, surface: .panel))
+        XCTAssertNil(PreviewKeyBinding.glyph(for: .save, surface: .panel))
+    }
+
+    func testTheWindowAdvertisesTheCommandCombinationsItConsumes() {
+        for command in viewport + [.copyImage, .copySource, .save, .close] {
+            let glyph = PreviewKeyBinding.glyph(for: command, surface: .window)
+            XCTAssertEqual(glyph?.hasPrefix("⌘"), true, "\(command) is a Command combination in the window")
+        }
+    }
+
+    /// An observer can answer Escape and nothing else, so Escape is the only key it may promise.
+    func testAnObservedPanelPromisesOnlyTheKeyItCanAnswer() {
+        XCTAssertNotNil(PreviewKeyBinding.glyph(for: .close, surface: .observedPanel))
+        for command in viewport {
+            XCTAssertNil(PreviewKeyBinding.glyph(for: command, surface: .observedPanel))
+        }
+    }
+
+    /// Panning has no glyph anywhere: the arrows are not written into a tooltip on either surface.
+    func testPanningIsNotAdvertisedAsAKeyCap() {
+        for surface: PreviewKeyBinding.Surface in [.observedPanel, .panel, .window] {
+            XCTAssertNil(PreviewKeyBinding.glyph(for: .pan(dx: 60, dy: 0), surface: surface))
+        }
+    }
+}

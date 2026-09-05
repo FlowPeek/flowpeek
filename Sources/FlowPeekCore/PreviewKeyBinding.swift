@@ -140,10 +140,11 @@ public enum PreviewKeyBinding {
 extension PreviewKeyBinding {
     /// The key a surface really answers for a command, written the way a menu writes it.
     ///
-    /// Composed here rather than translated — the glyphs are the same in every language — and read
-    /// from the same table the monitors dispatch through, so a hint cannot advertise a key the
-    /// surface does not take. The panel's are bare characters: it binds no Command combination,
-    /// because a global monitor cannot take ⌘C away from the application underneath it.
+    /// Composed here rather than translated — the glyphs are the same in every language. This is a
+    /// second table and not the dispatch one: it spells keys for a reader, where `command(for:_:)`
+    /// reads key codes, and the two are held together by the round trip the tests put every glyph
+    /// through rather than by sharing code. The panel's are bare characters: it binds no Command
+    /// combination, because a global monitor cannot take ⌘C away from the application underneath it.
     public static func glyph(for command: PreviewCommand, surface: Surface) -> String? {
         switch surface {
         case .observedPanel:

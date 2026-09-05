@@ -201,6 +201,40 @@ final class PreviewKeyGlyphTests: XCTestCase {
         }
     }
 
+    /// The glyph table and the dispatch table are written separately, so the only thing keeping a
+    /// hint from advertising a key its surface throws away is this: every cap that is displayed is
+    /// pressed here, on the surface that displayed it, and has to come back as the command it was
+    /// offered for.
+    func testEveryKeyCapAdvertisedIsOneTheSurfaceReallyAnswers() throws {
+        let commands: [PreviewCommand] = viewport + [.copyImage, .copySource, .save, .close]
+        for surface: PreviewKeyBinding.Surface in [.observedPanel, .panel, .window] {
+            for command in commands {
+                guard let glyph = PreviewKeyBinding.glyph(for: command, surface: surface) else { continue }
+                XCTAssertEqual(
+                    PreviewKeyBinding.command(for: try stroke(pressing: glyph), surface: surface),
+                    command,
+                    "\(surface) offers \(glyph) for \(command)"
+                )
+            }
+        }
+    }
+
+    /// The key a cap names, as the keyboard actually sends it. Written from the key caps rather
+    /// than from either table, so it can hold the two of them to each other: `+` is Shift and the
+    /// `=` key, and the typographic minus a menu prints is the hyphen key.
+    private func stroke(pressing glyph: String) throws -> PreviewKeyStroke {
+        var cap = Substring(glyph)
+        var command = false
+        var shift = false
+        while let modifier = cap.first, modifier == "⌘" || modifier == "⇧" {
+            if modifier == "⌘" { command = true } else { shift = true }
+            cap = cap.dropFirst()
+        }
+        let codes: [String: UInt16] = ["esc": 53, "0": 29, "1": 18, "C": 8, "S": 1, "W": 13, "+": 24, "−": 27]
+        let keyCode = try XCTUnwrap(codes[String(cap)], "no key is known for the cap \(glyph)")
+        return PreviewKeyStroke(keyCode: keyCode, command: command, shift: shift || cap == "+")
+    }
+
     /// Panning has no glyph anywhere: the arrows are not written into a tooltip on either surface.
     func testPanningIsNotAdvertisedAsAKeyCap() {
         for surface: PreviewKeyBinding.Surface in [.observedPanel, .panel, .window] {

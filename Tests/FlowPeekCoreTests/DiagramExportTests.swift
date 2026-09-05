@@ -208,6 +208,37 @@ final class DiagramNarrationTests: XCTestCase {
         XCTAssertLessThanOrEqual(spoken.count, DiagramNarration.maximumLength + 1)
     }
 
+    /// mermaid names the diagram type only for the types that ask it to, so markup without the
+    /// attribute is ordinary — and the walk's budget has to cover the search for it too. Without
+    /// one, an absent attribute costs a scan of the whole drawing, which is path data all the way
+    /// down, on the main actor, in the render completion.
+    func testTheKindIsLookedForUnderTheSameBudgetAsTheWords() {
+        let padding = String(repeating: "<path d=\"M0,0 L1,1\"/>", count: 20_000)
+        XCTAssertGreaterThan(padding.count, DiagramNarration.maximumScan)
+        XCTAssertEqual(
+            DiagramNarration.kind(in: "<svg aria-roledescription=\"flowchart\">" + padding + "</svg>"),
+            "flowchart",
+            "the root carries it, and the root is the first thing in the markup"
+        )
+        XCTAssertNil(DiagramNarration.kind(in: "<svg>" + padding + "<g aria-roledescription=\"flowchart\"/></svg>"))
+    }
+
+    /// The theme is CSS, and CSS is free to hold a `<` of its own inside a quoted string. Walking
+    /// it tag by tag opens an element that never closes and takes every word after it with it.
+    func testAStylesheetCannotSwallowTheDiagram() {
+        let svg = "<svg><style>.node::after{content:'<text>'}</style><text><tspan>Ship it</tspan></text></svg>"
+        XCTAssertEqual(DiagramNarration.read(svg).labels, ["Ship it"])
+    }
+
+    /// The serialiser escapes `&`, `<` and `"` on the way out and leaves `>` alone, so an attribute
+    /// carrying the user's own text can hold one — a tooltip quoting an arrow, say. A tag scan that
+    /// stops at the first `>` spills the rest of that attribute into the label as if the diagram
+    /// had said it.
+    func testAnAttributeIsNotMistakenForALabel() {
+        let svg = "<svg><foreignObject><div title=\"A --> B\"><span>Ship it</span></div></foreignObject></svg>"
+        XCTAssertEqual(DiagramNarration.read(svg).labels, ["Ship it"])
+    }
+
     /// Nothing to read is not the same as a blank value: the caller says so in the reader's own
     /// language instead of announcing an empty string.
     func testADrawingWithNoWordsHasNothingToSay() {

@@ -206,6 +206,43 @@ public struct DiagramViewport: Equatable, Sendable {
     }
 }
 
+/// The transparent-canvas switch, which is two facts and not one.
+///
+/// What the user asked for and what the engine could do about it are different things: the backdrop
+/// is switched through a private WebKit key, and on a system where that key has gone the request
+/// cannot be served at all. Kept apart here so neither can overwrite the other -- a refusal never
+/// rewrites the choice, which stays remembered and is still waiting for an engine that can honour
+/// it, and the choice never claims a canvas that is not on screen.
+public struct CanvasTransparency: Equatable, Sendable {
+    /// What the user asked for, and the only half of this worth remembering between launches.
+    public private(set) var preferred: Bool
+    /// What the canvas is actually showing, which is what a switch should have its checkmark from.
+    public private(set) var isTransparent: Bool
+
+    /// Nothing has drawn anything yet, so the choice is the best answer available until an engine
+    /// gives a better one.
+    public init(preferred: Bool) {
+        self.preferred = preferred
+        isTransparent = preferred
+    }
+
+    /// The user working the switch, and the only thing that ever moves `preferred`.
+    public mutating func choose(_ transparent: Bool) {
+        preferred = transparent
+        isTransparent = transparent
+    }
+
+    /// What an engine answered when it was asked for `preferred`. A refusal leaves WebKit drawing
+    /// its own backdrop, which is solid -- so a refused request for glass is opaque, and a refused
+    /// request for solid is already exactly what is on screen.
+    public mutating func record(honoured: Bool) {
+        isTransparent = honoured && preferred
+    }
+
+    /// Whether the canvas is what was asked for. False only where there is something to say.
+    public var isHonoured: Bool { isTransparent == preferred }
+}
+
 public struct DiagramDocument: Identifiable, Equatable, Sendable {
     public let id: UUID
     public var title: String

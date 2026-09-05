@@ -203,10 +203,15 @@ extension NSSavePanel {
     /// released model, still able to write a file for a surface that is gone. So the caller's
     /// cancellation takes it down here.
     ///
-    /// The level is raised for the same reason the modality changed: the preview is `.floating` and
-    /// both are centred, so an ordinary save panel opens *underneath* the panel that asked for it.
+    /// The level is raised for the same reason the modality changed: the quick preview is
+    /// `.floating` and both are centred, so an ordinary save panel opens *underneath* the panel
+    /// that asked for it. Only while such a panel is up, though — a `.modalPanel` save panel stays
+    /// above every other application, and from the promoted window, which is an ordinary window
+    /// with nothing floating over it, that is a dialog that will not get out of the user's way.
     fileprivate func beginSheetless() async -> NSApplication.ModalResponse {
-        level = .modalPanel
+        if NSApp.windows.contains(where: { $0.isVisible && $0.level == .floating }) {
+            level = .modalPanel
+        }
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 begin { continuation.resume(returning: $0) }

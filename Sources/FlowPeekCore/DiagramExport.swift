@@ -137,6 +137,11 @@ public enum DiagramNarration {
     /// all, which mermaid ships as one element inside the SVG — is markup, not words.
     private static let containers: Set<String> = ["text", "foreignobject"]
 
+    /// The elements whose contents are not markup at all and are stepped over whole. A stylesheet
+    /// may hold a literal `<` — inside a quoted `content:` string, say — and walking one tag by tag
+    /// opens an element that never closes and takes the rest of the drawing's words with it.
+    private static let opaque: Set<String> = ["style", "script"]
+
     public struct Reading: Equatable, Sendable {
         /// The diagram type as `aria-roledescription` spells it, tidied for reading out loud.
         public let kind: String?
@@ -194,10 +199,17 @@ public enum DiagramNarration {
         return kind.isEmpty ? nil : kind
     }
 
+    /// Under the same budget as the walk, and for the same reason: the attributes worth reading are
+    /// on the root element, and the engine leaves them off entirely for the diagram types that
+    /// never call `setA11yDiagramInfo`. Without the window that absence costs a search of the whole
+    /// drawing — measured in hundreds of milliseconds on a large one — for something that was never
+    /// there. Matched as written, because the markup comes back through the DOM serialiser and
+    /// attribute names arrive lowercase from it.
     private static func attribute(_ name: String, in svg: String) -> String? {
-        guard let start = svg.range(of: name + "=\"", options: [.caseInsensitive]),
-              let end = svg.range(of: "\"", range: start.upperBound..<svg.endIndex) else { return nil }
-        let raw = String(svg[start.upperBound..<end.lowerBound])
+        let head = svg.prefix(maximumScan)
+        guard let start = head.range(of: name + "=\""),
+              let end = head.range(of: "\"", range: start.upperBound..<head.endIndex) else { return nil }
+        let raw = String(head[start.upperBound..<end.lowerBound])
         return decodeEntities(in: raw).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -218,9 +230,17 @@ public enum DiagramNarration {
                 index = svg.index(after: index)
                 continue
             }
-            guard let terminator = svg[index...].firstIndex(of: ">") else { break }
+            guard let terminator = tagEnd(in: svg, from: index) else { break }
             let tag = svg[svg.index(after: index)..<terminator]
             let name = elementName(of: tag)
+            if opaque.contains(name), !tag.hasPrefix("/"), !tag.hasSuffix("/") {
+                guard let close = svg.range(of: "</" + name, range: svg.index(after: terminator)..<svg.endIndex)
+                else { break }
+                // Charged to the budget all the same: the stylesheet is most of a small diagram.
+                scanned += svg.distance(from: index, to: close.lowerBound)
+                index = close.lowerBound
+                continue
+            }
             if containers.contains(name) {
                 if tag.hasPrefix("/") {
                     depth = max(0, depth - 1)
@@ -241,6 +261,26 @@ public enum DiagramNarration {
             index = svg.index(after: terminator)
         }
         return (words, false)
+    }
+
+    /// Where a tag really ends. An attribute value may carry a `>` — the serialiser escapes `&`,
+    /// `<` and `"` on the way out and leaves that one alone — and taking the first one closes the
+    /// tag mid-attribute, spilling the rest of it into the label as if it were the diagram's words.
+    private static func tagEnd(in svg: String, from open: String.Index) -> String.Index? {
+        var index = svg.index(after: open)
+        var quote: Character?
+        while index < svg.endIndex {
+            let character = svg[index]
+            if let inside = quote {
+                if character == inside { quote = nil }
+            } else if character == "\"" || character == "'" {
+                quote = character
+            } else if character == ">" {
+                return index
+            }
+            index = svg.index(after: index)
+        }
+        return nil
     }
 
     private static func elementName(of tag: Substring) -> String {

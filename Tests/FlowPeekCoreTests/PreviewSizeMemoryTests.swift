@@ -97,3 +97,45 @@ final class PreviewSizeMemoryTests: XCTestCase {
         )
     }
 }
+
+/// The canvas switch, which is a choice and a fact and not one thing. Keeping them apart is what
+/// stops an engine that cannot switch its backdrop from taking the user's preference away with it,
+/// and what stops the preference from putting a checkmark over a canvas that is still solid.
+final class CanvasTransparencyTests: XCTestCase {
+    func testAnEngineThatCannotObligeKeepsItsHandsOffTheChoice() {
+        var canvas = CanvasTransparency(preferred: false)
+        canvas.choose(true)
+        canvas.record(honoured: false)
+        XCTAssertTrue(canvas.preferred, "the choice is remembered for the engine that can serve it")
+        XCTAssertFalse(canvas.isTransparent, "the backdrop is still WebKit's own, and the switch says so")
+        XCTAssertFalse(canvas.isHonoured)
+    }
+
+    /// A view arrives from the pool for every attach and every replacement, and what one of them
+    /// could do says nothing about the next.
+    func testAReplacementThatCannotObligeCorrectsTheSwitch() {
+        var canvas = CanvasTransparency(preferred: true)
+        canvas.record(honoured: true)
+        XCTAssertTrue(canvas.isTransparent)
+        canvas.record(honoured: false)
+        XCTAssertFalse(canvas.isTransparent)
+        XCTAssertTrue(canvas.preferred)
+    }
+
+    /// Nothing to switch off: WebKit's own backdrop is solid, so a refusal has already produced
+    /// exactly the canvas that was asked for.
+    func testARefusalIsNothingToReportWhenSolidIsWhatWasAsked() {
+        var canvas = CanvasTransparency(preferred: true)
+        canvas.choose(false)
+        canvas.record(honoured: false)
+        XCTAssertFalse(canvas.isTransparent)
+        XCTAssertTrue(canvas.isHonoured)
+    }
+
+    /// Before an engine has answered — the failure card is up, or the pool had nothing to hand out
+    /// — the choice is the only thing there is to show.
+    func testAnUnansweredCanvasShowsTheStoredChoice() {
+        XCTAssertTrue(CanvasTransparency(preferred: true).isTransparent)
+        XCTAssertTrue(CanvasTransparency(preferred: true).isHonoured)
+    }
+}

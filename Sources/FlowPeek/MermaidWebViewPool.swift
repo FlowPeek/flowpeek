@@ -75,9 +75,8 @@ final class MermaidEngineView: NSObject, MermaidRendering {
     /// `isOpaque` is get-only on an `NSView`, so it goes through the one key WebKit exposes.
     /// Guarded and probed under the name KVC actually resolves (`_setDrawsBackground:`): the
     /// un-prefixed spelling reports false and the call would be skipped in silence.
-    /// Returns whether the canvas is now what was asked for. A caller that shows the choice back to
-    /// the user has to know: a silent no-op here is a switch that lies about the drawing.
-    @discardableResult
+    /// Returns whether the canvas is now what was asked for, and the answer cannot be dropped: a
+    /// silent no-op here is a switch that lies about the drawing.
     func setBackgroundTransparent(_ transparent: Bool) -> Bool {
         guard webView.responds(to: NSSelectorFromString("_setDrawsBackground:")) else { return false }
         webView.setValue(!transparent, forKey: "drawsBackground")

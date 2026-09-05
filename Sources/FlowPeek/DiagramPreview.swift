@@ -922,8 +922,20 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
             // A save panel or an alert of ours is key: its own Escape must cancel it, not close the
             // preview underneath it.
             guard event.window == nil || event.window === self.quickPanel else { return event }
-            return self.handlePanelKey(PreviewKeyStroke(event), surface: .panel) ? nil : event
+            // A local monitor still sees keystrokes while somebody else's application is frontmost:
+            // measured with the terminal in front, one `=` both typed into the terminal and zoomed
+            // the panel. `NSApp.isActive` cannot tell them apart -- it reads true for a key
+            // non-activating panel while the Dock and the menu bar belong to another application --
+            // so the frontmost process is asked directly, the same way the ambient reader does it.
+            let surface: PreviewKeyBinding.Surface = Self.isFrontmost ? .panel : .observedPanel
+            return self.handlePanelKey(PreviewKeyStroke(event), surface: surface) ? nil : event
         }) { dismissMonitors.append(local) }
+    }
+
+    /// Whether FlowPeek is the application the keyboard belongs to right now.
+    private static var isFrontmost: Bool {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier
+            == ProcessInfo.processInfo.processIdentifier
     }
 
     /// Escape closes either kind of quick surface; everything else needs a diagram to act on.

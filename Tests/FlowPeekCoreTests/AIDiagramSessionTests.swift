@@ -285,4 +285,24 @@ final class AIDiagramSessionTests: XCTestCase {
         XCTAssertEqual(session.instruction(before: secondFailure), "second")
         XCTAssertNil(session.instruction(before: AITurn.ID()))
     }
+
+    /// A rejected request must carry the status and none of the provider's own words. On a bad key
+    /// some providers quote the key back in the body, and the body has nowhere to go on screen that
+    /// would not also be somewhere it could be copied out of.
+    func testAProviderRejectionKeepsTheStatusAndDropsTheBody() {
+        let body = "Incorrect API key provided: sk-proj-REDACTEDLOOKINGSECRET"
+        XCTAssertEqual(AIProviderRejection.cause(status: 401, body: body), .unauthorized)
+        XCTAssertEqual(AIProviderRejection.cause(status: 403, body: body), .unauthorized)
+        XCTAssertEqual(AIProviderRejection.cause(status: 500, body: body), .server(status: 500))
+        XCTAssertEqual(AIProviderRejection.cause(status: 429, body: ""), .server(status: 429))
+
+        // Whatever the status, nothing the provider said survives into what the window can show.
+        for status in [400, 401, 403, 404, 429, 500, 503] {
+            let cause = AIProviderRejection.cause(status: status, body: body)
+            let presentation = AIFailurePresentation.make(cause)
+            let rendered = [presentation.headline, presentation.hint ?? "", presentation.details ?? ""].joined(separator: " ")
+            XCTAssertFalse(rendered.contains("sk-proj"), "the provider's body reached the window for \(status)")
+            XCTAssertFalse(rendered.contains(body), "the provider's body reached the window for \(status)")
+        }
+    }
 }

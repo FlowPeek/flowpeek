@@ -93,7 +93,6 @@ final class AIPromptModel: ObservableObject {
 
     /// The one-word report for a text copy. The chrome's other copies go through the preview, which
     /// keeps its own; a draft that never drew has no preview to report through and still has text.
-    @Published private(set) var copiedText = false
 
     private var request: Task<Void, Never>?
     private var noticeTask: Task<Void, Never>?
@@ -190,7 +189,7 @@ final class AIPromptModel: ObservableObject {
             case .missingKey: .missingKey
             case .invalidResponse: .invalidResponse
             case .unusableDiagram: .invalidResponse
-            case .server(let status, _): status == 401 || status == 403 ? .unauthorized : .server(status: status)
+            case .server(let status, let body): AIProviderRejection.cause(status: status, body: body)
             }
         // URLError's own description is translated by Foundation and names no key, so it is the one
         // machine sentence worth carrying through.
@@ -223,19 +222,6 @@ final class AIPromptModel: ObservableObject {
         guard let draft = session.shownDraft else { return }
         preview.title = draft.title
         preview.update(source: draft.mermaid)
-    }
-
-    func copyText() {
-        guard let mermaid = session.copyableMermaid else { return }
-        DiagramPasteboard.write(text: mermaid)
-        copiedText = true
-        noticeTask?.cancel()
-        noticeTask = Task { [weak self] in
-            // The same beat the preview chrome holds its own word for.
-            try? await Task.sleep(for: .seconds(1.8))
-            guard !Task.isCancelled else { return }
-            self?.copiedText = false
-        }
     }
 
     /// Hands the diagram to the preview every other route in the app ends in, so it can be zoomed,
@@ -337,7 +323,7 @@ struct AIPromptView: View {
                 }
                 .transition(.opacity)
             }
-            exportMenu
+            DiagramChromeControls(model: preview, keyEquivalentsWork: true)
             // Gated on the diagram having actually drawn rather than on there being a draft: an
             // answer the reader put on the stage to look at may be one that does not parse, and a
             // button that opens nothing is worse than one that is visibly unavailable.
@@ -358,37 +344,8 @@ struct AIPromptView: View {
     }
 
     private var exportWord: LocalizedStringKey? {
-        if model.copiedText { return LocalizedStringKey("preview.export.copied") }
         guard let feedback = preview.exportFeedback else { return nil }
         return LocalizedStringKey(feedback.rawValue)
-    }
-
-    /// The preview's own export menu, kept row for row: the same diagram leaving by the same door
-    /// should not be a different menu because it was made here.
-    private var exportMenu: some View {
-        Menu {
-            Button("preview.export.copy-image") { preview.copyImage() }
-                .disabled(!preview.canExport)
-            Button("preview.export.copy-text") { model.copyText() }
-                .disabled(model.session.copyableMermaid == nil)
-            Divider()
-            Group {
-                Button("preview.export.save.png") { preview.save(.png) }
-                Button("preview.export.save.pdf") { preview.save(.pdf) }
-                Button("preview.export.save.svg") { preview.save(.svg) }
-            }
-            .disabled(!preview.canExport)
-        } label: {
-            Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 20)
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("preview.export.help")
-        .accessibilityLabel(Text("preview.export.label"))
     }
 
     private func chromeButton(

@@ -285,6 +285,20 @@ public struct AIFailurePresentation: Equatable, Sendable {
 
 /// What went wrong, told apart far enough to decide what to offer next. The window maps its
 /// provider and network errors onto these; the copy and the remedy are decided here.
+/// How a provider rejection becomes something the window may show.
+///
+/// Here rather than in the view, because it is the rule that keeps a provider's own words off the
+/// screen and out of a report, and a rule with nothing asserting it is a rule that lasts until
+/// somebody edits the line. On a rejected key some providers quote the key back in the body, so the
+/// status is carried and the body is not.
+public enum AIProviderRejection {
+    public static func cause(status: Int, body: String) -> AIFailureCause {
+        // 401 and 403 are the two a reader can act on, and the action is the same for both: the key
+        // is wrong. Every other status is a number they can quote to the provider.
+        status == 401 || status == 403 ? .unauthorized : .server(status: status)
+    }
+}
+
 public enum AIFailureCause: Equatable, Sendable {
     case missingKey
     case unauthorized

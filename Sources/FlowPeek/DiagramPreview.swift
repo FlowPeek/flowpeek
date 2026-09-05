@@ -1112,8 +1112,7 @@ struct DiagramPreviewView: View {
                 }
                 .transition(.opacity)
             }
-            canvasButton
-            exportMenu
+            DiagramChromeControls(model: model, keyEquivalentsWork: !compact)
             zoomCluster
                 .disabled(!hasDiagram)
             if compact {
@@ -1123,64 +1122,6 @@ struct DiagramPreviewView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
-    }
-
-    /// Whether the diagram sits on the glass or on a canvas of its own.
-    ///
-    /// Its own control rather than a row inside the export menu: it is the one thing here that
-    /// changes what the reader is looking at right now, and a preference filed behind a share glyph
-    /// is a preference nobody finds. The glyph shows the state -- a checkerboard is the drawing
-    /// with the desktop behind it, a filled square is the canvas -- so the strip says which one is
-    /// on without being opened.
-    ///
-    /// The state comes from the canvas rather than from the choice: where the backdrop cannot be
-    /// switched off, the control that shows it is the last place that should claim it changed.
-    private var canvasButton: some View {
-        Button {
-            model.chooseTransparentCanvas(!model.canvas.isTransparent)
-        } label: {
-            Image(systemName: model.canvas.isTransparent ? "checkerboard.rectangle" : "square.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 20)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(model.canvas.isTransparent ? "preview.background.make-solid" : "preview.background.make-transparent")
-        .accessibilityLabel(Text("preview.background.transparent-canvas"))
-        .accessibilityValue(Text(model.canvas.isTransparent ? "preview.background.state.on" : "preview.background.state.off"))
-    }
-
-    /// Copy and save. A menu rather than five more 22x20 glyphs: the strip is already six of them at
-    /// a 360pt minimum width, and a menu row is the one place in this app where a control carries
-    /// its own name in the reader's language instead of a tooltip.
-    private var exportMenu: some View {
-        Menu {
-            Group {
-                Button("preview.export.copy-image") { model.copyImage() }
-                    .keyboardShortcut(shortcut("c", modifiers: .command))
-                Button("preview.export.copy-text") { model.copySource() }
-                    .keyboardShortcut(shortcut("c", modifiers: [.command, .shift]))
-                Divider()
-                Button("preview.export.save.png") { model.save(.png) }
-                    .keyboardShortcut(shortcut("s", modifiers: .command))
-                Button("preview.export.save.pdf") { model.save(.pdf) }
-                Button("preview.export.save.svg") { model.save(.svg) }
-            }
-            // Only the export rows depend on there being a drawing. The canvas is a preference and
-            // has to stay reachable while the failure card is up -- it is the one control that used
-            // to sit in the chrome unconditionally.
-            .disabled(!model.canExport)
-        } label: {
-            Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 20)
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("preview.export.help")
-        .accessibilityLabel(Text("preview.export.label"))
     }
 
     /// Key equivalents only where they can fire. The quick panel is non-activating: nothing is
@@ -1312,5 +1253,88 @@ struct PreviewMessageView: View {
             .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+    }
+}
+
+
+/// The canvas choice and the export menu, in the one place both surfaces read them from.
+///
+/// The AI window draws its own chrome around the same `DiagramViewModel`, and a hand-copied menu is
+/// a menu that drifts: the canvas control moved out of the export menu here and the copy stayed
+/// behind, which left the AI window as the only preview surface with no way to change its canvas.
+struct DiagramChromeControls: View {
+    @ObservedObject var model: DiagramViewModel
+    /// False on the quick panel, which is non-activating: nothing is dispatched to it, so a menu
+    /// row registered there would display a glyph for a key that does nothing.
+    let keyEquivalentsWork: Bool
+
+    var body: some View {
+        // The canvas first: it changes what is on screen now, where the menu produces a file.
+        canvasButton
+        exportMenu
+    }
+
+    /// Whether the diagram sits on the glass or on a canvas of its own.
+    ///
+    /// Its own control rather than a row inside the export menu: it is the one thing here that
+    /// changes what the reader is looking at right now, and a preference filed behind a share glyph
+    /// is a preference nobody finds. The glyph shows the state -- a checkerboard is the drawing
+    /// with the desktop behind it, a filled square is the canvas -- so the strip says which one is
+    /// on without being opened.
+    ///
+    /// The state comes from the canvas rather than from the choice: where the backdrop cannot be
+    /// switched off, the control that shows it is the last place that should claim it changed.
+    private var canvasButton: some View {
+        Button {
+            model.chooseTransparentCanvas(!model.canvas.isTransparent)
+        } label: {
+            Image(systemName: model.canvas.isTransparent ? "checkerboard.rectangle" : "square.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(model.canvas.isTransparent ? "preview.background.make-solid" : "preview.background.make-transparent")
+        .accessibilityLabel(Text("preview.background.transparent-canvas"))
+        .accessibilityValue(Text(model.canvas.isTransparent ? "preview.background.state.on" : "preview.background.state.off"))
+    }
+
+    /// Copy and save. A menu rather than five more 22x20 glyphs: the strip is already six of them at
+    /// a 360pt minimum width, and a menu row is the one place in this app where a control carries
+    /// its own name in the reader's language instead of a tooltip.
+    private var exportMenu: some View {
+        Menu {
+            Group {
+                Button("preview.export.copy-image") { model.copyImage() }
+                    .keyboardShortcut(shortcut("c", modifiers: .command))
+                Button("preview.export.copy-text") { model.copySource() }
+                    .keyboardShortcut(shortcut("c", modifiers: [.command, .shift]))
+                Divider()
+                Button("preview.export.save.png") { model.save(.png) }
+                    .keyboardShortcut(shortcut("s", modifiers: .command))
+                Button("preview.export.save.pdf") { model.save(.pdf) }
+                Button("preview.export.save.svg") { model.save(.svg) }
+            }
+            // Only the export rows depend on there being a drawing. The canvas is a preference and
+            // has to stay reachable while the failure card is up -- it is the one control that used
+            // to sit in the chrome unconditionally.
+            .disabled(!model.canExport)
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("preview.export.help")
+        .accessibilityLabel(Text("preview.export.label"))
+    }
+
+    /// In a window they are live -- see `PreviewCoordinator`, which consumes them from a local
+    /// monitor so the displayed glyph and the working key are the same key.
+    private func shortcut(_ key: KeyEquivalent, modifiers: EventModifiers) -> KeyboardShortcut? {
+        keyEquivalentsWork ? KeyboardShortcut(key, modifiers: modifiers) : nil
     }
 }

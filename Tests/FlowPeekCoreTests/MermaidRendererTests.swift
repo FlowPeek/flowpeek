@@ -319,6 +319,20 @@ final class MermaidRendererTests: XCTestCase {
         XCTAssertFalse(banned.contains("foreignObject"), "<foreignObject> must be sanitised, not deleted")
         XCTAssertTrue(source.contains("var LABEL_TAGS"), "the label allow-list is missing")
 
+        // Choosing a palette is what Mermaid's theming is for, so a diagram may set its own theme.
+        // Blocking these made every `%%{init: {"theme": ...}}%%` directive silently do nothing.
+        let secureStart = try XCTUnwrap(source.range(of: "var SECURE_KEYS ="))
+        let secure = source[secureStart.upperBound...].prefix(while: { $0 != ";" })
+        XCTAssertFalse(secure.contains("\"theme\""), "a diagram must be able to choose its theme")
+        XCTAssertFalse(secure.contains("themeVariables"), "a diagram must be able to set theme variables")
+        // Raw CSS is a different thing from values, and the theme's <style> is kept by the scrub.
+        XCTAssertTrue(secure.contains("themeCSS"), "themeCSS must stay out of a diagram's reach")
+        XCTAssertTrue(secure.contains("htmlLabels"), "htmlLabels must stay out of a diagram's reach")
+
+        // The kept <style> is read on the way past, and mermaid's own marker references survive.
+        XCTAssertTrue(source.contains("var STYLE_HAZARDS"), "the stylesheet check is gone")
+        XCTAssertTrue(source.contains("style-hazard"), "a stripped stylesheet must be reported")
+
         // mermaid throws its own "svg element not in render tree" whenever a measured line of text
         // reports a 0x0 box, which WebKit does for the zero-width space mermaid uses to stand in for
         // a blank line. Without this patch every diagram containing a blank line fails to render.

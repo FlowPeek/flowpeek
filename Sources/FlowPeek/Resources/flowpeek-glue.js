@@ -6,7 +6,20 @@
   var GLUE_VERSION = "1";
   var CANARY_SOURCE = "flowchart TD\n  A[Start] --> B[End]";
   var MAX_MESSAGE = 2000;
-  var SECURE_KEYS = ["htmlLabels", "theme", "themeVariables", "themeCSS", "fontFamily", "altFontFamily", "layout", "look"];
+  // What a diagram may not decide for itself. `theme` and `themeVariables` are deliberately absent:
+  // choosing a palette is the whole point of Mermaid's theming, and blocking them made every
+  // `%%{init: {"theme": ...}}%%` directive and every front-matter `config: theme:` silently do
+  // nothing -- three different spellings from Mermaid's own theming page all drew in identical
+  // colours. `themeCSS` stays blocked because it is raw CSS rather than values, and the theme's
+  // <style> element is the one thing the scrub keeps.
+  var SECURE_KEYS = ["htmlLabels", "themeCSS", "fontFamily", "altFontFamily", "layout", "look"];
+
+  // Theme variables reach the page as values inside that kept <style>, so a value carrying its own
+  // punctuation could close the declaration and open something else. Nothing here needs more than a
+  // colour, a length or a font name.
+  // `url(#arrowhead)` is mermaid's own marker reference and points inside the document, which is
+  // the same rule the attribute pass applies; anything else a url() could name is off-document.
+  var STYLE_HAZARDS = /@import|url\s*\(\s*['"]?(?!#)|expression\s*\(|<\s*\/?\s*script/i;
 
   // mermaid measures a line of text by appending an <svg><text> to <body> and reading getBBox(),
   // and treats a 0x0 answer as fatal: `if (b.width === 0 && b.height === 0) throw new Error("svg
@@ -147,6 +160,15 @@
           unwrap(node);
         }
       }
+    });
+    // The theme arrives as one <style>, which is kept -- so it is read once on the way past. A
+    // diagram that got a hazard into it through a theme variable loses the stylesheet rather than
+    // the diagram: mermaid's shapes carry presentation attributes too, so an unstyled diagram is
+    // still a diagram.
+    root.querySelectorAll("style").forEach(function (node) {
+      if (!STYLE_HAZARDS.test(node.textContent || "")) return;
+      removed.push("style-hazard");
+      node.remove();
     });
     root.querySelectorAll("a").forEach(function (a) { unwrap(a); });
     var nodes = [root];

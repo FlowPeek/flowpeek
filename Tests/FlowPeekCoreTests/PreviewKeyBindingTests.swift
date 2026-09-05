@@ -167,3 +167,78 @@ final class PreviewKeyBindingTests: XCTestCase {
         )
     }
 }
+
+/// What each surface is allowed to tell the user its keys are. A hint is a promise, and the panel
+/// and the window keep different ones — which is exactly how the chrome got to advertise ⌘0 on a
+/// surface where the working key is a bare `0`.
+final class PreviewKeyGlyphTests: XCTestCase {
+    private let viewport: [PreviewCommand] = [.zoomIn, .zoomOut, .fit, .actualSize]
+
+    /// The panel binds no Command combination, so it must never display one: ⌘C there would be
+    /// delivered to the application the user is typing in, not to the preview.
+    func testThePanelAdvertisesTheBareKeysItReallyTakes() {
+        for command in viewport {
+            let glyph = PreviewKeyBinding.glyph(for: command, surface: .panel)
+            XCTAssertNotNil(glyph, "\(command) works in the panel and has to be discoverable there")
+            XCTAssertFalse(glyph?.contains("⌘") ?? true, "the panel answers no Command combination")
+        }
+        XCTAssertNil(PreviewKeyBinding.glyph(for: .copyImage, surface: .panel))
+        XCTAssertNil(PreviewKeyBinding.glyph(for: .save, surface: .panel))
+    }
+
+    func testTheWindowAdvertisesTheCommandCombinationsItConsumes() {
+        for command in viewport + [.copyImage, .copySource, .save, .close] {
+            let glyph = PreviewKeyBinding.glyph(for: command, surface: .window)
+            XCTAssertEqual(glyph?.hasPrefix("⌘"), true, "\(command) is a Command combination in the window")
+        }
+    }
+
+    /// An observer can answer Escape and nothing else, so Escape is the only key it may promise.
+    func testAnObservedPanelPromisesOnlyTheKeyItCanAnswer() {
+        XCTAssertNotNil(PreviewKeyBinding.glyph(for: .close, surface: .observedPanel))
+        for command in viewport {
+            XCTAssertNil(PreviewKeyBinding.glyph(for: command, surface: .observedPanel))
+        }
+    }
+
+    /// The glyph table and the dispatch table are written separately, so the only thing keeping a
+    /// hint from advertising a key its surface throws away is this: every cap that is displayed is
+    /// pressed here, on the surface that displayed it, and has to come back as the command it was
+    /// offered for.
+    func testEveryKeyCapAdvertisedIsOneTheSurfaceReallyAnswers() throws {
+        let commands: [PreviewCommand] = viewport + [.copyImage, .copySource, .save, .close]
+        for surface: PreviewKeyBinding.Surface in [.observedPanel, .panel, .window] {
+            for command in commands {
+                guard let glyph = PreviewKeyBinding.glyph(for: command, surface: surface) else { continue }
+                XCTAssertEqual(
+                    PreviewKeyBinding.command(for: try stroke(pressing: glyph), surface: surface),
+                    command,
+                    "\(surface) offers \(glyph) for \(command)"
+                )
+            }
+        }
+    }
+
+    /// The key a cap names, as the keyboard actually sends it. Written from the key caps rather
+    /// than from either table, so it can hold the two of them to each other: `+` is Shift and the
+    /// `=` key, and the typographic minus a menu prints is the hyphen key.
+    private func stroke(pressing glyph: String) throws -> PreviewKeyStroke {
+        var cap = Substring(glyph)
+        var command = false
+        var shift = false
+        while let modifier = cap.first, modifier == "⌘" || modifier == "⇧" {
+            if modifier == "⌘" { command = true } else { shift = true }
+            cap = cap.dropFirst()
+        }
+        let codes: [String: UInt16] = ["esc": 53, "0": 29, "1": 18, "C": 8, "S": 1, "W": 13, "+": 24, "−": 27]
+        let keyCode = try XCTUnwrap(codes[String(cap)], "no key is known for the cap \(glyph)")
+        return PreviewKeyStroke(keyCode: keyCode, command: command, shift: shift || cap == "+")
+    }
+
+    /// Panning has no glyph anywhere: the arrows are not written into a tooltip on either surface.
+    func testPanningIsNotAdvertisedAsAKeyCap() {
+        for surface: PreviewKeyBinding.Surface in [.observedPanel, .panel, .window] {
+            XCTAssertNil(PreviewKeyBinding.glyph(for: .pan(dx: 60, dy: 0), surface: surface))
+        }
+    }
+}

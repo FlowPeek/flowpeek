@@ -38,6 +38,11 @@ struct ShortcutRecorder: View {
                 .buttonStyle(.plain)
                 .onHover { isHovered = $0 }
                 .help("shortcut.record.help")
+                // The field is named by the row it belongs to and valued by the combination it
+                // currently holds; `.help()` is a hint and names nothing.
+                .accessibilityLabel(Text(String(localized: action.titleKey)))
+                .accessibilityValue(Text(verbatim: fieldText))
+                .accessibilityHint(Text("shortcut.record.help"))
 
                 Button {
                     center.reset(action)
@@ -51,6 +56,7 @@ struct ShortcutRecorder: View {
                 .buttonStyle(.plain)
                 .disabled(center.shortcuts[action] == action.defaultShortcut)
                 .help("shortcut.reset.help")
+                .accessibilityLabel(Text("shortcut.reset.help"))
             }
 
             if let error {

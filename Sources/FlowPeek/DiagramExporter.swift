@@ -25,12 +25,14 @@ final class DiagramExporter {
     enum Failure: LocalizedError {
         case nothingRendered
         case pageFailed(String)
+        case pageTimedOut(seconds: Int)
         case noBitmap
 
         var errorDescription: String? {
             switch self {
             case .nothingRendered: "there is no rendered diagram to export"
             case .pageFailed(let detail): "the export page did not load: \(detail)"
+            case .pageTimedOut(let seconds): "the export page did not load within \(seconds)s"
             case .noBitmap: "WebKit produced no bitmap for the export page"
             }
         }
@@ -42,7 +44,8 @@ final class DiagramExporter {
         guard !request.svg.isEmpty, request.size.width > 0, request.size.height > 0 else {
             throw Failure.nothingRendered
         }
-        if format == .svg {
+        // The vector is already in hand, so only the drawn formats need a page at all.
+        guard format.needsRedraw else {
             return Data(DiagramSVGDocument.standalone(request.svg).utf8)
         }
         let session = try await Session(
@@ -51,11 +54,7 @@ final class DiagramExporter {
             logger: logger
         )
         defer { session.finish() }
-        switch format {
-        case .pdf: return try await session.pdf()
-        case .png: return try await session.png()
-        case .svg: throw Failure.nothingRendered  // handled above
-        }
+        return format == .png ? try await session.png() : try await session.pdf()
     }
 
     /// Writes an export to a file the user picks. Returns false when they cancel.
@@ -75,6 +74,10 @@ final class DiagramExporter {
         // what keeps Escape cancelling the save panel instead of closing the preview behind it.
         NSApp.activate(ignoringOtherApps: true)
         guard await panel.beginSheetless() == .OK, let url = panel.url else { return false }
+        // The preview can go while the panel is up: a click in another application dismisses the
+        // quick panel, which releases its model and cancels this task. Nothing is written for a
+        // surface that no longer exists.
+        try Task.checkCancellation()
         try data.write(to: url, options: .atomic)
         return true
     }
@@ -96,6 +99,10 @@ final class DiagramExporter {
         /// `viewBox` is fractional, and rounding it up before doubling drifts the export off the
         /// size the panel reports.
         private let natural: CGSize
+        /// The load in flight, and the clock on it. Both are cleared by whichever of the three
+        /// outcomes arrives first.
+        private var pending: CheckedContinuation<Void, any Error>?
+        private var deadline: Task<Void, Never>?
 
         init(request: Request, opaque: Bool, logger: Logger) async throws {
             natural = request.size
@@ -112,16 +119,18 @@ final class DiagramExporter {
                 webView.setValue(false, forKey: "drawsBackground")
             }
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                var settled = false
-                policy.onFinish = {
-                    guard !settled else { return }
-                    settled = true
-                    continuation.resume()
+                pending = continuation
+                policy.onFinish = { [weak self] in self?.settle(.success(())) }
+                policy.onFatal = { [weak self] error in
+                    self?.settle(.failure(Failure.pageFailed(error.localizedDescription)))
                 }
-                policy.onFatal = { error in
-                    guard !settled else { return }
-                    settled = true
-                    continuation.resume(throwing: Failure.pageFailed(error.localizedDescription))
+                // A navigation decision that reaches neither callback — a cancelled one does — used
+                // to leave this continuation, and the web view behind it, alive for the life of the
+                // process, with ⌘C reporting nothing at all. The same clock the renders run under.
+                deadline = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(MermaidRenderLimits.timeoutSeconds))
+                    guard !Task.isCancelled else { return }
+                    self?.settle(.failure(Failure.pageTimedOut(seconds: MermaidRenderLimits.timeoutSeconds)))
                 }
                 webView.loadHTMLString(
                     MermaidEnginePage.exportDocument(
@@ -163,7 +172,18 @@ final class DiagramExporter {
             return png
         }
 
+        /// Whichever outcome arrives first wins; the other two find nothing to resume.
+        private func settle(_ outcome: Result<Void, any Error>) {
+            guard let continuation = pending else { return }
+            pending = nil
+            deadline?.cancel()
+            deadline = nil
+            continuation.resume(with: outcome)
+        }
+
         func finish() {
+            deadline?.cancel()
+            deadline = nil
             policy.onFinish = nil
             policy.onFatal = nil
             webView.stopLoading()
@@ -173,13 +193,31 @@ final class DiagramExporter {
     }
 }
 
+@MainActor
 extension NSSavePanel {
     /// `beginSheetModal(for:)` needs a parent window, and the surface that asked for the save is a
     /// borderless non-activating panel that must not be blocked by a sheet — closing the preview
-    /// while its own sheet is up strands the sheet. So the panel is run window-modal to itself.
+    /// while its own sheet is up strands the sheet. `begin` is modal to nothing instead, which also
+    /// means the panel outlives the preview rather than closing with it: a click in another
+    /// application dismisses the quick panel, and the save panel would be left standing over a
+    /// released model, still able to write a file for a surface that is gone. So the caller's
+    /// cancellation takes it down here.
+    ///
+    /// The level is raised for the same reason the modality changed: the quick preview is
+    /// `.floating` and both are centred, so an ordinary save panel opens *underneath* the panel
+    /// that asked for it. Only while such a panel is up, though — a `.modalPanel` save panel stays
+    /// above every other application, and from the promoted window, which is an ordinary window
+    /// with nothing floating over it, that is a dialog that will not get out of the user's way.
     fileprivate func beginSheetless() async -> NSApplication.ModalResponse {
-        await withCheckedContinuation { continuation in
-            begin { continuation.resume(returning: $0) }
+        if NSApp.windows.contains(where: { $0.isVisible && $0.level == .floating }) {
+            level = .modalPanel
+        }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                begin { continuation.resume(returning: $0) }
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancel(nil) }
         }
     }
 }

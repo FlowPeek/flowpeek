@@ -48,9 +48,11 @@ final class PreviewEngineDeathTests: XCTestCase {
         model.release()
     }
 
-    /// The failure has to be reported *after* the waiters, so a render already in flight still wins
-    /// through its own path — which is the only one that can quote the user's source back at them.
-    func testARenderInFlightStillReportsTheFailureItself() async throws {
+    /// A death reported while a render is in flight belongs to that render: it fails on its own and
+    /// reports through `render()`, which knows the source and can quote it. Handling it here as
+    /// well would swap the engine out from under the render that is still using it — so the view
+    /// the model holds afterwards has to be the very one the render started against.
+    func testADeathReportedMidRenderIsLeftToTheRenderItself() async throws {
         let pool = MermaidWebViewPool()
         let model = DiagramViewModel(title: "mid-render", source: "flowchart TD\n  A --> B", pool: pool)
         model.attach()
@@ -58,8 +60,11 @@ final class PreviewEngineDeathTests: XCTestCase {
         XCTAssertEqual(model.status, .rendering, "attach() starts a render synchronously")
 
         try killWebContent(of: engine)
-        // Whatever the outcome, it must be a decided one: the status the defect describes is a
-        // `.rendered` that never changes.
+        // The report itself must change nothing: the render is still holding this view, and
+        // swapping it here would pull the page out from under a call that has not returned.
+        XCTAssertTrue(model.engine === engine, "the render in flight keeps the view it started on")
+        // The render then fails on its own and recovers through its own path, which is where the
+        // replacement belongs — and where the user's source can still be quoted back at them.
         await waitUntil({ model.status != .rendering }, "the in-flight render settled")
         model.release()
     }

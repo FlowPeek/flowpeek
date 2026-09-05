@@ -136,3 +136,41 @@ public enum PreviewKeyBinding {
         }
     }
 }
+
+extension PreviewKeyBinding {
+    /// The key a surface really answers for a command, written the way a menu writes it.
+    ///
+    /// Composed here rather than translated — the glyphs are the same in every language. This is a
+    /// second table and not the dispatch one: it spells keys for a reader, where `command(for:_:)`
+    /// reads key codes, and the two are held together by the round trip the tests put every glyph
+    /// through rather than by sharing code. The panel's are bare characters: it binds no Command
+    /// combination, because a global monitor cannot take ⌘C away from the application underneath it.
+    public static func glyph(for command: PreviewCommand, surface: Surface) -> String? {
+        switch surface {
+        case .observedPanel:
+            // Escape is the only thing an observer may answer, so it is the only thing to promise.
+            return command == .close ? "esc" : nil
+        case .panel:
+            switch command {
+            case .zoomIn: return "+"
+            case .zoomOut: return "−"
+            case .fit: return "0"
+            case .actualSize: return "1"
+            case .close: return "esc"
+            case .pan, .copyImage, .copySource, .save: return nil
+            }
+        case .window:
+            switch command {
+            case .zoomIn: return "⌘+"
+            case .zoomOut: return "⌘−"
+            case .fit: return "⌘0"
+            case .actualSize: return "⌘1"
+            case .copyImage: return "⌘C"
+            case .copySource: return "⌘⇧C"
+            case .save: return "⌘S"
+            case .close: return "⌘W"
+            case .pan: return nil
+            }
+        }
+    }
+}

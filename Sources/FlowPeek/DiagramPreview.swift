@@ -1123,6 +1123,7 @@ struct DiagramPreviewView: View {
                 }
                 .transition(.opacity)
             }
+            canvasButton
             exportMenu
             zoomCluster
                 .disabled(!hasDiagram)
@@ -1135,9 +1136,34 @@ struct DiagramPreviewView: View {
         .frame(height: 44)
     }
 
-    /// Copy, save and the canvas choice. A menu rather than four more 22x20 glyphs: the strip is
-    /// already six of them at a 360pt minimum width, and a menu row is the one place in this app
-    /// where a control carries its own name in the reader's language instead of a tooltip.
+    /// Whether the diagram sits on the glass or on a canvas of its own.
+    ///
+    /// Its own control rather than a row inside the export menu: it is the one thing here that
+    /// changes what the reader is looking at right now, and a preference filed behind a share glyph
+    /// is a preference nobody finds. The glyph shows the state -- a checkerboard is the drawing
+    /// with the desktop behind it, a filled square is the canvas -- so the strip says which one is
+    /// on without being opened.
+    ///
+    /// The state comes from the canvas rather than from the choice: where the backdrop cannot be
+    /// switched off, the control that shows it is the last place that should claim it changed.
+    private var canvasButton: some View {
+        Button {
+            model.chooseTransparentCanvas(!model.canvas.isTransparent)
+        } label: {
+            Image(systemName: model.canvas.isTransparent ? "checkerboard.rectangle" : "square.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(model.canvas.isTransparent ? "preview.background.make-solid" : "preview.background.make-transparent")
+        .accessibilityLabel(Text("preview.background.transparent-canvas"))
+        .accessibilityValue(Text(model.canvas.isTransparent ? "preview.background.state.on" : "preview.background.state.off"))
+    }
+
+    /// Copy and save. A menu rather than five more 22x20 glyphs: the strip is already six of them at
+    /// a 360pt minimum width, and a menu row is the one place in this app where a control carries
+    /// its own name in the reader's language instead of a tooltip.
     private var exportMenu: some View {
         Menu {
             Group {
@@ -1155,17 +1181,6 @@ struct DiagramPreviewView: View {
             // has to stay reachable while the failure card is up -- it is the one control that used
             // to sit in the chrome unconditionally.
             .disabled(!model.canExport)
-            Divider()
-            // The checkmark comes from the canvas rather than from the choice: on a system where
-            // the backdrop cannot be switched off, the row that shows the state is the last place
-            // that should claim it changed.
-            Toggle(
-                "preview.background.transparent-canvas",
-                isOn: Binding(
-                    get: { model.canvas.isTransparent },
-                    set: { model.chooseTransparentCanvas($0) }
-                )
-            )
         } label: {
             Image(systemName: "square.and.arrow.up")
                 .font(.system(size: 11, weight: .semibold))

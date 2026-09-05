@@ -264,3 +264,9 @@
 "preview.a11y.diagram.hint" = "Copy Diagram Text in the share menu reads this diagram back as Mermaid.";
 "clipboard.indicator.help" = "Open the copied diagram";
 "clipboard.indicator.a11y" = "Mermaid copied. Press %@ to preview it.";
+
+/* Canvas control */
+"preview.background.make-transparent" = "Show the Desktop Through the Diagram";
+"preview.background.make-solid" = "Put the Diagram on Its Own Canvas";
+"preview.background.state.on" = "Transparent";
+"preview.background.state.off" = "Solid";

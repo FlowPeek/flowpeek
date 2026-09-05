@@ -269,6 +269,25 @@ final class AmbientPeekMonitor {
         // blocks on the page, at which point the largest text is some other diagram entirely.
         // A bare starter line cannot win here either, because a starter with no body detects as
         // `.weak` and `AmbientPeekPolicy` requires `.likely`.
+        // The caret first, where there is one. An editor that hands out its whole document through
+        // the focused element can say exactly which diagram surrounds the user's position and where
+        // that line is; the climb, in the same editor, finds the document re-exposed at the pane and
+        // frames the whole editor -- which is not a block and tells the reader nothing. Where there
+        // is no such focused document, this costs two attributes and falls straight through: in a
+        // browser the focused element is the web area, whose role is not a text area, and the climb
+        // is what answers.
+        if ownsHit(hit, application),
+           case .found(let candidate) = caretRead(
+               at: pointer,
+               in: application,
+               screen: screen,
+               flip: flip,
+               frames: frames,
+               deadline: deadline
+           ) {
+            return .found(candidate)
+        }
+
         var cursor: AXUIElement? = hit
         for _ in 0..<Self.ancestorLimit {
             guard let element = cursor else { break }
@@ -307,20 +326,17 @@ final class AmbientPeekMonitor {
                 applicationName: application.localizedName
             ) { return .found(candidate) }
         }
-        // Nothing under the pointer reads as a diagram. In an editor that is the normal answer
-        // rather than a "no", so the caret gets one attempt on what is left of the same budget --
-        // but only while the pointer really is over that editor. This is the cheap half of that
-        // test: the element under the pointer has to belong to the application whose focused
-        // document is about to be read, or pointing at a Finder window with an editor frontmost
-        // would put an outline where the pointer has never been. `AXUIElementGetPid` is a local
-        // lookup rather than a message to the other process. The other half, that the pointer is
-        // over the editor rather than merely over the same application, needs the editor's own
-        // rectangle and so belongs to the read.
+        return .nothing
+    }
+
+    /// Whether the pointer is over the frontmost application's own element. The cheap half of the
+    /// caret gate: pointing at a Finder window with an editor frontmost must not put an outline
+    /// where the pointer has never been. `AXUIElementGetPid` is a local lookup rather than a message
+    /// to the other process. The other half -- that the pointer is over the editor rather than
+    /// merely over the same application -- needs the editor's own rectangle and belongs to the read.
+    private func ownsHit(_ hit: AXUIElement, _ application: NSRunningApplication) -> Bool {
         var owner: pid_t = 0
-        guard AXUIElementGetPid(hit, &owner) == .success, owner == application.processIdentifier else {
-            return Date() < deadline ? .nothing : .abandoned
-        }
-        return caretRead(at: pointer, in: application, screen: screen, flip: flip, frames: frames, deadline: deadline)
+        return AXUIElementGetPid(hit, &owner) == .success && owner == application.processIdentifier
     }
 
     /// The read the descent cannot do. VS Code's editor exposes the whole file as the focused

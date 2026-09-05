@@ -230,15 +230,35 @@ final class DocumentCaretSliceTests: XCTestCase {
         }
     }
 
+    /// One ordinary word is the same trap one word wide. The starters are prefixes and none of them
+    /// stops at a word boundary, so a single lowercase word that merely begins with one leaves
+    /// nothing after it to judge -- and a scratch buffer that opens with one is still a note.
+    func testAFenceFreeDocumentOpeningWithOneOrdinaryWordFindsNothing() {
+        for word in ["blocking", "information", "graphs", "pies", "timelines", "ganttry",
+                     "journeyman", "mindmapping", "infographic"] {
+            let document = "\(word)\nsecond line of prose\nthird line\n"
+            XCTAssertGreaterThanOrEqual(
+                MermaidDetector.detect(document).confidence, .likely,
+                "\(word) was expected to fool the detector on its own"
+            )
+            XCTAssertNil(DocumentCaretSlicer.slice(document: document, caret: 3), word)
+        }
+    }
+
     /// The declaration line is where the fence-free route gets its evidence, so the forms mermaid
-    /// itself accepts there all have to pass.
+    /// itself accepts there all have to pass -- including the ones whose real keyword is longer than
+    /// the head the table matches, which is why the word gate cannot simply demand an exact match.
     func testEveryShapeOfDeclarationLineIsAccepted() {
         for opening in ["flowchart LR", "graph TD;", "gitGraph TB:", "pie showData", "pie title Answers",
                         "sequenceDiagram", "erDiagram", "stateDiagram-v2", "requirementDiagram",
-                        "xychart-beta horizontal", "C4Context title Banking"] {
+                        "xychart-beta horizontal", "C4Context title Banking", "block-beta",
+                        "architecture-beta", "sankey-beta", "packet-beta", "treemap-beta",
+                        "flowchart-elk LR", "swimlane-beta", "cynefin-beta", "gitGraph:",
+                        "radar-beta:", "graph;", "stateDiagram-v2;"] {
             XCTAssertTrue(MermaidDetector.declaresDiagram(opening), opening)
         }
-        for prose in ["graph of dependencies", "pie in the sky", "About the sequenceDiagram", ""] {
+        for prose in ["graph of dependencies", "pie in the sky", "About the sequenceDiagram", "",
+                      "blocking", "graphs", "journeyman", "infographic", "ganttry"] {
             XCTAssertFalse(MermaidDetector.declaresDiagram(prose), prose)
         }
     }
@@ -265,6 +285,41 @@ final class DocumentCaretSliceTests: XCTestCase {
         let document = "```mermaid\n\(flowchart)\n```\n"
         XCTAssertNil(DocumentCaretSlicer.slice(document: document, caret: 20, before: Date.distantPast))
         XCTAssertNotNil(DocumentCaretSlicer.slice(document: document, caret: 20, before: Date() + 60))
+    }
+
+    /// The split reads the clock as it goes, not only at its two ends: a document at the cap is
+    /// 64,000 characters of work between those two checks, and the read that fetched it has usually
+    /// spent most of its budget getting there. The clock is passed in because arranging for the wall
+    /// clock to expire part-way through a split is a race, and this is not.
+    func testTheSplitChecksTheClockAsItGoesAndStopsAtTheFirstExpiredReading() {
+        let document = "```mermaid\n\(flowchart)\n```\n" + String(repeating: "prose about the diagram\n", count: 1_000)
+        let length = (document as NSString).length
+        XCTAssertGreaterThan(length, DocumentCaretSlicer.clockInterval * 4)
+
+        var readings = 0
+        let slice = DocumentCaretSlicer.slice(
+            document: document,
+            caret: 20,
+            minimumConfidence: AmbientPeekPolicy.minimumConfidence,
+            before: .distantFuture,
+            clock: { readings += 1; return Date() }
+        )
+        XCTAssertNotNil(slice)
+        XCTAssertGreaterThanOrEqual(readings, length / DocumentCaretSlicer.clockInterval)
+
+        // Expired at the first reading inside the split, and nothing is read after it: the split
+        // stops there rather than finishing the document and letting the check on the far side
+        // answer for it.
+        let start = Date()
+        var expiring = 0
+        XCTAssertNil(DocumentCaretSlicer.slice(
+            document: document,
+            caret: 20,
+            minimumConfidence: AmbientPeekPolicy.minimumConfidence,
+            before: start + 1,
+            clock: { expiring += 1; return expiring == 1 ? start : start + 60 }
+        ))
+        XCTAssertEqual(expiring, 2)
     }
 
     func testAnUntaggedFenceIsStillWorthReading() throws {

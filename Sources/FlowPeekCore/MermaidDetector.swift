@@ -113,16 +113,42 @@ public enum MermaidDetector {
     public static func declaresDiagram(_ line: String) -> Bool {
         let line = trimmed(line)
         let keyword = line.prefix { !$0.isWhitespace }
-        guard match(String(keyword)) != nil else { return false }
+        guard let hit = match(String(keyword)) else { return false }
+        // "The keyword by itself" has to be checked, not assumed: `match` stops at the end of the
+        // starter and none of these starters carries a word boundary, so a single word that merely
+        // begins with one satisfies it and leaves nothing after it -- "blocking", "graphs",
+        // "journeyman", "information". A one-word note is exactly what a scratch buffer opens with.
+        // The terminator is not part of the word for this purpose any more than it is below:
+        // `gitGraph:`, `radar-beta:` and `graph;` are the keyword by itself.
+        let word = String(keyword).trimmingCharacters(in: statementPunctuation)
+        guard completesKeyword(word.dropFirst(hit.keyword.count)) else { return false }
         let rest = line.dropFirst(keyword.count).trimmingCharacters(in: .whitespaces)
         guard !rest.isEmpty else { return true }
         // Statement punctuation belongs to the grammar, not to the word: `graph TD;` and
         // `gitGraph LR:` are both declarations.
         let tail = String(rest.prefix { !$0.isWhitespace })
-            .trimmingCharacters(in: CharacterSet(charactersIn: ":;,"))
+            .trimmingCharacters(in: statementPunctuation)
             .lowercased()
         return declarationTails.contains(tail)
     }
+
+    /// What may still follow the matched starter *inside the same word*. The table stores the
+    /// shortest form of each starter, so a full keyword can be longer than the head that matched
+    /// it: the `-beta` diagrams (`block-beta`, `sankey-beta`, `packet-beta`, `treemap-beta`,
+    /// `xychart-beta`, `architecture-beta`), `stateDiagram-v2`, and the `Diagram` that
+    /// `requirementDiagram` spells out. Requiring the head to consume the whole word instead would
+    /// turn every one of those away.
+    private static func completesKeyword(_ suffix: Substring) -> Bool {
+        guard !suffix.isEmpty else { return true }
+        let lowered = suffix.lowercased()
+        if lowered == "diagram" || lowered == "-beta" { return true }
+        guard lowered.hasPrefix("-v") else { return false }
+        let version = lowered.dropFirst(2)
+        return !version.isEmpty && version.allSatisfy(\.isNumber)
+    }
+
+    /// What mermaid's grammar lets a statement end with, wherever it sits on a declaration line.
+    private static let statementPunctuation = CharacterSet(charactersIn: ":;,")
 
     /// Everything mermaid 11.17.2 accepts after the keyword on the same line: the flowchart and
     /// gitGraph directions, a title, pie's one flag, and xychart's orientation.

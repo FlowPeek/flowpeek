@@ -171,18 +171,20 @@ final class AmbientPeekMonitor {
         // set: measured in VS Code, the descent found zero text before it and the document
         // immediately after. Memoised per pid and shared with the selection route, which warms the
         // same processes when they activate -- so an app the user has been working in is usually
-        // already warm by the time Option goes down. The renderer switches over asynchronously, so
-        // the first hold after a cold launch can still read nothing; the next one reads.
+        // already warm by the time Option goes down, and the message is not sent at all. The
+        // renderer switches over asynchronously, so the first hold after a cold launch can still
+        // read nothing; the next one reads.
         //
-        // The deadline is taken after it, not from `now`: this is one message sent once per app,
-        // and charging it to a budget that exists to survive a wedged app would spend the budget on
-        // the setup and leave nothing for the read it enables. The price is that a first hold in an
-        // app that is not answering pays both timeouts -- 0.2 s for the set and 0.2 s for the read,
-        // where every later hold pays one -- and the backoff only counts the read half, so it takes
-        // three of those before the app is left alone for ten seconds.
-        AccessibilityTreeWarmUp.shared.warmUp(pid)
+        // Inside the read's own budget, not before it. The set is a synchronous message to the very
+        // app the read is about to question, so an app that answers only when its timeout expires
+        // would stall the pointer for that timeout and *then* get a full budget to stall in again --
+        // with the read still reporting `.nothing`, which clears the backoff instead of engaging it.
+        // Charged here, a wedged app spends the budget it was given, the read comes back
+        // `.abandoned`, and three holds put it away for ten seconds.
+        let deadline = Date() + AmbientPeekPolicy.readBudget
+        AccessibilityTreeWarmUp.shared.warmUp(pid, before: deadline)
 
-        let outcome = read(at: pointer, in: application, deadline: Date() + AmbientPeekPolicy.readBudget)
+        let outcome = read(at: pointer, in: application, deadline: deadline)
         // Stamped when the read *finishes*: timed from the start, a 200 ms read would already be
         // past the debounce by the time it returned and the next pointer move would re-run it.
         lastRead = Date()

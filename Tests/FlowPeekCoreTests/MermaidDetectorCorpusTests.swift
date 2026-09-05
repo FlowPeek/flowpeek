@@ -31,6 +31,25 @@ final class MermaidDetectorCorpusTests: XCTestCase {
         XCTAssertEqual(missing, [], "detector table rows with no corpus row: \(missing)")
     }
 
+    /// The fence-free route asks `declaresDiagram` before it slices, so a form the corpus vouches
+    /// for that the gate turns away simply stops working in a `.mmd` file or a scratch buffer, with
+    /// nothing to show for it. Every clean row opens with a declaration and has to pass: the
+    /// `negative-` rows are the ones no detector may claim, and the `weak-` rows are prose that
+    /// merely opens with a starter, which is exactly what this gate exists to turn away.
+    func testEveryCleanCorpusRowOpensWithALineTheFenceFreeGateAccepts() throws {
+        var rejected: [String] = []
+        for row in try corpus().cases where row.expected != nil && !row.id.hasPrefix("weak-") {
+            let opening = row.source
+                .split(separator: "\n")
+                .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            guard let opening else { continue }
+            if !MermaidDetector.declaresDiagram(String(opening)) {
+                rejected.append("\(row.id): \(opening)")
+            }
+        }
+        XCTAssertEqual(rejected, [], "declaration lines the gate turned away:\n" + rejected.joined(separator: "\n"))
+    }
+
     func testEveryCorpusRowResolvesToTheDetectorIdMermaidItselfReports() throws {
         var failures: [String] = []
         for row in try corpus().cases {

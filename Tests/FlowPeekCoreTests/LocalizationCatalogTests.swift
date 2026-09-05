@@ -44,6 +44,19 @@ final class LocalizationCatalogTests: XCTestCase {
         }
     }
 
+    /// The AI window's failure copy is picked in `FlowPeekCore` too, and a missing translation there
+    /// would ship as the raw key in place of the sentence that says what to do next.
+    func testTheAIFailureKeysAreDefinedInEveryLanguage() throws {
+        for language in Self.languages {
+            let keys = Set(try Self.keys(of: language))
+            XCTAssertEqual(
+                AIFailurePresentation.localizationKeys.filter { !keys.contains($0) },
+                [],
+                "\(language).lproj is missing these"
+            )
+        }
+    }
+
     private static func keys(of language: String) throws -> [String] {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // FlowPeekCoreTests

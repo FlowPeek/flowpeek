@@ -1,6 +1,36 @@
-# FlowPeek
+<div align="center">
+  <img src="docs/images/flowpeek-avatar.png" width="120" alt="">
+  <h1>FlowPeek</h1>
+  <p><strong>See the Mermaid diagram you are looking at, without leaving the page.</strong></p>
+  <p>A macOS menu-bar app. Point at Mermaid source anywhere — a docs page, a pull request, your editor — and it draws.</p>
+</div>
 
-FlowPeek is a native macOS menu-bar app that recognizes selected Mermaid source in browsers and desktop apps, places a small action beside the selection, and renders it in a Quick Look–style preview. An experimental `⌥⌘M` workflow can use selected text as context for OpenAI, Claude, or Gemini to create a diagram.
+<p align="center">
+  <img src="docs/images/preview.png" width="720" alt="A Mermaid flowchart drawn in FlowPeek's preview, floating over the page it was read from">
+</p>
+
+## Three ways to see a diagram
+
+**Hold ⌥ and point at it.** The block is outlined where it sits. Press Space and it draws.
+
+<img src="docs/images/hold-to-peek.png" width="620" alt="Mermaid source on a web page with FlowPeek's outline around it and a hint reading flowchart, Option-Space">
+
+**Copy it.** A badge appears near the menu bar and names the key that opens it.
+
+<img src="docs/images/clipboard-badge.png" width="360" alt="A badge below the menu bar reading Mermaid, sequenceDiagram, Press to preview, with the shortcut Option-Shift-Command-M">
+
+**Select it.** A small button appears beside the selection.
+
+Editors work too. In VS Code the outline follows the caret, because an editor can say where the caret is but not where the pointer is:
+
+<img src="docs/images/vscode.png" width="620" alt="A fenced mermaid block in VS Code outlined by FlowPeek, with a hint reading flowchart at the cursor, Option-Space">
+
+## What you can do with it
+
+- **Zoom and pan** with the trackpad, or from the keyboard once the window has focus.
+- **Take it with you** — copy the diagram as an image, or save it as PNG, PDF or SVG.
+- **Put it on the glass or on its own canvas**, whichever reads better against what is behind it.
+- **Keep the size** you dragged it to; the next diagram opens the same way.
 
 ## Install
 
@@ -8,9 +38,22 @@ FlowPeek is a native macOS menu-bar app that recognizes selected Mermaid source 
 brew install --cask flowpeek/tap/flowpeek
 ```
 
-FlowPeek asks for Accessibility permission on first launch and requests nothing else. Releases are
-built, signed and notarized by `.github/workflows/release.yml` on every `v*` tag; see
+Or download the notarized disk image from [the latest release](https://github.com/FlowPeek/flowpeek/releases/latest).
+
+FlowPeek asks for Accessibility permission on first launch, because reading the text you are pointing
+at is the whole feature. If you would rather not grant it, say no: copying a diagram still works, and
+the app says so instead of pretending to be broken.
+
+Releases are built, signed and notarized by `.github/workflows/release.yml` on every `v*` tag; see
 [docs/RELEASING.md](docs/RELEASING.md).
+
+## Privacy
+
+- The text you point at is read into memory and never written to disk or logged.
+- Nothing is sent anywhere unless you use the AI experiment, which is off until you switch it on and
+  sends only when you press Generate.
+- Mermaid is bundled, so drawing a diagram makes no network request at all.
+- Only Accessibility is requested. Not Screen Recording, not Input Monitoring.
 
 ## Requirements
 
@@ -51,30 +94,51 @@ Debug builds use a valid local bundle signature so macOS can grant Accessibility
 
 ## Permissions and privacy
 
-FlowPeek requests only macOS Accessibility permission. It uses Accessibility APIs to read the current selection and selection bounds; it does not request Screen Recording or Input Monitoring. Selected text is held in memory and is not logged or written to disk. AI context is sent only after the user explicitly clicks Generate (or the explicit Repair button), and BYOK credentials are stored in the macOS Keychain.
+FlowPeek requests only macOS Accessibility permission, and uses it to read the text under the pointer
+or in the selection along with its bounds. It does not request Screen Recording or Input Monitoring.
+What it reads stays in memory: it is never logged and never written to disk. AI context leaves the
+machine only when Generate is pressed, and provider keys live in the macOS Keychain.
 
 Because cross-application Accessibility access is incompatible with the intended sandbox model, the distribution target has App Sandbox disabled and Hardened Runtime enabled. Distribute a Developer ID–signed, notarized, stapled DMG rather than a Mac App Store build.
 
 ## Renderer security
 
-- Mermaid is local; no CDN or remote renderer is used.
-- Mermaid runs with `securityLevel: sandbox`, locked security settings, a 50,000-character limit, and a 500-edge limit.
-- The `WKWebView` uses a non-persistent data store, denies user-initiated navigation, blocks remote content with CSP, removes links, and disables `window.open`.
-- Default diagrams receive semantic light/dark macOS colors and system typography. Mermaid frontmatter, init directives, `themeVariables`, `classDef`, `style`, `linkStyle`, and `themeCSS` remain authoritative for explicitly customized diagrams.
+- Mermaid is bundled; no CDN and no remote renderer.
+- It runs with `securityLevel: strict` in a page whose CSP is `default-src 'none'`, so nothing a
+  diagram contains can fetch, navigate or execute. `sandbox` was tried first and returns an iframe
+  that same CSP blocks, which is why the level is `strict` and the engine is injected as a user
+  script into its own content world instead.
+- Limits: 120,000 characters and 2,000 edges at the engine, and 100,000 characters, 5,000 lines and
+  20,000 characters per line before a source is handed to it.
+- Every rendered SVG is swept before it is shown: scripts, frames, external references and event
+  handlers are removed, `<foreignObject>` labels are reduced to the tags a label is made of, and the
+  theme's own `<style>` is dropped whole if a value carried an `@import` or an off-document `url()`
+  out of its declaration.
+- The `WKWebView` uses a non-persistent data store, denies user-initiated navigation and disables
+  `window.open`.
+- A diagram chooses its own palette: front matter, `%%{init}%%`, `themeVariables`, `classDef`,
+  `style` and `linkStyle` are all authoritative. `themeCSS` is not — that one is raw CSS rather than
+  values, and the theme's stylesheet is the one thing the sweep keeps. Diagrams that name no colours
+  get semantic light/dark macOS colours and system typography.
 
 ## AI experiment
 
-Enable the experiment in Settings, save a provider API key, select arbitrary text in another app, and press `⌥⌘M`. The provider must return `{ title, mermaid, notes }`; FlowPeek validates the Mermaid locally before displaying it. Invalid output is never retried automatically—the user decides whether to invoke Repair.
+Off until you switch it on. Enable it in Settings, save a provider key — it goes to the macOS
+Keychain — then select any text and press the AI shortcut. The provider must answer with
+`{ title, mermaid, notes }`, and FlowPeek validates the Mermaid locally before drawing it. Nothing is
+ever re-sent on your behalf: an answer that will not draw offers a repair you can read before you
+send it.
 
-The default model identifiers are `gpt-5.6-terra`, `claude-sonnet-5`, and `gemini-3.7-flash`. Availability depends on the user’s provider account and can change; production should expose model configuration and move credentials to a backend.
+The default model identifiers are `gpt-5.6-terra`, `claude-sonnet-5` and `gemini-3.7-flash`.
+Availability depends on your own provider account.
 
 ## Release setup
 
 Before shipping:
 
-2. Set `DEVELOPMENT_TEAM` and the Developer ID signing identity.
-3. Archive and export the app, then run `Scripts/notarize_dmg.sh` with the environment variables documented in that script.
-4. Publish an EdDSA-signed Sparkle appcast. `Updates/appcast.xml.example` shows the required shape.
+1. Set `DEVELOPMENT_TEAM` and the Developer ID signing identity.
+2. Archive and export the app, then run `Scripts/notarize_dmg.sh` with the environment variables documented in that script.
+3. Publish an EdDSA-signed Sparkle appcast. `Updates/appcast.xml.example` shows the required shape.
 
 Sparkle checks `https://github.com/FlowPeek/flowpeek/releases/latest/download/appcast.xml` once a day. GitHub redirects that path to the newest release, and the release workflow re-uploads the appcast on every tag, so no separate hosting is involved. Updates are EdDSA-signed with the key whose public half is in `Config/Info.plist`; the private half lives only in the `SPARKLE_PRIVATE_KEY` secret and the author's keychain.
 

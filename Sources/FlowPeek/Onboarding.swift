@@ -25,8 +25,11 @@ final class OnboardingCoordinator {
     func show(entry: OnboardingEntry = .setup) {
         if let window, openEntry == entry { window.makeKeyAndOrderFront(nil); return }
         // The step is @State inside the view, so there is no way to push a new destination into a
-        // window that is already up; it is rebuilt instead.
-        if window != nil { closeWindow() }
+        // window that is already up; it is rebuilt instead. Not as a dismissal, though: settling
+        // `onboardingComplete` here would let a click on the tutorial menu item, made from the
+        // welcome card of a first run that inherited an existing grant, finish setup on the user's
+        // behalf and throw away the login question they were two clicks from being asked.
+        if window != nil { closeWindow(recordingProgress: false) }
         let view = OnboardingView(
             entry: entry,
             completion: { [weak self] in
@@ -106,8 +109,8 @@ final class OnboardingCoordinator {
         window.setFrameOrigin(origin)
     }
 
-    private func closeWindow() {
-        Self.recordProgress()
+    private func closeWindow(recordingProgress: Bool = true) {
+        if recordingProgress { Self.recordProgress() }
         // The checklist is what made a refused selection worth a second look; with it gone, the
         // rejected branch of `receive` -- which every ordinary selection in every app takes -- has
         // nothing left to ask.
@@ -353,6 +356,15 @@ struct OnboardingView: View {
     /// refuses to read its own process, so a drag in here could never produce an overlay button.
     private var tutorialCard: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Said once, above the rows, when it is in the way of all of them: the pause is the only
+            // switch that can be, and repeated under each row it was three copies of one sentence
+            // with nothing left explaining what the three rows are for.
+            if let shared = sharedBlocker {
+                Label(shared.reason, systemImage: "slash.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ForEach(availableLessons) { lesson in
                 let state = app.tutorial[lesson]
                 let blocker = lesson.blocker(app.tutorialSwitches)
@@ -378,9 +390,10 @@ struct OnboardingView: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         // On the tick's own terms: a finished lesson keeps its checkmark, so it
-                        // must not also carry a line saying nothing is watching for it.
-                        if blocked, let reason = blocker?.reasonKey {
-                            Text(String(localized: reason))
+                        // must not also carry a line saying nothing is watching for it. Nor does a
+                        // row repeat the sentence already standing above the whole list.
+                        if blocked, let blocker, blocker != sharedBlocker {
+                            Text(blocker.reason)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -454,8 +467,12 @@ struct OnboardingView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22)))
         .animation(.snappy, value: app.tutorial)
-        .task(id: app.tutorialPracticeOpen) {
-            guard app.tutorialPracticeOpen else { return }
+        .task(id: app.tutorialPractice) {
+            // Cleared first, because this runs again whenever the clock is put back to zero -- the
+            // page opened a second time, or the checklist started over. A prompt left from the
+            // previous run would otherwise sit next to a row that has just become live again.
+            nudge = false
+            guard app.tutorialPractice.isOpen else { return }
             // Long enough that somebody working through the page in order finishes before it
             // appears, short enough to catch somebody sitting in front of a page where nothing
             // happened and no longer sure whether to try again.
@@ -675,6 +692,11 @@ struct OnboardingView: View {
 
     private var availableLessons: [TutorialProgress.Lesson] {
         TutorialProgress.Lesson.available(accessibilityGranted: app.accessibilityGranted)
+    }
+
+    /// The switch, if any, that is in the way of every row on offer.
+    private var sharedBlocker: TutorialProgress.Blocker? {
+        TutorialProgress.sharedBlocker(among: availableLessons, switches: app.tutorialSwitches)
     }
 
     private var allLessonsAvailable: Bool {

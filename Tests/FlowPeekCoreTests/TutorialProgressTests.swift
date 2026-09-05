@@ -298,35 +298,150 @@ final class TutorialProgressTests: XCTestCase {
         XCTAssertTrue(reasons.isDisjoint(with: details))
     }
 
-    /// The checklist can throw exactly one of the three switches itself; the other two live
-    /// somewhere else and the sentence has to say where rather than offer a button that is not there.
+    /// The checklist can throw exactly one of the three switches itself, and that is the one row
+    /// whose sentence names no control: the button is directly underneath it. The other two live
+    /// somewhere else, so both of their sentences have to say where.
     func testOnlyTheExperimentSwitchIsTheOneTheChecklistCanThrow() {
         for blocker in TutorialProgress.Blocker.allCases {
-            XCTAssertEqual(blocker.namesEnableButton, blocker == .ambientPeekOff, blocker.rawValue)
+            XCTAssertEqual(
+                blocker.reasonControlKey == nil,
+                blocker == .ambientPeekOff,
+                blocker.rawValue
+            )
+        }
+        XCTAssertEqual(
+            Self.key(TutorialProgress.Blocker.ambientPeekOff.detailControlKey),
+            Self.key(TutorialProgress.Blocker.enableButtonTitleKey)
+        )
+    }
+
+    /// Every sentence that sends the user to a control is given that control's own catalogue row
+    /// rather than a copy of its words. Spelled out, the tutorial goes on naming a control for as
+    /// long after it is reworded as it takes somebody to notice — and nothing in the app can notice
+    /// for them. The pause is the one that made this worth widening: the row it names is
+    /// "Detection Paused", and both of its sentences used to describe it by position instead.
+    func testEverySentenceNamingAControlIsGivenItsLabelInBothCatalogs() throws {
+        var pairs: [(sentence: String, control: String)] = []
+        for blocker in TutorialProgress.Blocker.allCases {
+            pairs.append((Self.key(blocker.detailKey), Self.key(blocker.detailControlKey)))
+            if let control = blocker.reasonControlKey {
+                pairs.append((Self.key(blocker.reasonKey), Self.key(control)))
+            }
+        }
+        XCTAssertEqual(pairs.count, TutorialProgress.Blocker.allCases.count * 2 - 1)
+        for language in ["en", "ko"] {
+            let rows = try String(contentsOf: Self.catalog(language), encoding: .utf8)
+                .components(separatedBy: "\n")
+            for pair in pairs {
+                let line = try XCTUnwrap(
+                    rows.first { $0.hasPrefix("\"\(pair.sentence)\" = ") },
+                    "\(language).lproj is missing \(pair.sentence)"
+                )
+                XCTAssertTrue(
+                    line.contains("%@"),
+                    "\(language).lproj: \(pair.sentence) has to be given \(pair.control)"
+                )
+                let row = try XCTUnwrap(
+                    rows.first { $0.hasPrefix("\"\(pair.control)\" = ") },
+                    "\(language).lproj is missing \(pair.control)"
+                )
+                let title = try XCTUnwrap(row.components(separatedBy: "\"").dropLast().last)
+                XCTAssertFalse(
+                    line.contains(title),
+                    "\(language).lproj: \(pair.sentence) spells \(pair.control) out"
+                )
+            }
         }
     }
 
-    /// The one sentence that names that button takes it as an argument. Written out in the
-    /// catalogue, the page starts naming a control that no longer exists the moment the button is
-    /// reworded — and nothing in the app would notice.
-    func testTheSentenceNamingTheEnableButtonIsGivenItsLabelInBothCatalogs() throws {
-        let key = Self.key(TutorialProgress.Blocker.ambientPeekOff.detailKey)
-        let label = Self.key(TutorialProgress.Blocker.enableButtonTitleKey)
-        for language in ["en", "ko"] {
-            let contents = try String(contentsOf: Self.catalog(language), encoding: .utf8)
-            let line = try XCTUnwrap(
-                contents.components(separatedBy: "\n").first { $0.hasPrefix("\"\(key)\" = ") },
-                "\(language).lproj is missing \(key)"
+    // MARK: - One switch in the way of everything
+
+    /// The pause stops all three routes, and printing it per lesson turned the checklist into three
+    /// copies of one sentence and the practice page into a numbered list with no instructions left
+    /// in it. Said once, above them, they can keep saying what the gestures are.
+    func testThePauseIsTheOneBlockerReportedForTheWholeList() {
+        let lessons = TutorialProgress.Lesson.allCases
+        XCTAssertEqual(
+            TutorialProgress.sharedBlocker(
+                among: lessons,
+                switches: TutorialProgress.Switches(detectionEnabled: false)
+            ),
+            .detectionPaused
+        )
+        XCTAssertNil(
+            TutorialProgress.sharedBlocker(among: lessons, switches: TutorialProgress.Switches())
+        )
+    }
+
+    /// A switch that gates one route is that row's business alone: hoisting it would leave the other
+    /// two rows reading as blocked by something that has nothing to do with them.
+    func testASwitchThatGatesOneRouteIsNotHoistedOutOfItsRow() {
+        for switches in [
+            TutorialProgress.Switches(clipboardWatchEnabled: false),
+            TutorialProgress.Switches(ambientPeekEnabled: false),
+            TutorialProgress.Switches(clipboardWatchEnabled: false, ambientPeekEnabled: false),
+        ] {
+            XCTAssertNil(
+                TutorialProgress.sharedBlocker(among: TutorialProgress.Lesson.allCases, switches: switches)
             )
-            XCTAssertTrue(line.contains("%@"), "\(language).lproj: \(key) has to be given the button's label")
-            let button = try XCTUnwrap(
-                contents.components(separatedBy: "\n").first { $0.hasPrefix("\"\(label)\" = ") }
-            )
-            let words = button.components(separatedBy: "\"")
-            let title = try XCTUnwrap(words.dropLast().last)
-            XCTAssertFalse(line.contains(title), "\(language).lproj: \(key) spells the button's label out")
         }
     }
+
+    /// Without the grant the clipboard row is the whole list, so its own switch is in the way of
+    /// everything on offer — and a list of one has no room for a sentence said twice either.
+    func testTheOnlyLessonOnOfferCarriesItsSwitchForTheWholeList() {
+        let lessons = TutorialProgress.Lesson.available(accessibilityGranted: false)
+        XCTAssertEqual(
+            TutorialProgress.sharedBlocker(
+                among: lessons,
+                switches: TutorialProgress.Switches(clipboardWatchEnabled: false)
+            ),
+            .clipboardWatchOff
+        )
+        XCTAssertNil(TutorialProgress.sharedBlocker(among: [], switches: TutorialProgress.Switches()))
+    }
+
+    // MARK: - What restarts the nudge clock
+
+    /// The checklist keys its 45 seconds on this, so opening the page again has to move it: the
+    /// second opening is the checklist's own doing — turning the pointing experiment on rewrites the
+    /// page — and the row that has just become live must not wait behind the first run's clock.
+    func testOpeningThePracticePageAgainRestartsTheClock() {
+        var session = TutorialPracticeSession()
+        XCTAssertFalse(session.isOpen)
+        session.opened()
+        let first = session
+        XCTAssertTrue(session.isOpen)
+        session.opened()
+        XCTAssertNotEqual(session, first)
+        XCTAssertTrue(session.isOpen)
+    }
+
+    /// "Start Over" closes neither the checklist nor the browser tab, so the page stays open — and
+    /// every row is waiting again, which is the state the nudge exists for.
+    func testStartingOverRestartsTheClockWithoutClosingThePage() {
+        var session = TutorialPracticeSession()
+        session.opened()
+        let opened = session
+        session.restarted()
+        XCTAssertNotEqual(session, opened)
+        XCTAssertTrue(session.isOpen)
+    }
+
+    /// Nothing to restart when the page is not up: a checklist started over with no page in the
+    /// browser has no gesture to wait for and must not arm a prompt about one.
+    func testStartingOverWithNoPageOpenArmsNothing() {
+        var session = TutorialPracticeSession()
+        session.restarted()
+        XCTAssertEqual(session, TutorialPracticeSession())
+        session.opened()
+        session.closed()
+        let closed = session
+        session.restarted()
+        XCTAssertEqual(session, closed)
+        XCTAssertFalse(session.isOpen)
+    }
+
 
     private static let everySwitchCombination: [TutorialProgress.Switches] = [false, true].flatMap { paused in
         [false, true].flatMap { clipboard in
@@ -445,6 +560,30 @@ final class TutorialProgressTests: XCTestCase {
         progress.noteMissed(.selection)
         XCTAssertEqual(progress[.selection], .missed)
         XCTAssertFalse(progress.shouldNoteMissedSelection(text: dragged, practicePageOpen: true))
+    }
+
+    /// A drag that overshoots the block takes the page's own prose with it, and on a page whose
+    /// whole body is one diagram and that prose, Command-A is the most ordinary way to select the
+    /// block at all. Both are the practice page; answering "not the practice page" leaves the row
+    /// that produced them sitting at "not tried yet" with nothing said about why.
+    func testAWholePageSelectionIsStillRecognisedAsThePracticePage() {
+        let page = """
+        FlowPeek practice
+        This is a real page in your own browser, so every gesture below behaves exactly as it will \
+        from now on.
+        \(TutorialSample.text)
+        Click the block once — or focus it and press Return — to select all of it. If you drag \
+        instead, start from its first line: a selection that starts lower down has lost the line \
+        FlowPeek reads first.
+        1. Drag across the diagram below. A small button appears beside it — click that.
+        2. Select the diagram and press Command-C. A badge appears near the menu bar; click it or \
+        press its shortcut.
+        3. Hold Option and move the pointer over the diagram. It gets outlined; press ⌥Space while \
+        still holding.
+        Each one opens the same preview. Close it with Escape.
+        """
+        XCTAssertGreaterThan(page.utf16.count, TutorialSample.text.utf16.count * 4)
+        XCTAssertTrue(TutorialSample.appearsIn(page))
     }
 
     /// `String.LocalizationValue` keeps its key private and interpolating one yields the whole

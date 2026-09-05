@@ -44,6 +44,18 @@ public enum MenuBarStatus: Sendable, Equatable, CaseIterable {
         return .armed
     }
 
+    /// What the icon is entitled to say about the engine while a fresh canary is in flight.
+    ///
+    /// `latest` is absent for the length of a re-check: the verdict being re-taken must not be
+    /// displayed as the current one. That gap is not evidence of a cure, and reading it as one is
+    /// what turned the broken-engine octagon into "Ready — watching for diagrams" for the whole
+    /// duration of a check the user asked for *because* the engine had just failed. Before the very
+    /// first canary there is no measurement at all and `lastMeasured` is true there: an icon that
+    /// warns before it has evidence is one people learn to stop reading.
+    public static func engineUsable(latest: Bool?, lastMeasured: Bool) -> Bool {
+        latest ?? lastMeasured
+    }
+
     /// The SF Symbol the status item draws. One glyph per state, so the icon can be read at a
     /// glance; `pause.circle`, `eye.slash`, `exclamationmark.triangle.fill` and
     /// `exclamationmark.octagon.fill` have all shipped since macOS 11, and there is no `.slash`

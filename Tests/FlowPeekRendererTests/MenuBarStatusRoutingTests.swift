@@ -52,6 +52,27 @@ final class MenuBarStatusRoutingTests: XCTestCase {
         }
     }
 
+    /// What the menu's switch now calls, and all it calls. The rows of a `.menu`-style MenuBarExtra
+    /// are NSMenu items, so the view modifier that used to carry the second half of the click runs
+    /// only while SwiftUI re-renders the row: everything the pause has to do lives on one call the
+    /// setter makes itself.
+    func testThePauseSwitchStopsTheWatchAndMovesTheIconInOneCall() throws {
+        try watching {
+            let app = AppState.shared
+            XCTAssertTrue(app.clipboard.isRunning)
+
+            app.setDetectionEnabled(false)
+
+            XCTAssertEqual(app.menuBarStatus, .paused)
+            XCTAssertFalse(app.clipboard.isRunning, "a paused app was still polling the pasteboard")
+
+            app.setDetectionEnabled(true)
+
+            XCTAssertEqual(app.menuBarStatus, .armed)
+            XCTAssertTrue(app.clipboard.isRunning)
+        }
+    }
+
     /// Switching the last live route off is the case the "Ready" line used to survive: with no grant
     /// the selection button and the Option-hover outline are both impossible, so the clipboard watch
     /// is all that is left, and off it leaves nothing at all being watched.

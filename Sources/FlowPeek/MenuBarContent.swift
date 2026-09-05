@@ -46,8 +46,7 @@ struct MenuBarContent: View {
         // The only mouse-reachable door to the clipboard route once the badge has faded, and the
         // one place the chord is legible without opening Settings.
         Button(clipboardTitle) { app.previewCopied() }
-        Toggle(String(localized: app.isEnabled ? "menu.detection.on" : "menu.detection.paused"), isOn: $app.isEnabled)
-            .onChange(of: app.isEnabled) { _, _ in app.applyEnabledState() }
+        Toggle(String(localized: app.isEnabled ? "menu.detection.on" : "menu.detection.paused"), isOn: detection)
         Divider()
         // Only while there is one to go back to. A promoted preview is borderless, so it has no
         // Dock icon and no entry in the Window menu: once another app covered it there was nothing
@@ -75,6 +74,15 @@ struct MenuBarContent: View {
         Divider()
         Button("menu.quit") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
+    }
+
+    /// The pause switch. A binding whose setter does the work, rather than `$app.isEnabled` with an
+    /// `onChange` beside it: in a `.menu`-style `MenuBarExtra` these rows are NSMenu items, and the
+    /// modifier that would notice the change only runs while SwiftUI is re-rendering the row — so
+    /// starting and stopping the monitors, releasing the hot keys and redrawing the icon all hung on
+    /// a callback the menu is under no obligation to deliver. The click itself is the setter.
+    private var detection: Binding<Bool> {
+        Binding(get: { app.isEnabled }, set: { app.setDetectionEnabled($0) })
     }
 
     /// One line, in the icon's own precedence, so the menu and the glyph can never disagree.

@@ -9,19 +9,24 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
     /// because the alternative is spelling out the modifier chain SwiftUI infers for the root view.
     private var controller: NSHostingController<AnyView>?
 
-    /// `section` is what the caller wants looked at, not a preference: the menu bar's shortcut row
-    /// asks for the Shortcuts pane, and an already-open window is re-rooted there rather than left
-    /// on whatever the user was last reading.
-    func show(section: SettingsView.SettingsSection = .general) {
+    /// `section` is what the caller wants looked at: the menu bar's shortcut row asks for the
+    /// Shortcuts pane and has to get it on an already-open window too. `nil` is the plain "open
+    /// Settings" of the menu and the command router, which has no pane in mind and must not drag a
+    /// window the user is reading back to General.
+    func show(section: SettingsView.SettingsSection? = nil) {
         if let window {
-            controller?.rootView = rootView(section: section)
+            // Only for a caller that named one. Re-rooting is not by itself enough to move the
+            // pane — `SettingsView` seeds its selection into `@State`, and SwiftUI keeps the state
+            // it already has for a root view of the same identity, so the seed is discarded — which
+            // is why `rootView` tags the view with the section it was built for.
+            if let section { controller?.rootView = rootView(section: section) }
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
             return
         }
 
-        let controller = NSHostingController(rootView: rootView(section: section))
+        let controller = NSHostingController(rootView: rootView(section: section ?? .general))
         self.controller = controller
         let window = SettingsWindow(contentViewController: controller)
         window.title = String(localized: "settings.window.title")
@@ -51,6 +56,9 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
         AnyView(
             SettingsView(section: section, close: { [weak self] in self?.closeWindow() })
                 .environmentObject(AppState.shared)
+                // The identity that makes a re-root count as a different view, so the pane the
+                // caller asked for is the one that appears.
+                .id(section)
         )
     }
 

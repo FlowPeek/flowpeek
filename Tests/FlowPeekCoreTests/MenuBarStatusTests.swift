@@ -78,6 +78,22 @@ final class MenuBarStatusTests: XCTestCase {
         XCTAssertEqual(status(granted: false, isEnabled: false), .permissionMissing)
     }
 
+    /// The re-check the menu offers clears the verdict while the new canary runs, and reading that
+    /// gap as a working engine drew "Ready — watching for diagrams" over an engine that had just
+    /// failed — for as long as the check took, on the one surface the user was consulting about it.
+    func testAVerdictBeingTakenAgainIsNotReadAsACure() {
+        XCTAssertFalse(MenuBarStatus.engineUsable(latest: nil, lastMeasured: false))
+        XCTAssertEqual(
+            status(engineUsable: MenuBarStatus.engineUsable(latest: nil, lastMeasured: false)),
+            .engineBroken
+        )
+        // A canary that comes back healthy is what ends it, and a first launch has nothing to
+        // warn about yet.
+        XCTAssertTrue(MenuBarStatus.engineUsable(latest: true, lastMeasured: false))
+        XCTAssertTrue(MenuBarStatus.engineUsable(latest: nil, lastMeasured: true))
+        XCTAssertFalse(MenuBarStatus.engineUsable(latest: false, lastMeasured: true))
+    }
+
     /// The icon is one glyph wide, so two states sharing a symbol are indistinguishable to the only
     /// person who reads it.
     func testEveryStateDrawsItsOwnGlyph() {

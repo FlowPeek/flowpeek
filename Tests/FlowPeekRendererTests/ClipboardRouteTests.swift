@@ -29,13 +29,22 @@ final class ClipboardRouteTests: XCTestCase {
     /// the running app rather than to the case. Written as a wrapper rather than as `setUp`, which
     /// XCTest declares outside the main actor.
     private func owningTheClipboard(_ body: () throws -> Void) rethrows {
-        let restored = NSPasteboard.general.string(forType: .string)
+        let general = NSPasteboard.general
+        // Every flavour, not the string alone: this is the machine's own pasteboard, and a case that
+        // put back only `.string` would leave someone who had copied an image or styled text with a
+        // plain-text ghost of it. The empty case matters just as much — restoring nothing used to
+        // leave a case's own 200k-line flowchart sitting on the user's clipboard.
+        let restored: [NSPasteboardItem] = (general.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) { copy.setData(data, forType: type) }
+            }
+            return copy
+        }
         defer {
             AppState.shared.previews.closeQuick()
-            if let restored {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(restored, forType: .string)
-            }
+            general.clearContents()
+            if !restored.isEmpty { general.writeObjects(restored) }
             AppState.shared.applyEnabledState()
         }
         try body()

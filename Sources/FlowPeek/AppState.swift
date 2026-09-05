@@ -118,6 +118,13 @@ final class AppState: ObservableObject {
     private var ambientCandidate: AmbientCandidate?
 
     private init() {
+        // The status item is drawn from `menuBarStatus` the moment the scene is built, which is
+        // before `start()` has armed anything — and in the demo modes, which return before any
+        // monitor is started, it is the only value it ever draws. Seeded here from the stored
+        // switches and the real grant so a paused or unpermitted app does not open with the icon
+        // claiming to be watching for diagrams; the literal it used to hold was a claim nothing
+        // had checked.
+        refreshMenuBarStatus()
         // Wired here rather than in `start()`: a preview can be promoted from the demo arguments and
         // from the AI window, neither of which goes through the monitors that `start()` arms.
         previews.onPromotedChange = { [weak self] hasWindow in self?.hasPromotedPreview = hasWindow }
@@ -265,6 +272,15 @@ final class AppState: ObservableObject {
         forgetSelection()
     }
 
+    /// The pause switch, as one call. Assigning `isEnabled` on its own moves a stored value and
+    /// nothing else: the monitors keep polling, the hot keys stay claimed from every other app and
+    /// the icon goes on drawing the state before the click, so the two have to travel together.
+    func setDetectionEnabled(_ enabled: Bool) {
+        guard enabled != isEnabled else { return }
+        isEnabled = enabled
+        applyEnabledState()
+    }
+
     func applyEnabledState() {
         if isEnabled && accessibilityGranted {
             selectionMonitor.start()
@@ -310,9 +326,20 @@ final class AppState: ObservableObject {
         updateAccessibilityState(AXIsProcessTrusted())
     }
 
+    /// The last answer the canary actually gave. `engineHealth` is cleared for the length of a
+    /// re-check so the menu cannot show a verdict that is being re-taken, and reading that gap as a
+    /// working engine turned the octagon back into "Ready — watching for diagrams" for the whole
+    /// check — on an engine the user is re-checking precisely because it had just failed. Starts
+    /// true: before the first canary there is no evidence of a fault, and an icon that opens with a
+    /// warning it has not earned is one people learn to ignore.
+    private var engineUsableAsLastMeasured = true
+
     private func refreshMenuBarStatus() {
         let resolved = MenuBarStatus.resolve(
-            engineUsable: engineHealth?.isUsable ?? true,
+            engineUsable: MenuBarStatus.engineUsable(
+                latest: engineHealth?.isUsable,
+                lastMeasured: engineUsableAsLastMeasured
+            ),
             accessibilityGranted: accessibilityGranted,
             permissionDeclined: permissionDeclined,
             isEnabled: isEnabled,
@@ -734,6 +761,7 @@ final class AppState: ObservableObject {
         Task { [weak self] in
             let health = await pool.runSelfTest(theme: MermaidThemeFactory.current())
             self?.engineHealth = health
+            self?.engineUsableAsLastMeasured = health.isUsable
             self?.isCheckingEngine = false
             self?.refreshMenuBarStatus()
         }

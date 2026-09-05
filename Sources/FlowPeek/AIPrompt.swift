@@ -135,7 +135,9 @@ final class AIPromptModel: ObservableObject {
             return
         }
         let payload = session.beginSending(instruction: asked)
-        instruction = ""
+        // Only when the composer is what was sent. A retry replays an earlier turn, and clearing
+        // here threw away a repair the reader had asked for and not yet read.
+        if asked == instruction.trimmingCharacters(in: .whitespacesAndNewlines) { instruction = "" }
         let kind = provider
         request?.cancel()
         request = Task { [weak self] in
@@ -163,10 +165,11 @@ final class AIPromptModel: ObservableObject {
     }
 
     /// The reader asking for the same thing again after a failure. Their own words, sent again as a
-    /// visible turn rather than replayed silently.
-    func retry() {
-        guard let last = session.turns.reversed().compactMap(\.instruction).first else { return }
-        send(last)
+    /// visible turn rather than replayed silently -- and the words that earned *this* failure, which
+    /// is not the same as the last thing typed once a second exchange has happened since.
+    func retry(after failure: AITurn.ID) {
+        guard let instruction = session.instruction(before: failure) else { return }
+        send(instruction)
     }
 
     private func receive(_ error: any Error) {
@@ -589,10 +592,10 @@ struct AIPromptView: View {
         switch turn.content {
         case .instruction(let text):
             instructionCard(text)
-        case .answer(let draft):
+        case .answer(let draft, _):
             answerCard(turn: turn, draft: draft)
         case .failure(let presentation):
-            failureCard(presentation)
+            failureCard(presentation, on: turn)
         }
     }
 
@@ -654,7 +657,7 @@ struct AIPromptView: View {
 
     /// The two tiers `DiagramFailureView` established: what happened and the one thing to do about
     /// it, with the machine's own words folded away.
-    private func failureCard(_ presentation: AIFailurePresentation) -> some View {
+    private func failureCard(_ presentation: AIFailurePresentation, on turn: AITurn) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -677,7 +680,7 @@ struct AIPromptView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let title = presentation.remedy.titleKey {
-                Button(LocalizedStringKey(title)) { perform(presentation) }
+                Button(LocalizedStringKey(title)) { perform(presentation, on: turn) }
                     .controlSize(.small)
             }
             if let details = presentation.details {
@@ -699,10 +702,13 @@ struct AIPromptView: View {
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(Color.orange.opacity(0.28)))
     }
 
-    private func perform(_ presentation: AIFailurePresentation) {
+    private func perform(_ presentation: AIFailurePresentation, on turn: AITurn) {
         switch presentation.remedy {
         case .addKey: APIKeyCoordinator.shared.show()
-        case .retry: model.retry()
+        // The instruction this failure answered, not whichever was typed last: a card that says
+        // "ask again" has one thing it can mean, and asking again for something else -- while
+        // silently emptying a composer the reader was still reading -- is not it.
+        case .retry: model.retry(after: turn.id)
         // The newest answer: this failure is the one raised by an answer that never drew.
         case .repairDiagram: composeRepair(reason: presentation.hint ?? "", mermaid: model.session.latestDraft?.mermaid)
         case .none: break
@@ -724,7 +730,13 @@ struct AIPromptView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 9) {
-            if case .failed(let presentation) = preview.status { renderRepairRow(presentation) }
+            // Only where rewriting the diagram is what would help. A dead WebContent process, a
+            // timeout or a missing engine are all failures of the drawing rather than of the
+            // drawing's text, and offering to spend a request rewriting a correct diagram is worse
+            // than saying nothing.
+            if case .failed(let presentation) = preview.status, presentation.recovery == .fixSource {
+                renderRepairRow(presentation)
+            }
             TextField("ai.prompt.placeholder", text: $model.instruction, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.callout)

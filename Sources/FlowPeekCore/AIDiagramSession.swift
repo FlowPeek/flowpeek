@@ -9,7 +9,10 @@ import Foundation
 public struct AITurn: Identifiable, Equatable, Sendable {
     public enum Content: Equatable, Sendable {
         case instruction(String)
-        case answer(AIDiagramDraft)
+        /// `drawable` is false for an answer the engine refused. It is kept so it can be read,
+        /// copied and repaired, and it carries that fact with it: whether an answer can go on the
+        /// stage is a property of the answer, not of the moment it arrived.
+        case answer(AIDiagramDraft, drawable: Bool)
         case failure(AIFailurePresentation)
     }
 
@@ -22,7 +25,13 @@ public struct AITurn: Identifiable, Equatable, Sendable {
     }
 
     public var draft: AIDiagramDraft? {
-        guard case .answer(let draft) = content else { return nil }
+        guard case .answer(let draft, _) = content else { return nil }
+        return draft
+    }
+
+    /// The draft only if it drew. What the stage, and everything that copies from it, may use.
+    public var drawnDraft: AIDiagramDraft? {
+        guard case .answer(let draft, let drawable) = content, drawable else { return nil }
         return draft
     }
 
@@ -81,11 +90,12 @@ public struct AIDiagramSession: Equatable, Sendable {
         turns.reversed().compactMap(\.draft).first
     }
 
-    /// The diagram text a copy would put on the clipboard. Deliberately not the same question as
-    /// whether an image can be exported: an answer that never drew has no picture and still has
-    /// text worth keeping.
+    /// The diagram text a copy would put on the clipboard: the one on the stage, and nothing else.
+    /// Reading the newest answer instead let two rows of the same menu hand out two different
+    /// diagrams -- Copy Image gave what was on screen while Copy Text gave a later answer the
+    /// reader had never seen, and in the worst case one that would not parse.
     public var copyableMermaid: String? {
-        guard let text = latestDraft?.mermaid,
+        guard let text = shownDraft?.mermaid,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return text
     }
@@ -122,7 +132,7 @@ public struct AIDiagramSession: Equatable, Sendable {
     /// failed validation is remembered so it can be read, copied and repaired, but it must not take
     /// the stage away from the last diagram that did draw.
     public mutating func receive(_ draft: AIDiagramDraft, drawable: Bool = true) {
-        let turn = AITurn(content: .answer(draft))
+        let turn = AITurn(content: .answer(draft, drawable: drawable))
         turns.append(turn)
         if drawable { shownTurn = turn.id }
         isSending = false
@@ -136,8 +146,15 @@ public struct AIDiagramSession: Equatable, Sendable {
     /// The reader picking an earlier answer out of the conversation. Anything that is not a drawable
     /// answer is ignored: an instruction and a failure have no diagram to put on the stage.
     public mutating func show(_ id: AITurn.ID) {
-        guard turns.first(where: { $0.id == id })?.draft != nil else { return }
+        guard turns.first(where: { $0.id == id })?.drawnDraft != nil else { return }
         shownTurn = id
+    }
+
+    /// The instruction a given turn was the outcome of: the nearest one before it, since every
+    /// exchange is an instruction followed by exactly one answer or failure.
+    public func instruction(before id: AITurn.ID) -> String? {
+        guard let index = turns.firstIndex(where: { $0.id == id }) else { return nil }
+        return turns[..<index].reversed().compactMap(\.instruction).first
     }
 
     // MARK: - What the provider is told
@@ -156,7 +173,7 @@ public struct AIDiagramSession: Equatable, Sendable {
                 // Held rather than emitted: an instruction is only history once something answered
                 // it. One that failed, and the one being sent right now, are both still waiting.
                 asked = text
-            case .answer(let draft):
+            case .answer(let draft, _):
                 if let asked { messages.append(AIMessage(role: .user, text: asked)) }
                 messages.append(AIMessage(role: .assistant, text: draft.notes))
                 asked = nil

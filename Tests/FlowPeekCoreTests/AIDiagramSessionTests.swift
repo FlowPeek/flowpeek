@@ -81,7 +81,9 @@ final class AIDiagramSessionTests: XCTestCase {
     }
 
     /// An answer the engine was never given must not take the stage away from the diagram that is
-    /// on it, but it is still the newest thing said and still has text worth keeping.
+    /// on it, but it is still the newest thing said and is still kept so it can be read and
+    /// repaired. What the chrome copies is the diagram on the stage, which is the one the reader is
+    /// looking at -- offering the refused text there put two different diagrams in one menu.
     func testAnAnswerThatCannotBeDrawnIsRememberedWithoutTakingTheStage() {
         var subject = session()
         _ = subject.beginSending(instruction: "one")
@@ -90,8 +92,8 @@ final class AIDiagramSessionTests: XCTestCase {
         subject.receive(draft("prose", mermaid: "I am afraid I cannot draw that"), drawable: false)
 
         XCTAssertEqual(subject.shownDraft?.title, "first")
-        XCTAssertEqual(subject.latestDraft?.title, "prose")
-        XCTAssertEqual(subject.copyableMermaid, "I am afraid I cannot draw that")
+        XCTAssertEqual(subject.latestDraft?.title, "prose", "the refused answer is still kept")
+        XCTAssertEqual(subject.copyableMermaid, subject.shownDraft?.mermaid)
         XCTAssertEqual(subject.exportableDraft?.title, "first")
     }
 
@@ -227,5 +229,60 @@ final class AIDiagramSessionTests: XCTestCase {
         for remedy in AIFailurePresentation.Remedy.allCases where remedy != .none {
             XCTAssertNotNil(remedy.titleKey, "\(remedy) has no title")
         }
+    }
+
+    // MARK: - What the stage and the clipboard agree on
+
+    /// An answer the engine refused is remembered so it can be read and repaired, and it must stay
+    /// off the stage however it is reached. Putting it there left a blank window with no card and no
+    /// message, and no way back to the panes behind it.
+    func testAnAnswerThatNeverDrewCannotBePutOnTheStage() {
+        var session = AIDiagramSession(context: "", hasKey: true)
+        _ = session.beginSending(instruction: "one")
+        session.receive(AIDiagramDraft(title: "A", mermaid: "flowchart TD\n A --> B", notes: ""))
+        let drawn = session.turns.compactMap(\.drawnDraft).count
+        _ = session.beginSending(instruction: "two")
+        session.receive(AIDiagramDraft(title: "B", mermaid: "", notes: ""), drawable: false)
+
+        let refused = try? XCTUnwrap(session.turns.last?.id)
+        if let refused { session.show(refused) }
+        XCTAssertEqual(session.shownDraft?.title, "A", "an answer that never drew took the stage")
+        XCTAssertEqual(drawn, 1)
+        XCTAssertNil(session.turns.last?.drawnDraft, "a refused answer must not offer itself as drawn")
+        XCTAssertNotNil(session.turns.last?.draft, "and must still be readable")
+    }
+
+    /// Every row of one menu has to be about the same diagram. Copy Text read the newest answer
+    /// while the image rows read the stage, so pressing Show This One on an earlier answer made the
+    /// two disagree -- and a refused answer made Copy Text hand out source that would not parse.
+    func testTheClipboardFollowsTheStageRatherThanTheNewestAnswer() throws {
+        var session = AIDiagramSession(context: "", hasKey: true)
+        _ = session.beginSending(instruction: "one")
+        session.receive(AIDiagramDraft(title: "A", mermaid: "flowchart TD\n A --> B", notes: ""))
+        let first = try XCTUnwrap(session.turns.last?.id)
+        _ = session.beginSending(instruction: "two")
+        session.receive(AIDiagramDraft(title: "B", mermaid: "flowchart TD\n C --> D", notes: ""))
+
+        XCTAssertEqual(session.copyableMermaid, session.shownDraft?.mermaid)
+        session.show(first)
+        XCTAssertEqual(session.shownDraft?.title, "A")
+        XCTAssertEqual(session.copyableMermaid, session.shownDraft?.mermaid, "the menu offered two diagrams at once")
+        XCTAssertEqual(session.copyableMermaid, "flowchart TD\n A --> B")
+    }
+
+    /// "Ask again" means the instruction that earned this failure. Taking the last one typed sent
+    /// something else entirely once a second exchange had happened since.
+    func testAFailureAsksAgainForItsOwnInstruction() throws {
+        var session = AIDiagramSession(context: "", hasKey: true)
+        _ = session.beginSending(instruction: "first")
+        session.fail(AIFailurePresentation.make(.missingKey))
+        let firstFailure = try XCTUnwrap(session.turns.last?.id)
+        _ = session.beginSending(instruction: "second")
+        session.fail(AIFailurePresentation.make(.missingKey))
+        let secondFailure = try XCTUnwrap(session.turns.last?.id)
+
+        XCTAssertEqual(session.instruction(before: firstFailure), "first")
+        XCTAssertEqual(session.instruction(before: secondFailure), "second")
+        XCTAssertNil(session.instruction(before: AITurn.ID()))
     }
 }

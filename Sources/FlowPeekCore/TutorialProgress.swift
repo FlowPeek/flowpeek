@@ -148,18 +148,55 @@ public struct TutorialProgress: Equatable, Sendable {
 
         /// The label of the button the checklist offers for the one switch it can throw itself.
         public static let enableButtonTitleKey: String.LocalizationValue = "tutorial.ambient.enable"
+        /// The Settings toggle that governs the clipboard watch, and the menu row that pauses every
+        /// route. Named from their own catalogue rows for the reason the button is: spelled out as
+        /// prose, the tutorial goes on naming a control for as long after it is reworded as it takes
+        /// somebody to notice, and nothing in the app can notice for them.
+        public static let clipboardToggleTitleKey: String.LocalizationValue = "settings.clipboard"
+        public static let detectionMenuItemTitleKey: String.LocalizationValue = "menu.detection.paused"
 
-        /// Whether the sentence has to be given that label. Written out in the catalogue instead,
-        /// the page starts naming a control that no longer exists the moment the button is reworded
-        /// — the same drift the peek chord's placeholder exists to prevent.
-        public var namesEnableButton: Bool { self == .ambientPeekOff }
-
-        /// The page's sentence, with the button's own label written into it where one is named.
-        public var detail: String {
-            let text = String(localized: detailKey)
-            guard namesEnableButton else { return text }
-            return String(format: text, String(localized: Self.enableButtonTitleKey))
+        /// The control the checklist row sends the user to. The pointing experiment names none: its
+        /// button is in the same row, directly under the sentence.
+        public var reasonControlKey: String.LocalizationValue? {
+            switch self {
+            case .detectionPaused: Self.detectionMenuItemTitleKey
+            case .clipboardWatchOff: Self.clipboardToggleTitleKey
+            case .ambientPeekOff: nil
+            }
         }
+
+        /// The control the practice page sends the user to. Always one, because the page carries no
+        /// switches at all.
+        public var detailControlKey: String.LocalizationValue {
+            switch self {
+            case .detectionPaused: Self.detectionMenuItemTitleKey
+            case .clipboardWatchOff: Self.clipboardToggleTitleKey
+            case .ambientPeekOff: Self.enableButtonTitleKey
+            }
+        }
+
+        /// The row's sentence, with the control's own label written into it where one is named.
+        public var reason: String {
+            let text = String(localized: reasonKey)
+            guard let control = reasonControlKey else { return text }
+            return String(format: text, String(localized: control))
+        }
+
+        /// The page's sentence, with the control's own label written into it.
+        public var detail: String {
+            String(format: String(localized: detailKey), String(localized: detailControlKey))
+        }
+    }
+
+    /// The one blocker in the way of every lesson on offer, if there is one.
+    ///
+    /// Only the pause can be, and it is the case both surfaces read worst: printed per lesson it
+    /// becomes three copies of one sentence, which on the practice page replaces the numbered
+    /// instructions entirely and leaves a page that no longer says what the three gestures are.
+    /// Said once, above them, the instructions can stay where they are and merely read as locked.
+    public static func sharedBlocker(among lessons: [Lesson], switches: Switches) -> Blocker? {
+        guard let first = lessons.first?.blocker(switches) else { return nil }
+        return lessons.dropFirst().allSatisfy { $0.blocker(switches) == first } ? first : nil
     }
 
     /// Raw-valued because these names are written to disk. Renaming a case renames a stored value,
@@ -287,6 +324,44 @@ extension TutorialProgress: Codable {
     }
 }
 
+/// Where the practice page stands with the checklist: whether it is in front of the user, and which
+/// visit it is.
+///
+/// The visit count is what the nudge timer is keyed on. Keyed on "is it open" alone the timer never
+/// restarts, because opening the page a second time moves nothing -- and it is opened a second time
+/// by the checklist itself, when turning the pointing experiment on makes the sentence already in
+/// the browser wrong. The row that just became live would then wait behind whatever is left of the
+/// first 45 seconds, next to a nudge from that run still sitting on screen. Starting the checklist
+/// over is the same event without the browser: every row is waiting again, so the clock has to be.
+public struct TutorialPracticeSession: Equatable, Sendable {
+    /// Whether a refused selection is worth a second look and a silent row is worth a nudge.
+    public private(set) var isOpen: Bool
+    /// Bumped by anything that has to put the nudge clock back to zero. Never decreases, so the
+    /// value itself is meaningless -- only that it changed.
+    public private(set) var visit: Int
+
+    public init(isOpen: Bool = false, visit: Int = 0) {
+        self.isOpen = isOpen
+        self.visit = visit
+    }
+
+    public mutating func opened() {
+        isOpen = true
+        visit += 1
+    }
+
+    public mutating func closed() {
+        isOpen = false
+    }
+
+    /// The clock back to zero without a new visit: the page is exactly where it was, and the reason
+    /// to restart is on this side of the screen.
+    public mutating func restarted() {
+        guard isOpen else { return }
+        visit += 1
+    }
+}
+
 /// The diagram the practice page shows, and the one question the tutorial has to ask of a selection
 /// FlowPeek rejected: was the user aiming at this?
 ///
@@ -301,12 +376,18 @@ public enum TutorialSample {
       B -- hold Option --> C
     """
 
-    /// The size beyond which the answer is no without looking. A drag across the practice block is
-    /// a fragment of a five-line diagram, at worst with a line of the page's own prose caught at
-    /// either end; a whole document is not that, and normalizing one to find out costs more than
-    /// the detection that has just rejected it — measured at 164 ms for a select-all at the
-    /// detector's own million-code-unit ceiling, against 40 ms for the detection itself.
-    public static let maximumMatchableCharacters = text.utf16.count * 4
+    /// The size beyond which the answer is no without looking. A whole document is not a fragment of
+    /// a five-line block, and normalizing one to find out costs more than the detection that has
+    /// just rejected it — measured at 164 ms for a select-all at the detector's own million-code-unit
+    /// ceiling, against 40 ms for the detection itself.
+    ///
+    /// Sized against the practice page rather than against the block: a drag that overshoots picks
+    /// up the hint paragraph and the numbered instructions with it, and Command-A on a page whose
+    /// body is one diagram and that prose is the most ordinary way to select the whole thing. At
+    /// four times the block — 568 units against roughly 900 of page — both were answered "not the
+    /// practice page" and the row they came from sat at "not tried yet". A few thousand units is
+    /// still nothing: this only runs while the checklist is up and the drag row is still waiting.
+    public static let maximumMatchableCharacters = 8_000
 
     /// Matched line by line against the body, because the case worth catching is the partial drag:
     /// a selection that starts mid-diagram has lost the `flowchart TD` line detection needs, so

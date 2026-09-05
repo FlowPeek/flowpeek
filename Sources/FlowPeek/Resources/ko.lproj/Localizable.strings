@@ -54,10 +54,10 @@
 "tutorial.nudge.ambient" = "아직 테두리가 생기지 않았습니다. Option을 누른 상태를 유지한 채 포인터를 블록 위로 옮기세요.";
 "tutorial.ambient.switched-off" = "이 기능은 실험 기능이라 꺼진 상태로 시작합니다. 그래서 아직 아무것도 감시하지 않습니다.";
 "tutorial.ambient.blocked" = "아직 켜지 않았습니다 — 화면 가장자리의 FlowPeek 창에서 “%@”를 누른 뒤 이 페이지를 다시 열어주세요.";
-"tutorial.paused.switched-off" = "감지가 일시 정지되어 있어서 세 가지 모두 아무것도 감시하지 않습니다. 스위치는 메뉴 막대 FlowPeek 메뉴의 첫 항목입니다.";
-"tutorial.paused.blocked" = "감지가 일시 정지되어 있어서 아직은 아무 일도 일어나지 않습니다 — 메뉴 막대 FlowPeek 메뉴의 첫 항목이 그 스위치입니다. 다시 켠 뒤 이 페이지를 다시 열어주세요.";
-"tutorial.clipboard.switched-off" = "클립보드 감시가 꺼져 있어서 복사해도 알아채지 못합니다. 설정의 일반 탭에서 ‘클립보드 감시’를 켜주세요.";
-"tutorial.clipboard.blocked" = "클립보드 감시가 꺼져 있습니다 — 설정의 일반 탭에서 ‘클립보드 감시’를 켠 뒤 이 페이지를 다시 열어주세요.";
+"tutorial.paused.switched-off" = "감지가 일시 정지되어 있어서 아무것도 감시하지 않습니다. 메뉴 막대 FlowPeek 메뉴의 “%@” 항목을 눌러 다시 켜주세요.";
+"tutorial.paused.blocked" = "감지가 일시 정지되어 있어서 아직은 아무 일도 일어나지 않습니다. 메뉴 막대 FlowPeek 메뉴의 “%@” 항목을 눌러 다시 켠 뒤 이 페이지를 다시 열어주세요.";
+"tutorial.clipboard.switched-off" = "복사를 지켜보는 기능이 꺼져 있어서 복사해도 알아채지 못합니다. 설정의 일반 탭에서 ‘%@’를 켜주세요.";
+"tutorial.clipboard.blocked" = "복사를 지켜보는 기능이 꺼져 있습니다 — 설정의 일반 탭에서 ‘%@’를 켠 뒤 이 페이지를 다시 열어주세요.";
 "onboarding.launch.title" = "언제든 준비되어 있도록";
 "onboarding.launch.message" = "FlowPeek은 메뉴 막대에 머무르며, 다이어그램을 선택하거나 복사하기 전까지는 아무 일도 하지 않습니다. 로그인할 때 함께 켜두면 늘 그 자리에 있습니다.";
 "onboarding.launch.toggle" = "로그인 시 자동 실행";

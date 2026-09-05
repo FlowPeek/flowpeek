@@ -77,10 +77,12 @@ final class AppState: ObservableObject {
         }
     }
     private static let tutorialProgressKey = "flowpeek.tutorial.progress"
-    /// Whether the tutorial's practice page is the thing the user is looking at. A selection
-    /// FlowPeek refused is only a missed lesson while that page is open; anywhere else it is the
-    /// user's own text, and this is what keeps `receive` from asking anything about it.
-    @Published private(set) var tutorialPracticeOpen = false
+    /// Whether the tutorial's practice page is the thing the user is looking at, and which visit it
+    /// is on. A selection FlowPeek refused is only a missed lesson while that page is open; anywhere
+    /// else it is the user's own text, and this is what keeps `receive` from asking anything about
+    /// it. The visit is what the checklist keys its nudge timer on.
+    @Published private(set) var tutorialPractice = TutorialPracticeSession()
+    var tutorialPracticeOpen: Bool { tutorialPractice.isOpen }
     /// The override written into this app's own defaults domain; applied on the next launch.
     @Published var language: AppLanguage = AppLanguage.storedOverride(
         bundleIdentifier: Bundle.main.bundleIdentifier
@@ -652,22 +654,23 @@ final class AppState: ObservableObject {
 
     func resetTutorial() {
         tutorial.reset()
-        // Deliberately leaves `tutorialPracticeOpen` alone. Starting the checklist over closes
-        // neither the checklist nor the browser tab, and clearing it here switched off the two
-        // things that make a fresh attempt legible -- the second look at a refused selection and
-        // the nudge on a row that has produced nothing -- until the page was opened again.
+        // The page stays open -- starting over closes neither the checklist nor the browser tab, and
+        // closing it here switched off the two things that make a fresh attempt legible, the second
+        // look at a refused selection and the nudge on a row that has produced nothing. The clock
+        // does go back to zero: every row is waiting again, which is the state the nudge is for.
+        tutorialPractice.restarted()
     }
 
     /// The practice page is open, so a rejected selection is worth a second look and a lesson that
     /// has produced nothing is worth a nudge. Neither is true before it.
     func notePracticePageOpened() {
-        tutorialPracticeOpen = true
+        tutorialPractice.opened()
     }
 
     /// The checklist has gone, so the lesson is over: a refused selection is the user's own text
     /// again and `receive` goes back to asking nothing at all about it.
     func notePracticePageClosed() {
-        tutorialPracticeOpen = false
+        tutorialPractice.closed()
     }
 
     /// The three switches the tutorial has to read to know whether a lesson can fire at all: the

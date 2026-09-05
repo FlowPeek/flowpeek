@@ -77,12 +77,19 @@ enum TutorialPractice {
         // them is switched off, and it is the sentence the reader trusts when nothing happens.
         let intro = String(localized: blockers.isEmpty ? "tutorial.page.intro" : "tutorial.page.intro.blocked")
         let hint = String(localized: "tutorial.page.hint")
+        // One switch in the way of everything is said once, above the list, and the instructions
+        // stay where they are: printed per step it replaced every instruction with the same
+        // sentence, and the page stopped saying what the gestures it is teaching even are.
+        let shared = TutorialProgress.sharedBlocker(among: lessons, switches: switches)
+        let notice = shared.map { "<p class=\"blocked\">\(escape($0.detail))</p>\n  " } ?? ""
         let steps = lessons
             .map { lesson in
-                if let blocker = blockers[lesson] {
+                if shared == nil, let blocker = blockers[lesson] {
                     return "<li class=\"locked\">\(escape(blocker.detail))</li>"
                 }
-                return "<li>\(escape(lesson.detail(peekShortcut: peekShortcut)))</li>"
+                let instruction = escape(lesson.detail(peekShortcut: peekShortcut))
+                guard blockers[lesson] != nil else { return "<li>\(instruction)</li>" }
+                return "<li class=\"locked\">\(instruction)</li>"
             }
             .joined(separator: "\n    ")
         let closing = String(localized: lessons.count > 1 ? "tutorial.page.closing" : "tutorial.page.closing.one")
@@ -116,6 +123,7 @@ enum TutorialPractice {
           pre:hover, pre:focus { outline: 2px solid color-mix(in srgb, currentColor 28%, transparent) }
           p.hint { font-size: 13px; color: color-mix(in srgb, currentColor 62%, transparent);
                    margin: 0 0 28px }
+          p.blocked { margin: 0 0 14px }
           ol { padding-left: 22px; margin: 0 0 28px }
           li { margin-bottom: 10px }
           li.locked { opacity: .55 }
@@ -128,7 +136,7 @@ enum TutorialPractice {
           <p class="intro">\(escape(intro))</p>
           \(sample)
           <p class="hint" id="practice-hint">\(escape(hint))</p>
-          <ol>
+          \(notice)<ol>
             \(steps)
           </ol>
           <p class="closing">\(escape(closing))</p>

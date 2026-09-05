@@ -236,9 +236,16 @@ final class ShortcutInactiveHintTests: XCTestCase {
     }
 
     /// Running but switched off: the row names that action's own switch, and each is a different one.
+    /// Spelled out here rather than read back off the action, so a hint that starts pointing at the
+    /// wrong switch is a failure rather than a restatement.
     func testARunningAppNamesTheActionsOwnSwitch() {
         for action in FlowPeekShortcutAction.allCases {
-            XCTAssertEqual(action.inactiveHintKey(detectionPaused: false), action.inactiveHintKey, "\(action)")
+            let expected: String.LocalizationValue = switch action {
+            case .previewClipboard: "shortcut.inactive.clipboard"
+            case .aiPrompt: "shortcut.inactive.ai"
+            case .ambientPeek: "shortcut.inactive.ambient"
+            }
+            XCTAssertEqual(action.inactiveHintKey(detectionPaused: false), expected, "\(action)")
         }
         XCTAssertEqual(
             Set(FlowPeekShortcutAction.allCases.map { String(describing: $0.inactiveHintKey(detectionPaused: false)) }).count,

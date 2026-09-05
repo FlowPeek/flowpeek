@@ -59,9 +59,11 @@ final class AppState: ObservableObject {
     /// True while the canary is running. The verdict is cleared for the duration, so the menu shows
     /// "checking" rather than a verdict that is being re-taken.
     @Published private(set) var isCheckingEngine = false
-    /// What the status item draws, and what the menu says in words. Recomputed rather than derived
-    /// in the view: `isEnabled` is `@AppStorage`, which publishes nothing from inside a class, so a
-    /// computed property would leave the icon showing the state before the toggle.
+    /// What the status item draws, and what the menu says in words. Stored and refreshed rather
+    /// than computed on demand: five switches and verdicts feed `MenuBarStatus.resolve`, most of
+    /// which move without touching each other, and only the resolved answer is worth publishing —
+    /// `refreshMenuBarStatus()` drops the assignment when it has not moved, which is what keeps the
+    /// permission poll from redrawing the icon on a timer.
     @Published private(set) var menuBarStatus: MenuBarStatus = .armed
     /// Which of the three routes the user has exercised. Drives the onboarding tutorial.
     ///

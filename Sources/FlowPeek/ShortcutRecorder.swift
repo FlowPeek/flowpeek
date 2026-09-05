@@ -167,9 +167,10 @@ private struct KeyCaptureView: NSViewRepresentable {
         /// The cancel this view is waiting to hand over, kept so a second resignation replaces it
         /// instead of stacking another waiter beside it.
         private var pendingCancel: (() -> Void)?
-        /// What the wait is listening to, and the floor under it.
+        /// What the wait is listening to, and whatever turn or timer it is currently sitting on:
+        /// the floor under the whole wait before the button comes up, the margin after it has.
         private var mouseUpMonitor: Any?
-        private var cancelDeadline: Task<Void, Never>?
+        private var handOverTimer: Task<Void, Never>?
 
         override var acceptsFirstResponder: Bool { true }
 
@@ -194,24 +195,22 @@ private struct KeyCaptureView: NSViewRepresentable {
                 // Nothing is held, so there is no mouse-up on its way to wait for: the keyboard, or
                 // the pane going away, took the responder. Still a turn late, to get off the
                 // `makeFirstResponder` this is standing inside.
-                Task { @MainActor [weak self] in self?.handOverCancel() }
+                handOverTimer = Task { @MainActor [weak self] in self?.handOverCancel() }
                 return true
             }
             // Watched rather than polled. The wait used to re-read `NSEvent.pressedMouseButtons`
             // every 16 ms for up to a second — sixty main-actor wakeups to learn something the event
-            // stream announces once, and up to a frame of shortcuts held down after the button was
-            // already back up. A local monitor sees the mouse-up before the window does, and the
-            // hop below still leaves the record field's own action to run first.
+            // stream announces once.
             mouseUpMonitor = NSEvent.addLocalMonitorForEvents(
                 matching: [.leftMouseUp, .rightMouseUp, .otherMouseUp]
             ) { [weak self] event in
-                Task { @MainActor in self?.handOverCancel() }
+                self?.startHandOverMargin()
                 return event
             }
             // The floor under it: a drag that ends over another application delivers its mouse-up
             // there, where a local monitor never sees it, and without this every FlowPeek shortcut
             // would stay suspended for the rest of the session. A second is well past any click.
-            cancelDeadline = Task { @MainActor [weak self] in
+            handOverTimer = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled else { return }
                 self?.handOverCancel()
@@ -219,12 +218,52 @@ private struct KeyCaptureView: NSViewRepresentable {
             return true
         }
 
+        /// The button is back up — but this runs too early to act on it. A local monitor is called
+        /// while the event is still on its way: AppKit hands it round before dispatching it to the
+        /// window, so the record field's button has not seen the mouse-up yet, and its action is the
+        /// one thing that must decide first. Handing over on the next main-actor turn would only be
+        /// safe if SwiftUI resolved that action inside the dispatch itself; deferring it by a turn
+        /// of its own is enough for the cancel to arrive first, end the session the button is about
+        /// to toggle, and turn the click that means "stop" into a fresh recording.
+        ///
+        /// So the handover keeps a margin, and the margin is a frame — the same one the poll this
+        /// replaced had, which could not observe the release before its next 16 ms wakeup either.
+        /// It is waiting for the button's action, and once that has run `cancelRecording()` is a
+        /// no-op. One wakeup instead of sixty, and the shortcuts come back a frame after the button
+        /// rather than up to a second later.
+        private func startHandOverMargin() {
+            // The event this was waiting for has arrived; what is left is the margin behind it.
+            if let mouseUpMonitor { NSEvent.removeMonitor(mouseUpMonitor) }
+            mouseUpMonitor = nil
+            handOverTimer?.cancel()
+            handOverTimer = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(16))
+                guard !Task.isCancelled else { return }
+                self?.handOverCancel()
+            }
+        }
+
         /// The recording can also end by a route that has nothing to do with this wait — Escape, or
-        /// the Settings window closing — and that takes this view out of its window. Whatever it was
-        /// waiting for is moot, and a monitor nobody is left to remove would sit in the event stream
-        /// for the rest of the session.
+        /// the Settings window closing — and that takes this view out of its window. The wait is
+        /// over either way, but the cancel it was holding is still run rather than thrown away: it
+        /// is what gives the hot keys back, and if the route out was not one that ended the
+        /// recording it is the last thing left holding them down. It costs nothing when it was,
+        /// because by then there is no recording of this field's to end.
+        ///
+        /// Carried by value into a turn of its own, the way every other handover is deferred: this
+        /// arrives from inside AppKit taking the view out, and the view may not outlive the turn.
         override func viewDidMoveToWindow() {
-            if window == nil { dropWait() }
+            guard window == nil else { return }
+            let cancel = pendingCancel
+            dropWait()
+            if let cancel { Task { @MainActor in cancel() } }
+        }
+
+        /// A monitor is registered with AppKit rather than with this view, so a field that goes away
+        /// without its window taking it out first — the Settings window torn down whole while a
+        /// button is held — leaves one behind in the event stream for the rest of the session.
+        isolated deinit {
+            if let mouseUpMonitor { NSEvent.removeMonitor(mouseUpMonitor) }
         }
 
         /// Whichever of the two gets here first, exactly once.
@@ -236,8 +275,8 @@ private struct KeyCaptureView: NSViewRepresentable {
 
         private func dropWait() {
             pendingCancel = nil
-            cancelDeadline?.cancel()
-            cancelDeadline = nil
+            handOverTimer?.cancel()
+            handOverTimer = nil
             if let mouseUpMonitor { NSEvent.removeMonitor(mouseUpMonitor) }
             mouseUpMonitor = nil
         }

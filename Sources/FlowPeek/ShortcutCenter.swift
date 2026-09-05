@@ -80,10 +80,11 @@ final class ShortcutCenter: ObservableObject {
     /// clash that appeared *while* the app was running becomes visible: `unavailableActions` is a
     /// record of the last registration, and `setActiveActions` deliberately does not register again
     /// when the active set has not moved. Paying `register(_:)`'s drop-and-retake on every switch is
-    /// what that guard exists to avoid; paying it once, when the pane that draws the red line is
-    /// opened and the user is looking at it, is not the same bargain. The re-ask can only improve
-    /// the answer: a combination this process is already holding is not one another process can have
-    /// taken in the meantime.
+    /// what that guard exists to avoid; paying it when the pane that draws the red line is open and
+    /// the user is looking at it is not the same bargain. It is a price rather than a free second
+    /// opinion, though: `register(_:)` gives the claim up before taking it again (GlobalHotKey.swift),
+    /// so every live combination is briefly nobody's and a retake that loses turns a working hot key
+    /// into the very line it was asked about. Which is why nothing but that pane calls this.
     func refreshAvailability() {
         registerAll()
     }

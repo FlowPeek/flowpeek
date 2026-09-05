@@ -329,3 +329,110 @@ final class OnboardingQuitGuardTests: XCTestCase {
         XCTAssertEqual(records, 1)
     }
 }
+
+/// The window's own bookkeeping: which door is open, and — the reason it is worth a type of its own
+/// — that a card on screen is always a card whose quit is being watched for. Driven through a
+/// notification centre of this test's own, so the real application's termination notice is never
+/// involved.
+@MainActor
+final class OnboardingWindowSessionTests: XCTestCase {
+    private let quit = Notification.Name("OnboardingWindowSessionTests.quit")
+
+    private func makeSession(_ center: NotificationCenter, recording: @escaping () -> Void) -> OnboardingWindowSession {
+        OnboardingWindowSession(center: center, quitNotification: quit, record: recording)
+    }
+
+    /// The whole point: putting the card up is what arms the quit, so a user who grants permission,
+    /// ticks a lesson and quits for the day is not met by the entire flow at the next launch.
+    func testPuttingTheCardUpIsWhatArmsTheQuit() {
+        let center = NotificationCenter()
+        var records = 0
+        let session = makeSession(center) { records += 1 }
+
+        XCTAssertEqual(session.opening(.setup), .build)
+        XCTAssertTrue(session.isWatchingForQuit)
+        center.post(name: quit, object: nil)
+
+        XCTAssertEqual(records, 1)
+    }
+
+    /// Nothing is watched for before the card goes up: a quit during an ordinary session must not
+    /// answer a question the user was never shown.
+    func testNothingIsWatchedForBeforeTheCardGoesUp() {
+        let center = NotificationCenter()
+        var records = 0
+        let session = makeSession(center) { records += 1 }
+
+        XCTAssertFalse(session.isWatchingForQuit)
+        XCTAssertNil(session.entryOnScreen)
+        center.post(name: quit, object: nil)
+
+        XCTAssertEqual(records, 0)
+    }
+
+    /// The same door twice is the menu item pressed again: the card that is up is the one wanted,
+    /// and it is brought forward rather than replaced.
+    func testTheSameDoorTwiceOnlyFrontsTheCardThatIsUp() {
+        let center = NotificationCenter()
+        var records = 0
+        let session = makeSession(center) { records += 1 }
+
+        XCTAssertEqual(session.opening(.tutorial), .build)
+        XCTAssertEqual(session.opening(.tutorial), .front)
+
+        XCTAssertEqual(records, 0)
+        XCTAssertEqual(session.entryOnScreen, .tutorial)
+        center.post(name: quit, object: nil)
+        XCTAssertEqual(records, 1)
+    }
+
+    /// The other door is a different destination, so the card is rebuilt — and the card that comes
+    /// back has to be watched for just as the one it replaced was.
+    func testTheOtherDoorRebuildsAndTheNewCardIsWatchedForToo() {
+        let center = NotificationCenter()
+        var records = 0
+        let session = makeSession(center) { records += 1 }
+
+        XCTAssertEqual(session.opening(.setup), .build)
+        XCTAssertEqual(session.opening(.tutorial), .rebuild)
+
+        XCTAssertEqual(records, 1, "the card that went away wrote its answer")
+        XCTAssertEqual(session.entryOnScreen, .tutorial)
+        XCTAssertTrue(session.isWatchingForQuit)
+        center.post(name: quit, object: nil)
+        XCTAssertEqual(records, 2)
+    }
+
+    /// Closing is the exit AppKit does announce: it writes the answer itself and gives the listener
+    /// back, so a quit hours later answers nothing for a user who is long done with the wizard.
+    func testClosingWritesTheAnswerAndStopsWatching() {
+        let center = NotificationCenter()
+        var records = 0
+        let session = makeSession(center) { records += 1 }
+
+        _ = session.opening(.setup)
+        session.closing()
+
+        XCTAssertEqual(records, 1)
+        XCTAssertFalse(session.isWatchingForQuit)
+        XCTAssertNil(session.entryOnScreen)
+        center.post(name: quit, object: nil)
+        XCTAssertEqual(records, 1)
+    }
+
+    /// And the card can go up again afterwards — from the menu, at the next offer — with the quit
+    /// watched for all over again.
+    func testAReopenedCardIsWatchedForAgain() {
+        let center = NotificationCenter()
+        var records = 0
+        let session = makeSession(center) { records += 1 }
+
+        _ = session.opening(.setup)
+        session.closing()
+        XCTAssertEqual(session.opening(.setup), .build)
+
+        XCTAssertTrue(session.isWatchingForQuit)
+        center.post(name: quit, object: nil)
+        XCTAssertEqual(records, 2)
+    }
+}

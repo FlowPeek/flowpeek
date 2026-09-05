@@ -159,3 +159,70 @@ public final class OnboardingQuitGuard {
         self.observer = nil
     }
 }
+
+/// Which door the window is being opened by.
+///
+/// A returning user who asked for the tutorial is not being set up again: the wizard's steps are
+/// behind them, and the difference decides whether the window offers a way backwards into them.
+public enum OnboardingEntry: Sendable {
+    case setup
+    case tutorial
+}
+
+/// Everything about the wizard's window that is not the window: which door it is open by, and the
+/// quit hook that has to be armed for exactly as long as it is up.
+///
+/// The two belong to one another — a window goes up, the hook is armed; it comes down, the hook is
+/// handed back and the answer written — and put side by side with two hundred lines of AppKit the
+/// arming is one line that can be dropped without anything noticing. Whether a user who quits
+/// half-way through setup ever gets out of the flow rests on it, so the ordering lives here and the
+/// window is told what to do.
+@MainActor
+public final class OnboardingWindowSession {
+    /// What the caller has to do with the window it owns.
+    public enum Presentation: Equatable, Sendable {
+        /// A window for this door is already up: bring it forward.
+        case front
+        /// Build one.
+        case build
+        /// The window that is up is for the other door. The step is state inside the view, so there
+        /// is no way to push a new destination into it; take that one down and build the new one.
+        case rebuild
+    }
+
+    private let quitGuard: OnboardingQuitGuard
+    private var openEntry: OnboardingEntry?
+
+    /// True exactly while a quit would still record what the user got through.
+    public var isWatchingForQuit: Bool { quitGuard.isWatchingForQuit }
+    /// Which door the window on screen was opened by, or nil while there is none.
+    public var entryOnScreen: OnboardingEntry? { openEntry }
+
+    public init(
+        center: NotificationCenter = .default,
+        quitNotification: Notification.Name,
+        record: @escaping () -> Void
+    ) {
+        quitGuard = OnboardingQuitGuard(center: center, quitNotification: quitNotification, record: record)
+    }
+
+    /// The window is being opened by `entry`. Arming the quit hook is part of the answer, not
+    /// something the caller is trusted to remember afterwards.
+    public func opening(_ entry: OnboardingEntry) -> Presentation {
+        guard openEntry != entry else { return .front }
+        let replacing = openEntry != nil
+        // A rebuild is a dismissal too: it writes what the user got through and hands the listener
+        // back, and the arming below takes a fresh one, so the window that is up is always the one
+        // being watched for.
+        if replacing { closing() }
+        openEntry = entry
+        quitGuard.windowOpened()
+        return replacing ? .rebuild : .build
+    }
+
+    /// The window is going away by one of the doors AppKit does announce.
+    public func closing() {
+        openEntry = nil
+        quitGuard.windowClosed()
+    }
+}

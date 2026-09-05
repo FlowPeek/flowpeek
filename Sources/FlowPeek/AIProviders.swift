@@ -8,12 +8,17 @@ import OSLog
 enum AIProviderError: LocalizedError {
     case missingKey
     case invalidResponse
+    /// The answer came back and is not a diagram FlowPeek can draw. The draft travels with it: it
+    /// is the only text a repair can be asked about, and throwing it away left the window with a
+    /// sentence and nothing to act on.
+    case unusableDiagram(AIDiagramDraft, String)
     case server(Int, String)
 
     var errorDescription: String? {
         switch self {
         case .missingKey: String(localized: "ai.error.missing-key")
         case .invalidResponse: String(localized: "ai.error.invalid-response")
+        case .unusableDiagram(_, let reason): reason
         case .server(let status, _):
             status == 401 || status == 403
                 ? String(localized: "ai.error.unauthorized")
@@ -45,7 +50,11 @@ struct AIProviderClient {
         }
         let text = try extractText(kind: kind, data: data)
         let draft = try JSONDecoder().decode(AIDiagramDraft.self, from: Data(text.utf8))
-        _ = try MermaidSource(rawValue: draft.mermaid)
+        do {
+            _ = try MermaidSource(rawValue: draft.mermaid)
+        } catch {
+            throw AIProviderError.unusableDiagram(draft, localizedUserMessage(error))
+        }
         return draft
     }
 

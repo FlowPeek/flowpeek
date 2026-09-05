@@ -580,29 +580,6 @@ struct DiagramFailureView: View {
     }
 }
 
-/// The preview embedded in the AI window: owns its own pooled view for the lifetime of the surface.
-struct MermaidPreviewSurface: View {
-    let source: String
-    var onFailure: ((String?) -> Void)?
-
-    @StateObject private var model = DiagramViewModel(title: "")
-
-    var body: some View {
-        DiagramStage(model: model)
-            .onAppear {
-                model.update(source: source)
-                model.attach()
-            }
-            .onDisappear { model.release() }
-            .onChange(of: source) { _, value in model.update(source: value) }
-            .onChange(of: model.status) { _, status in
-                // The inspector has room for one line, so it gets the headline and the offending
-                // line — never the engine text the card keeps behind its disclosure.
-                if case .failed(let presentation) = status { onFailure?(presentation.plainSummary) } else { onFailure?(nil) }
-            }
-    }
-}
-
 @MainActor
 final class PreviewCoordinator: NSObject, NSWindowDelegate {
     /// A promoted preview and the model whose engine it is showing. Every window carries its own
@@ -761,6 +738,18 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         // rather than release it: the next quick preview would otherwise check the engine back in
         // underneath the window that is still drawing with it.
         quickModel = nil
+        openWindow(model: model)
+    }
+
+    /// A diagram that never had a quick panel to be promoted from — the AI window's draft, opened
+    /// into the same preview every other route in the app ends in.
+    func openWindow(document: DiagramDocument) {
+        let model = DiagramViewModel(document: document, pool: pool)
+        model.attach()
+        openWindow(model: model)
+    }
+
+    private func openWindow(model: DiagramViewModel) {
         let opening = openingSize(for: .window, fallback: Self.windowSize, minimum: Self.windowMinSize)
         let window = FlowPeekGlassWindow(
             contentRect: CGRect(origin: .zero, size: opening),

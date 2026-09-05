@@ -399,6 +399,9 @@ final class AmbientPeekMonitor {
             line: line,
             pane: pane,
             hasSelection: selected.length > 0,
+            document: document,
+            caret: selected.location,
+            slice: slice,
             flip: flip,
             before: deadline
         ) {
@@ -442,6 +445,9 @@ final class AmbientPeekMonitor {
         line: CGRect?,
         pane: CGRect?,
         hasSelection: Bool,
+        document: String,
+        caret: Int,
+        slice: CaretDiagramSlice,
         flip: CGFloat,
         before deadline: Date
     ) -> [CGRect] {
@@ -456,9 +462,76 @@ final class AmbientPeekMonitor {
            ) {
             bounds.append(ScreenGeometry.axToAppKit(selection, flipReference: flip))
         }
+        if let line, let block = blockBounds(
+            of: focused,
+            caretLine: line,
+            document: document,
+            caret: caret,
+            slice: slice,
+            before: deadline
+        ) {
+            bounds.append(block)
+        }
         if let line { bounds.append(line) }
         if let pane { bounds.append(pane) }
         return bounds
+    }
+
+    /// The whole diagram's rectangle, worked out from the caret's line, or nil when the editor does
+    /// not agree that the arithmetic applies.
+    ///
+    /// The estimate assumes one row per document line. Soft wrapping and folded regions break that,
+    /// and neither is announced -- so instead of trusting it, the editor is asked what text it has
+    /// on the block's first line. `AXTextMarkerRangeForLine` answers the wrong *rectangle* for any
+    /// line but the caret's, which is why the geometry has to be computed at all, but it answers the
+    /// right *text*, and that is enough to catch a document whose rows and lines have stopped
+    /// matching. One extra accessibility message, only on the caret route.
+    private func blockBounds(
+        of focused: AXUIElement,
+        caretLine: CGRect,
+        document: String,
+        caret: Int,
+        slice: CaretDiagramSlice,
+        before deadline: Date
+    ) -> CGRect? {
+        guard let caretLineNumber = CaretBlockGeometry.lineNumber(of: caret, in: document),
+              let lines = CaretBlockGeometry.lines(of: slice.range, in: document),
+              lines.last > lines.first,
+              let block = CaretBlockGeometry.rectangle(
+                  caretLine: caretLine,
+                  caretLineNumber: caretLineNumber,
+                  firstLine: lines.first,
+                  lastLine: lines.last
+              ) else { return nil }
+        guard agreesOnLine(lines.first, of: focused, in: document, before: deadline) else { return nil }
+        return block
+    }
+
+    /// Whether the editor puts the same text on `line` as the document string does. Line numbers are
+    /// zero-based here and one-based everywhere else in this file, which is the only reason the
+    /// conversion is spelled out.
+    private func agreesOnLine(
+        _ line: Int,
+        of focused: AXUIElement,
+        in document: String,
+        before deadline: Date
+    ) -> Bool {
+        let documentLines = document.components(separatedBy: "\n")
+        guard line >= 1, line <= documentLines.count else { return false }
+        let expected = documentLines[line - 1].trimmingCharacters(in: .whitespaces)
+        guard !expected.isEmpty else { return false }
+        guard let range = attribute(
+            focused,
+            parameterized: "AXTextMarkerRangeForLine",
+            argument: NSNumber(value: line - 1),
+            before: deadline
+        ), let text = string(
+            focused,
+            parameterized: "AXStringForTextMarkerRange",
+            argument: range,
+            before: deadline
+        ) else { return false }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines) == expected
     }
 
     /// Rebuilds lines from the pieces' own frames. Joining every piece with a newline splits a
@@ -565,6 +638,38 @@ final class AmbientPeekMonitor {
     private func rect(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CGRect? {
         guard let value = self.attribute(element, attribute, before: deadline) else { return nil }
         return Self.cgRect(value)
+    }
+
+    /// The parameterized twin of `attribute(_:_:before:)`, for the one range this file asks for by
+    /// line number rather than by marker.
+    private func attribute(
+        _ element: AXUIElement,
+        parameterized attribute: String,
+        argument: CFTypeRef,
+        before deadline: Date
+    ) -> CFTypeRef? {
+        guard Date() < deadline else { return nil }
+        var value: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(
+            element,
+            attribute as CFString,
+            argument,
+            &value
+        ) == .success else { return nil }
+        return value
+    }
+
+    private func string(
+        _ element: AXUIElement,
+        parameterized attribute: String,
+        argument: CFTypeRef,
+        before deadline: Date
+    ) -> String? {
+        guard let value = self.attribute(element, parameterized: attribute, argument: argument, before: deadline) else {
+            return nil
+        }
+        if let text = value as? String { return text }
+        return (value as? NSAttributedString)?.string
     }
 
     private func rect(

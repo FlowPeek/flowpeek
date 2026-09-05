@@ -192,7 +192,10 @@ final class SelectionMonitor {
 
 /// Chromium and Electron expose a tree of empty groups until `AXManualAccessibility` is set on the
 /// application element, and switch their renderers over asynchronously afterwards -- so this is
-/// done when an app activates and memoised per pid rather than repeated on every read.
+/// done when an app activates and memoised per pid rather than repeated on every read. A refusal is
+/// memoised too, for `AccessibilityWarmUpMemo.retryInterval` rather than for good: every app that is
+/// not Chromium refuses this each time it is asked, and one that was still starting its renderer
+/// answers differently a moment later.
 ///
 /// One instance for the whole app, because both routes into a preview need the same processes warm
 /// and the switch is one shared boolean per target: a per-route memo would let the selection route
@@ -205,32 +208,41 @@ final class AccessibilityTreeWarmUp {
     static let shared = AccessibilityTreeWarmUp()
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Selection")
-    private var enabledProcesses: Set<pid_t> = []
+    private var memo = AccessibilityWarmUpMemo()
 
-    func warmUp(_ pid: pid_t) {
-        guard pid > 0, pid != ProcessInfo.processInfo.processIdentifier, !enabledProcesses.contains(pid) else { return }
+    /// `deadline` is the clock of the read this is warming for, when there is one. The set is a
+    /// synchronous message like every other, so it may not spend more of that read than the read
+    /// has left: an app that answers only once its own timeout expires would otherwise stall here
+    /// for that timeout and then be handed a whole fresh budget to stall in again.
+    func warmUp(_ pid: pid_t, before deadline: Date = .distantFuture) {
+        guard pid > 0, pid != ProcessInfo.processInfo.processIdentifier else { return }
+        let now = Date()
+        let remaining = deadline.timeIntervalSince(now)
+        guard remaining > 0, memo.shouldSend(pid: pid, now: now) else { return }
         let app = AXUIElementCreateApplication(pid)
-        _ = AXUIElementSetMessagingTimeout(app, AccessibilitySelectionReader.messagingTimeout)
+        _ = AXUIElementSetMessagingTimeout(app, min(AccessibilitySelectionReader.messagingTimeout, Float(remaining)))
         let error = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         logger.debug(
             "AXManualAccessibility enabled for pid \(pid) -> \(AccessibilitySelectionReader.name(error), privacy: .public)"
         )
-        // Only a set that landed is remembered. A busy app answers this with a timeout, and
-        // memoising that would leave it showing a tree of empty groups for the rest of the
-        // process's life while both routes believed it was awake.
-        guard error == .success else { return }
-        enabledProcesses.insert(pid)
+        // A set that landed is remembered for good; one that did not is remembered for the memo's
+        // retry window. Remembering a refusal as a success would leave a busy app showing a tree of
+        // empty groups for the rest of its life while both routes believed it was awake -- and not
+        // remembering it at all sends the same doomed message on every single read, which is the
+        // answer every app that is not Chromium gives.
+        memo.note(pid: pid, succeeded: error == .success, now: now)
     }
 
     func forget(_ pid: pid_t) {
-        if enabledProcesses.remove(pid) != nil { logger.debug("pruned accessibility memo for terminated pid \(pid)") }
+        let wasEnabled = memo.isEnabled(pid: pid)
+        memo.forget(pid: pid)
+        if wasEnabled { logger.debug("pruned accessibility memo for terminated pid \(pid)") }
     }
 
     func release() {
-        for pid in enabledProcesses {
+        for pid in memo.drain() {
             _ = AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXManualAccessibility" as CFString, kCFBooleanFalse)
         }
-        enabledProcesses.removeAll()
     }
 }
 
@@ -253,7 +265,9 @@ final class AccessibilitySelectionReader {
 
     // MARK: - Accessibility tree lifecycle
 
-    func warmUp(_ pid: pid_t) { AccessibilityTreeWarmUp.shared.warmUp(pid) }
+    func warmUp(_ pid: pid_t, before deadline: Date = .distantFuture) {
+        AccessibilityTreeWarmUp.shared.warmUp(pid, before: deadline)
+    }
 
     func forget(_ pid: pid_t) { AccessibilityTreeWarmUp.shared.forget(pid) }
 
@@ -276,7 +290,7 @@ final class AccessibilitySelectionReader {
         let deadline = Date().addingTimeInterval(Self.attemptBudget)
         let app = AXUIElementCreateApplication(pid)
         _ = AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
-        warmUp(pid)
+        warmUp(pid, before: deadline)
 
         let flip = ScreenGeometry.flipReference(screenFrames: NSScreen.screens.map(\.frame))
         let provider = AXProbe(reader: self, application: app, flipReference: flip, deadline: deadline)

@@ -187,8 +187,8 @@ private struct AmbientHighlightView: View {
                 Text(model.keyword ?? String(localized: "ambient.hint.generic"))
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
-                if model.anchor == .caret {
-                    Text(String(localized: "ambient.hint.caret"))
+                if let note = model.anchor.hintNoteKey {
+                    Text(String(localized: String.LocalizationValue(note)))
                         .font(.system(size: 11))
                         .lineLimit(1)
                         .opacity(0.85)
@@ -210,6 +210,6 @@ private struct AmbientHighlightView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help(String(localized: model.anchor == .caret ? "ambient.hint.help.caret" : "ambient.hint.help"))
+        .help(String(localized: String.LocalizationValue(model.anchor.hintHelpKey)))
     }
 }

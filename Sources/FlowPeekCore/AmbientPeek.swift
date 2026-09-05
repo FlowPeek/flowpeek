@@ -11,6 +11,27 @@ public struct AmbientCandidate: Equatable, Sendable {
     public enum Anchor: Equatable, Sendable {
         case pointer
         case caret
+
+        /// The catalogue key for the note the hint carries beside the diagram's own keyword, or nil
+        /// when the frame really is around the block and there is nothing to qualify.
+        public var hintNoteKey: String? {
+            switch self {
+            case .pointer: nil
+            case .caret: "ambient.hint.caret"
+            }
+        }
+
+        /// The catalogue key for the hint's tooltip, which has to say the same thing at length: the
+        /// outline marks the caret, not the block.
+        ///
+        /// Chosen here rather than in the view so the choice is one a test can make: the view it is
+        /// spent in draws into someone else's window and has no assertion to offer.
+        public var hintHelpKey: String {
+            switch self {
+            case .pointer: "ambient.hint.help"
+            case .caret: "ambient.hint.help.caret"
+            }
+        }
     }
 
     public let text: String

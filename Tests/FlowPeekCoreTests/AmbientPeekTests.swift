@@ -291,4 +291,16 @@ final class AmbientPeekTests: XCTestCase {
         XCTAssertEqual(AmbientPeekPolicy.grownToMinimum(.zero), .zero)
         XCTAssertEqual(AmbientPeekPolicy.grownToMinimum(.infinite), .infinite)
     }
+
+    // MARK: - What the hint says it is around
+
+    /// The frame a caret read draws is the caret's line or the pane around it, never the block, so
+    /// the hint has to name the caret in both places it speaks: the note beside the keyword, and the
+    /// tooltip behind it. A pointer read frames the block itself and adds nothing.
+    func testACaretAnchoredHintNamesTheCaretAndAPointerAnchoredOneDoesNot() {
+        XCTAssertNil(AmbientCandidate.Anchor.pointer.hintNoteKey)
+        XCTAssertEqual(AmbientCandidate.Anchor.caret.hintNoteKey, "ambient.hint.caret")
+        XCTAssertEqual(AmbientCandidate.Anchor.pointer.hintHelpKey, "ambient.hint.help")
+        XCTAssertEqual(AmbientCandidate.Anchor.caret.hintHelpKey, "ambient.hint.help.caret")
+    }
 }

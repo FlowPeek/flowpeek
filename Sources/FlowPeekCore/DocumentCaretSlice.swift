@@ -33,7 +33,7 @@ public struct CaretDiagramSlice: Equatable, Sendable {
 /// and the detector are the whole input.
 public enum DocumentCaretSlicer {
     /// How many characters the line split gets through between two readings of the clock.
-    private static let clockInterval = 4_096
+    static let clockInterval = 4_096
 
     /// The diagram around `caret`, or nil when the caret is not in one.
     ///
@@ -50,16 +50,29 @@ public enum DocumentCaretSlicer {
         minimumConfidence: MermaidDetection.Confidence = AmbientPeekPolicy.minimumConfidence,
         before deadline: Date = .distantFuture
     ) -> CaretDiagramSlice? {
+        slice(document: document, caret: caret, minimumConfidence: minimumConfidence, before: deadline, clock: Date.init)
+    }
+
+    /// The same slice with the clock in hand. Internal because nothing outside a test has a clock
+    /// worth passing: the checks inside the line split fire part-way through a document, which is a
+    /// race to arrange against the wall clock and exact against a clock the test advances itself.
+    static func slice(
+        document: String,
+        caret: Int,
+        minimumConfidence: MermaidDetection.Confidence,
+        before deadline: Date,
+        clock: () -> Date
+    ) -> CaretDiagramSlice? {
         guard !document.isEmpty else { return nil }
         // Refused on length before a single character is examined: an editor hands over its whole
         // buffer, the work below is linear in it, and a clock alone cannot keep a read cheap when
         // it is re-run every debounce for as long as the modifier is held.
         guard document.utf16.count <= AmbientPeekPolicy.maximumDocumentCharacters else { return nil }
-        guard Date() < deadline else { return nil }
-        guard let lines = self.lines(of: document, before: deadline) else { return nil }
+        guard clock() < deadline else { return nil }
+        guard let lines = self.lines(of: document, before: deadline, clock: clock) else { return nil }
         let clamped = min(max(caret, 0), lines[lines.count - 1].end)
         guard let region = region(containing: clamped, in: lines) else { return nil }
-        guard Date() < deadline else { return nil }
+        guard clock() < deadline else { return nil }
         let detection = MermaidDetector.detect(region.text)
         guard detection.confidence >= minimumConfidence else { return nil }
         return CaretDiagramSlice(text: region.text, detection: detection, range: region.range)
@@ -83,7 +96,7 @@ public enum DocumentCaretSlicer {
     /// Iterating over `Character`s is what makes CRLF free: Swift treats "\r\n" as a single
     /// character two code units wide, so a CRLF document yields exactly the same lines as an LF one
     /// and only the offsets differ -- which is the difference the caret is counted in.
-    private static func lines(of document: String, before deadline: Date) -> [Line]? {
+    private static func lines(of document: String, before deadline: Date, clock: () -> Date) -> [Line]? {
         var lines: [Line] = []
         var text = ""
         var start = 0
@@ -94,7 +107,7 @@ public enum DocumentCaretSlicer {
             // and the point is to notice a deadline that has passed, not to time each character.
             sinceCheck += 1
             if sinceCheck >= Self.clockInterval {
-                guard Date() < deadline else { return nil }
+                guard clock() < deadline else { return nil }
                 sinceCheck = 0
             }
             let width = character.unicodeScalars.reduce(0) { $0 + UTF16.width($1) }

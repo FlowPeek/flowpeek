@@ -1,4 +1,5 @@
 import XCTest
+@testable import FlowPeekCore
 
 /// The catalogues are edited by hand and merged by hand, and a key that only reaches one of them
 /// ships as its own raw identifier in that language — "menu.preview.reveal" in a menu — which no
@@ -29,6 +30,17 @@ final class LocalizationCatalogTests: XCTestCase {
             let keys = try Self.keys(of: language)
             let repeated = Set(keys.filter { key in keys.filter { $0 == key }.count > 1 })
             XCTAssertEqual(repeated.sorted(), [], "\(language).lproj repeats these keys")
+        }
+    }
+
+    /// The ambient hint picks its keys in `FlowPeekCore`, where no catalogue is in reach and a
+    /// missing translation would ship as the raw key over somebody else's window.
+    func testTheAmbientHintsKeysAreDefinedInEveryLanguage() throws {
+        let needed = [AmbientCandidate.Anchor.pointer, .caret]
+            .flatMap { [$0.hintHelpKey, $0.hintNoteKey].compactMap { $0 } }
+        for language in Self.languages {
+            let keys = Set(try Self.keys(of: language))
+            XCTAssertEqual(needed.filter { !keys.contains($0) }, [], "\(language).lproj is missing these")
         }
     }
 

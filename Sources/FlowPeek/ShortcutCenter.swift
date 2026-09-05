@@ -76,6 +76,19 @@ final class ShortcutCenter: ObservableObject {
         registerAll()
     }
 
+    /// Re-asks the OS for every combination that is supposed to be live, which is the only way a
+    /// clash that appeared *while* the app was running becomes visible: `unavailableActions` is a
+    /// record of the last registration, and `setActiveActions` deliberately does not register again
+    /// when the active set has not moved. Paying `register(_:)`'s drop-and-retake on every switch is
+    /// what that guard exists to avoid; paying it when the pane that draws the red line is open and
+    /// the user is looking at it is not the same bargain. It is a price rather than a free second
+    /// opinion, though: `register(_:)` gives the claim up before taking it again (GlobalHotKey.swift),
+    /// so every live combination is briefly nobody's and a retake that loses turns a working hot key
+    /// into the very line it was asked about. Which is why nothing but that pane calls this.
+    func refreshAvailability() {
+        registerAll()
+    }
+
     /// Frees the keyboard for one field. Any field already recording is dropped first, so the
     /// suspension always has exactly one owner and can never be left dangling.
     func beginRecording(_ action: FlowPeekShortcutAction) {

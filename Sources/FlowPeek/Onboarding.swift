@@ -2,34 +2,30 @@ import AppKit
 import FlowPeekCore
 import SwiftUI
 
-/// Which door the window is being opened by.
-///
-/// A returning user who asked for the tutorial is not being set up again: the wizard's steps are
-/// behind them, and the difference decides whether the window offers a way backwards into them.
-enum OnboardingEntry {
-    case setup
-    case tutorial
-}
-
 @MainActor
 final class OnboardingCoordinator {
     static let shared = OnboardingCoordinator()
     private var window: NSWindow?
-    /// Which door the window on screen was opened by. The menu offers two — setup and the tutorial
-    /// — and they are different destinations: fronting the wizard when the user asked for the
-    /// checklist reads as a menu item that does nothing.
-    private var openEntry: OnboardingEntry?
+    /// Which door the window on screen was opened by, and — because quitting with the card still
+    /// open records what the user got through, a rule this borderless window has no close path to
+    /// express — the listener for the quit. Both are the session's to keep.
+    private lazy var session = OnboardingWindowSession(
+        quitNotification: NSApplication.willTerminateNotification
+    ) { Self.recordProgress() }
     private var spaceObserver: NSObjectProtocol?
-    private var terminationObserver: NSObjectProtocol?
 
     func show(entry: OnboardingEntry = .setup) {
-        if let window, openEntry == entry { window.makeKeyAndOrderFront(nil); return }
-        // The step is @State inside the view, so there is no way to push a new destination into a
-        // window that is already up; it is rebuilt instead. Not as a dismissal, though: settling
-        // `onboardingComplete` here would let a click on the tutorial menu item, made from the
-        // welcome card of a first run that inherited an existing grant, finish setup on the user's
-        // behalf and throw away the login question they were two clicks from being asked.
-        if window != nil { closeWindow(recordingProgress: false) }
+        switch session.opening(entry) {
+        case .front:
+            // The menu offers two doors and they are different destinations: fronting the wizard
+            // when the user asked for the checklist reads as a menu item that does nothing.
+            window?.makeKeyAndOrderFront(nil)
+            return
+        case .rebuild:
+            tearDownWindow()
+        case .build:
+            break
+        }
         let view = OnboardingView(
             entry: entry,
             completion: { [weak self] in
@@ -65,29 +61,12 @@ final class OnboardingCoordinator {
         // observer calling orderFrontRegardless() on the dismissed card at the next Space switch.
         window.onCancel = { [weak self] in self?.closeWindow() }
         self.window = window
-        openEntry = entry
         spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.window?.orderFrontRegardless() }
-        }
-        // Quitting with the card still open used to record nothing at all, so a user who granted
-        // permission, ticked a lesson or two and quit for the day was met by the whole flow again at
-        // the next launch. There is no other hook for it: the window is borderless, so AppKit's own
-        // close path is never taken, and the process is torn down without it.
-        terminationObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: nil
-        ) { _ in
-            // Synchronous rather than a `Task`: the app is already on its way out and a hop to the
-            // next main-actor turn would never run. `queue: nil` is the delivery that promises that
-            // — the block runs on the thread that posted the notification, which for
-            // `willTerminate` is the main one, so the isolation assumption holds too. Handing it a
-            // queue instead would be free to enqueue the block for a turn that never comes.
-            MainActor.assumeIsolated { Self.recordProgress() }
         }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -109,19 +88,23 @@ final class OnboardingCoordinator {
         window.setFrameOrigin(origin)
     }
 
-    private func closeWindow(recordingProgress: Bool = true) {
-        if recordingProgress { Self.recordProgress() }
+    private func closeWindow() {
+        session.closing()
+        tearDownWindow()
+    }
+
+    /// The card itself, taken down. Separate from `closeWindow()` because a rebuild takes one down
+    /// without the wizard going away: the session has already written that dismissal and armed the
+    /// listener for the card replacing it.
+    private func tearDownWindow() {
         // The checklist is what made a refused selection worth a second look; with it gone, the
         // rejected branch of `receive` -- which every ordinary selection in every app takes -- has
         // nothing left to ask.
         AppState.shared.notePracticePageClosed()
         window?.close()
         window = nil
-        openEntry = nil
         if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
         spaceObserver = nil
-        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
-        terminationObserver = nil
     }
 
     /// What the wizard leaves behind, whichever way it goes away. Leaving the permission question

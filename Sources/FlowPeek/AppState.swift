@@ -59,9 +59,11 @@ final class AppState: ObservableObject {
     /// True while the canary is running. The verdict is cleared for the duration, so the menu shows
     /// "checking" rather than a verdict that is being re-taken.
     @Published private(set) var isCheckingEngine = false
-    /// What the status item draws, and what the menu says in words. Recomputed rather than derived
-    /// in the view: `isEnabled` is `@AppStorage`, which publishes nothing from inside a class, so a
-    /// computed property would leave the icon showing the state before the toggle.
+    /// What the status item draws, and what the menu says in words. Stored and refreshed rather
+    /// than computed on demand: five switches and verdicts feed `MenuBarStatus.resolve`, most of
+    /// which move without touching each other, and only the resolved answer is worth publishing —
+    /// `refreshMenuBarStatus()` drops the assignment when it has not moved, which is what keeps the
+    /// permission poll from redrawing the icon on a timer.
     @Published private(set) var menuBarStatus: MenuBarStatus = .armed
     /// Which of the three routes the user has exercised. Drives the onboarding tutorial.
     ///
@@ -825,19 +827,22 @@ final class AppState: ObservableObject {
     /// not registered — are not failures at all. The status the system reports afterwards is the
     /// honest answer, and `launchAtLoginState` is what the switch renders.
     func setLaunchAtLogin(_ enabled: Bool) {
-        // Part of the published answer rather than a flag beside it, because for the two statuses
-        // that `register()`/`unregister()` leave untouched — held for approval, and never
-        // registered at all — the click moves nothing else, and the notice beneath the switch has
-        // to appear and disappear with it. So this assignment is what redraws, not the re-read
-        // below, which will find the status exactly where it left it.
-        launchAtLogin = launchAtLogin.requesting(enabled)
         do {
             if enabled { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
         } catch {
             logger.error("login item \(enabled ? "register" : "unregister", privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
         }
-        refreshLaunchAtLoginStatus()
+        // What was asked for and what the system reports afterwards are two halves of one answer,
+        // put together in Core: for the two statuses `register()`/`unregister()` leave untouched —
+        // held for approval, and never registered at all — the click is the only half that moves,
+        // and the notice beneath the switch has to appear and disappear with it.
+        let status = SMAppService.mainApp.status
+        launchAtLogin = launchAtLogin.requesting(
+            enabled,
+            thenReading: status == .enabled,
+            requiresApproval: status == .requiresApproval
+        )
     }
 
     func openLoginItemsSettings() {

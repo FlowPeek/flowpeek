@@ -74,17 +74,18 @@ final class LaunchAtLoginStateTests: XCTestCase {
 }
 
 final class LaunchAtLoginAnswerTests: XCTestCase {
-    /// What the app holds after working the switch: the request goes in first, then the status is
-    /// re-read, which is the order the register call forces. `nil` from the re-read means the
-    /// system said nothing new, so the answer the request produced is the one on screen.
+    /// What the app holds after working the switch, through the same call the switch itself makes:
+    /// the request first, then whatever the system reports once it has been asked.
     private func afterFlipping(
         _ enabled: Bool,
         on answer: LaunchAtLoginAnswer,
         statusBecomes status: (registered: Bool, requiresApproval: Bool)
     ) -> LaunchAtLoginAnswer {
-        let requested = answer.requesting(enabled)
-        return requested.rereading(registered: status.registered, requiresApproval: status.requiresApproval)
-            ?? requested
+        answer.requesting(
+            enabled,
+            thenReading: status.registered,
+            requiresApproval: status.requiresApproval
+        )
     }
 
     /// The flow the whole feature exists for, end to end. macOS is already holding a registration

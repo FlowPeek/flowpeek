@@ -208,8 +208,6 @@
 "preview.error.title" = "Cannot Preview This Selection";
 
 /* Preview background */
-"preview.background.solid" = "Use a Solid Background";
-"preview.background.transparent" = "Use a Transparent Background";
 "ai.error.server" = "The provider rejected the request (HTTP %ld). Check the API key for this provider, then try again.";
 "ai.error.unauthorized" = "That API key was rejected. Open Manage API Keys… and paste the key again.";
 "preview.failure.details" = "Engine details";
@@ -257,7 +255,7 @@
 "preview.export.copied" = "Copied";
 "preview.export.saved" = "Saved";
 "preview.export.failed" = "Could not export";
-"preview.background.transparent-canvas" = "Transparent Canvas";
+"preview.background.transparent-canvas" = "Transparent Preview Background";
 "preview.zoom-level" = "Zoom Level";
 "preview.a11y.diagram" = "Diagram: %@";
 "preview.a11y.diagram.hint" = "Copy Diagram Text in the share menu reads this diagram back as Mermaid.";

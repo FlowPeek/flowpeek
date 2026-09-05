@@ -208,8 +208,6 @@
 "preview.error.title" = "이 선택 항목을 미리 볼 수 없습니다";
 
 /* 미리보기 배경 */
-"preview.background.solid" = "불투명 배경 사용";
-"preview.background.transparent" = "투명 배경 사용";
 "ai.error.server" = "공급자가 요청을 거부했습니다 (HTTP %ld). 해당 공급자의 API 키를 확인한 뒤 다시 시도해 주세요.";
 "ai.error.unauthorized" = "API 키가 거부되었습니다. 'API 키 관리…'를 열어 키를 다시 붙여넣어 주세요.";
 "preview.failure.details" = "엔진 세부 정보";
@@ -257,7 +255,7 @@
 "preview.export.copied" = "복사됨";
 "preview.export.saved" = "저장됨";
 "preview.export.failed" = "내보낼 수 없습니다";
-"preview.background.transparent-canvas" = "투명한 배경";
+"preview.background.transparent-canvas" = "미리보기 배경 투명하게";
 "preview.zoom-level" = "확대 비율";
 "preview.a11y.diagram" = "다이어그램: %@";
 "preview.a11y.diagram.hint" = "공유 메뉴의 '다이어그램 텍스트 복사'를 사용하면 이 다이어그램을 Mermaid 원본으로 다시 읽을 수 있습니다.";

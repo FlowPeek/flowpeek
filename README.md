@@ -20,7 +20,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/images/preview.gif" width="720" alt="A Mermaid flowchart being copied and appearing a moment later in FlowPeek's glass preview">
+  <img src="docs/images/preview.gif" width="640" alt="A Mermaid flowchart being copied and appearing a moment later in FlowPeek's glass preview">
 </p>
 
 ```sh
@@ -31,17 +31,17 @@ brew install --cask flowpeek/tap/flowpeek
 
 **Hold ⌥ and point at it.** The block is outlined where it sits. Press Space and it draws.
 
-<img src="docs/images/hold-to-peek.gif" width="720" alt="Option held over a Mermaid code block on a documentation page: the block is outlined with a hint reading swimlane-beta, Option-Space, and pressing it draws the diagram">
+<img src="docs/images/hold-to-peek.gif" width="600" alt="Option held over a Mermaid code block on a documentation page: the block is outlined with a hint reading swimlane-beta, Option-Space, and pressing it draws the diagram">
 
 **Copy it.** A badge appears near the menu bar and names the key that opens it.
 
-<img src="docs/images/clipboard-badge.gif" width="380" alt="A badge sliding in below the menu bar reading Mermaid, sequenceDiagram, Press to preview, with the shortcut Option-Shift-Command-M">
+<img src="docs/images/clipboard-badge.gif" width="420" alt="A badge sliding in below the menu bar reading Mermaid, sequenceDiagram, Press to preview, with the shortcut Option-Shift-Command-M">
 
 **Select it.** A small button appears beside the selection.
 
 Editors work too. In VS Code the outline follows the caret, because an editor can say where the caret is but not where the pointer is:
 
-<img src="docs/images/vscode.gif" width="720" alt="A fenced mermaid block in VS Code outlined by FlowPeek with a hint reading flowchart at the cursor, Option-Space, then drawn in the preview">
+<img src="docs/images/vscode.gif" width="680" alt="A fenced mermaid block in VS Code outlined by FlowPeek with a hint reading flowchart at the cursor, Option-Space, then drawn in the preview">
 
 ## The shelf
 

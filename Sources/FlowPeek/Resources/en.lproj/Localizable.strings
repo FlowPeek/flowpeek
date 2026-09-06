@@ -297,3 +297,9 @@
 "preview.background.make-solid" = "Put the Diagram on Its Own Canvas";
 "preview.background.state.on" = "Transparent";
 "preview.background.state.off" = "Solid";
+
+/* The one favour the app ever asks for */
+"star.title" = "Enjoying FlowPeek?";
+"star.message" = "A star on GitHub helps other people find it. This is the only time we will ask.";
+"star.action" = "Star on GitHub";
+"star.dismiss" = "No Thanks";

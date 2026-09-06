@@ -144,6 +144,7 @@ final class AppState: ObservableObject {
         // Wired here rather than in `start()`: a preview can be promoted from the demo arguments and
         // from the AI window, neither of which goes through the monitors that `start()` arms.
         previews.onPromotedChange = { [weak self] hasWindow in self?.hasPromotedPreview = hasWindow }
+        previews.onDiagramDrawn = { [weak self] in self?.noteDiagramDrawn() }
         // The one moment worth asking anything: a diagram the user asked for has just been closed,
         // so the app has demonstrably worked and the screen it was covering is theirs again.
         previews.onVisibleSurfaceChange = { [weak self] surface in
@@ -278,6 +279,17 @@ final class AppState: ObservableObject {
             return
         }
         #endif
+        // The AI window is written against a closure so it can be read and tested on its own; this
+        // is where the real store arrives. Without it a diagram made there is drawn, exported and
+        // then forgotten, which is the one thing the history exists to prevent.
+        AIDiagramHistoryBridge.record = { title, source, origin, revising in
+            DiagramHistoryStore.shared.record(
+                title: title,
+                source: source,
+                origin: DiagramOrigin(rawValue: origin) ?? .ai,
+                revising: revising
+            )
+        }
         InstallLocationAdvisor.promptIfNeeded()
         selectionMonitor.onSelection = { [weak self] snapshot in
             self?.receive(snapshot)
@@ -728,8 +740,15 @@ final class AppState: ObservableObject {
     /// A diagram the user asked for is on screen, opened by one of the three routes. The only thing
     /// FlowPeek counts towards ever asking for anything: not launches, not selections it noticed,
     /// not copies it badged — the moments it did the job it exists for.
+    /// A route reached a preview. The tutorial's tick belongs to the gesture, so it is recorded
+    /// here; how much use the app has had belongs to the drawing, which has not happened yet and may
+    /// not happen at all -- a source that passes validation can still be refused by the engine, and
+    /// what opens for it is an apology.
     private func noteDiagramOpened(_ lesson: TutorialProgress.Lesson) {
         tutorial.noteOpened(lesson)
+    }
+
+    private func noteDiagramDrawn() {
         starLedger = starLedger.recordingDiagram(at: Date())
     }
 

@@ -225,4 +225,66 @@ final class StarNudgePolicyTests: XCTestCase {
             )
         }
     }
+
+    /// The one favour the app ever asks for must follow something that worked. A panel opened for a
+    /// diagram the engine then refused holds an apology, and closing that is not a good moment.
+    func testAnApologyClosingIsNotAnAskableMoment() {
+        XCTAssertTrue(StarNudgePolicy.isAskableMoment(previous: .diagram, current: .none))
+        XCTAssertFalse(StarNudgePolicy.isAskableMoment(previous: .message, current: .none))
+        XCTAssertFalse(StarNudgePolicy.isAskableMoment(previous: .none, current: .none))
+        // Nor is opening one, whichever kind it is.
+        XCTAssertFalse(StarNudgePolicy.isAskableMoment(previous: .none, current: .diagram))
+        XCTAssertFalse(StarNudgePolicy.isAskableMoment(previous: .message, current: .diagram))
+    }
+
+    // MARK: - What is on screen
+
+    /// A panel that opened for a diagram the engine then refused is holding an apology, and it must
+    /// not read as a diagram: closing it is the worst moment the app could pick to ask a favour.
+    func testAPanelHoldingAnApologyIsNotADiagram() {
+        XCTAssertEqual(
+            PreviewSurface.resolve(hasQuickPanel: true, quickIsDiagram: true, quickHasDrawn: false,
+                                   promotedCount: 0, promotedHasDrawn: false),
+            .message
+        )
+        XCTAssertEqual(
+            PreviewSurface.resolve(hasQuickPanel: true, quickIsDiagram: true, quickHasDrawn: true,
+                                   promotedCount: 0, promotedHasDrawn: false),
+            .diagram
+        )
+        // The message panel -- an empty clipboard, an engine that will not run -- was never a diagram.
+        XCTAssertEqual(
+            PreviewSurface.resolve(hasQuickPanel: true, quickIsDiagram: false, quickHasDrawn: false,
+                                   promotedCount: 0, promotedHasDrawn: false),
+            .message
+        )
+    }
+
+    func testNothingOnScreenIsNothing() {
+        XCTAssertEqual(
+            PreviewSurface.resolve(hasQuickPanel: false, quickIsDiagram: false, quickHasDrawn: false,
+                                   promotedCount: 0, promotedHasDrawn: false),
+            .none
+        )
+    }
+
+    /// A promoted window counts on the same terms, and one that has drawn outranks a quick panel
+    /// that has not: both are on screen and only one of them is a diagram.
+    func testAPromotedWindowCountsOnTheSameTerms() {
+        XCTAssertEqual(
+            PreviewSurface.resolve(hasQuickPanel: false, quickIsDiagram: false, quickHasDrawn: false,
+                                   promotedCount: 1, promotedHasDrawn: true),
+            .diagram
+        )
+        XCTAssertEqual(
+            PreviewSurface.resolve(hasQuickPanel: false, quickIsDiagram: false, quickHasDrawn: false,
+                                   promotedCount: 1, promotedHasDrawn: false),
+            .message
+        )
+        XCTAssertEqual(
+            PreviewSurface.resolve(hasQuickPanel: true, quickIsDiagram: true, quickHasDrawn: false,
+                                   promotedCount: 1, promotedHasDrawn: true),
+            .diagram
+        )
+    }
 }

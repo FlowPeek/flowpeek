@@ -36,6 +36,14 @@ final class DiagramViewModel: ObservableObject {
     @Published private(set) var narration: DiagramNarration.Reading?
     @Published private(set) var scale: Double = 1
     @Published private(set) var engine: MermaidEngineView?
+    /// Fired each time a render succeeds, which is the only moment a diagram is really on screen.
+    var onDiagramDrawn: (() -> Void)?
+
+    /// Whether this model has something drawn right now, as opposed to a failure card or nothing.
+    var hasDrawn: Bool {
+        if case .rendered = status { return true }
+        return false
+    }
     @Published private(set) var exportFeedback: ExportFeedback?
     /// Solid by default, glass on request and remembered after. Glass makes a diagram read as part
     /// of the panel rather than as a slide pasted on top of it, but it is the wrong default: page,
@@ -362,6 +370,11 @@ final class DiagramViewModel: ObservableObject {
                 self.status = .rendered(result)
                 self.needsFit = true
                 self.engine?.fitToStage()
+                // A diagram is on screen. Not the same event as a preview opening: a source that
+                // passes validation can still be refused by the engine, and the panel that opens for
+                // it holds an apology. Anything counting how often FlowPeek has been useful has to
+                // count this and not the other.
+                self.onDiagramDrawn?()
             case .failure(let error):
                 // The key names the failure for triage; the formatted message can quote the user's
                 // own selection (`.unknownDiagramType` carries all of it, `.parseFailure` an excerpt),
@@ -601,6 +614,11 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     /// menu-bar entry that offers the way back can appear and disappear with it.
     var onPromotedChange: ((Bool) -> Void)?
 
+    /// Fired each time one of this coordinator's surfaces really draws a diagram. Separate from a
+    /// preview opening: a source that passes validation can still be refused by the engine, and the
+    /// panel that opens for it holds an apology.
+    var onDiagramDrawn: (() -> Void)?
+
     /// Fired whenever the answer to "what is FlowPeek showing right now" changes. The quick panel
     /// and the promoted windows are separate slots and either can be the last one on screen, so the
     /// question is asked of both together rather than of whichever one moved. The kind travels with
@@ -611,9 +629,13 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     /// A diagram in either slot wins over a message: a promoted window still holds a diagram the
     /// user is reading, whichever panel happens to be in front of it.
     var visibleSurface: PreviewSurface {
-        if !promoted.isEmpty { return .diagram }
-        guard quickPanel != nil else { return .none }
-        return quickPanelIsDiagram ? .diagram : .message
+        PreviewSurface.resolve(
+            hasQuickPanel: quickPanel != nil,
+            quickIsDiagram: quickPanelIsDiagram,
+            quickHasDrawn: quickModel?.hasDrawn == true,
+            promotedCount: promoted.count,
+            promotedHasDrawn: promoted.contains { $0.model.hasDrawn }
+        )
     }
 
     var hasVisibleSurface: Bool { visibleSurface != .none }
@@ -723,6 +745,14 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     func showQuick(document: DiagramDocument) {
         closeQuick()
         let model = DiagramViewModel(document: document, pool: pool)
+        model.onDiagramDrawn = { [weak self] in
+            // The surface only changes shape when a panel opens or closes, and a panel that opened
+            // holding an apology becomes a diagram without either happening -- so the answer is
+            // re-published here, or a preview that drew after it opened would still read as the
+            // apology it started as.
+            self?.reportVisibleSurface()
+            self?.onDiagramDrawn?()
+        }
         quickModel = model
         model.attach()
         quickPanelIsDiagram = true
@@ -785,6 +815,14 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     /// into the same preview every other route in the app ends in.
     func openWindow(document: DiagramDocument) {
         let model = DiagramViewModel(document: document, pool: pool)
+        model.onDiagramDrawn = { [weak self] in
+            // The surface only changes shape when a panel opens or closes, and a panel that opened
+            // holding an apology becomes a diagram without either happening -- so the answer is
+            // re-published here, or a preview that drew after it opened would still read as the
+            // apology it started as.
+            self?.reportVisibleSurface()
+            self?.onDiagramDrawn?()
+        }
         model.attach()
         openWindow(model: model)
     }

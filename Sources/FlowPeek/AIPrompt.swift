@@ -11,14 +11,23 @@ extension Notification.Name {
 
 /// The one place a diagram made in this window enters the app's diagram history.
 ///
-/// `DiagramHistoryStore` is owned elsewhere and is not in this worktree; a closure is the join, so
-/// this window can be finished, tested and read without it. Whoever brings the store in replaces
-/// the default with `DiagramHistoryStore.shared.record(title:source:origin:)` and deletes nothing
-/// else — there is exactly one caller, `AIPromptModel.recordInHistory`.
+/// A closure is the join, so this window can be finished, tested and read on its own; the app
+/// replaces the default at launch.
+///
+/// The identity travels both ways. A conversation is one diagram being revised, not twelve
+/// diagrams: recording each turn as a new row would push a dozen near-identical entries into a
+/// history whose cap then throws away work the user did days ago. So the store hands back what it
+/// filed, this window keeps it, and the next turn says which row it is replacing.
 @MainActor
 enum AIDiagramHistoryBridge {
-    /// Called with the title as the reader sees it and the Mermaid as it now stands, edits and all.
-    static var record: (_ title: String, _ source: MermaidSource, _ origin: String) -> Void = { _, _, _ in }
+    /// Called with the title as the reader sees it, the Mermaid as it now stands, and the row this
+    /// supersedes if the conversation has already filed one. Returns the row that was written.
+    static var record: (
+        _ title: String,
+        _ source: MermaidSource,
+        _ origin: String,
+        _ revising: UUID?
+    ) -> UUID? = { _, _, _, _ in nil }
     /// Which of the app's routes produced the diagram.
     static let origin = "ai"
 }
@@ -438,8 +447,19 @@ final class AIPromptModel: ObservableObject {
         guard let draft = session.exportableDraft,
               let source = try? MermaidSource(rawValue: draft.mermaid) else { return }
         let title = draft.title.isEmpty ? String(localized: "diagram.default-title") : draft.title
-        AIDiagramHistoryBridge.record(title, source, AIDiagramHistoryBridge.origin)
+        // Every answer after the first is a revision of the same diagram, so the row it filed is
+        // named and replaced. Without this a twelve-turn conversation files twelve rows and the cap
+        // evicts a dozen of the user's older diagrams to make room for them.
+        historyIdentity = AIDiagramHistoryBridge.record(
+            title,
+            source,
+            AIDiagramHistoryBridge.origin,
+            historyIdentity
+        )
     }
+
+    /// The history row this conversation has filed, if it has filed one.
+    private var historyIdentity: UUID?
 
     /// Hands the diagram to the preview every other route in the app ends in, so it can be zoomed,
     /// compared with another one and kept open after this window goes away.

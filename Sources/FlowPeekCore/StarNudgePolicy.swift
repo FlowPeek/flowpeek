@@ -86,6 +86,25 @@ public enum PreviewSurface: Equatable, Sendable {
     /// A failure in words: Mermaid that would not parse, an engine that would not run, a clipboard
     /// with nothing in it.
     case message
+
+    /// What is on screen, from what the preview coordinator knows about its two slots.
+    ///
+    /// A panel opened for a diagram is not the same thing as a diagram: the engine can refuse a
+    /// source that passed validation, and what stands in the panel then is an apology carrying a
+    /// parse error. Anything that treats a closing preview as a good moment has to be able to tell
+    /// the two apart, which is the whole reason this is a value and not a Bool.
+    public static func resolve(
+        hasQuickPanel: Bool,
+        quickIsDiagram: Bool,
+        quickHasDrawn: Bool,
+        promotedCount: Int,
+        promotedHasDrawn: Bool
+    ) -> PreviewSurface {
+        if promotedCount > 0, promotedHasDrawn { return .diagram }
+        guard hasQuickPanel else { return promotedCount > 0 ? .message : .none }
+        guard quickIsDiagram, quickHasDrawn else { return .message }
+        return .diagram
+    }
 }
 
 public enum StarNudgeDecision: Equatable, Sendable {

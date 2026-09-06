@@ -10,6 +10,7 @@
     <a href="https://github.com/FlowPeek/flowpeek/releases/latest"><img src="https://img.shields.io/github/v/release/FlowPeek/flowpeek?style=flat-square&label=release&color=0A84FF" alt="Latest release"></a>
     <a href="https://github.com/FlowPeek/flowpeek/releases"><img src="https://img.shields.io/github/downloads/FlowPeek/flowpeek/total?style=flat-square&color=3a3a3c" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/macOS-14%2B-3a3a3c?style=flat-square&logo=apple&logoColor=white" alt="macOS 14+">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3a3a3c?style=flat-square" alt="MIT License"></a>
   </p>
   <p>
     <a href="#install"><b>Install</b></a> ·
@@ -194,4 +195,4 @@ Sparkle checks `https://github.com/FlowPeek/flowpeek/releases/latest/download/ap
 
 ## Third-party software
 
-Mermaid 11.17.2 and Sparkle 2.9.2 are MIT licensed. See `THIRD_PARTY_NOTICES.md` and their upstream distributions for full license texts.
+FlowPeek itself is MIT licensed; see [LICENSE](LICENSE). Mermaid 11.17.2 and Sparkle 2.9.2 are MIT licensed. See `THIRD_PARTY_NOTICES.md` and their upstream distributions for full license texts.

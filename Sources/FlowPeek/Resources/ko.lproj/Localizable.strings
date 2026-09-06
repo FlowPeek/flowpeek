@@ -297,3 +297,9 @@
 "preview.background.make-solid" = "다이어그램을 자체 배경 위에 놓기";
 "preview.background.state.on" = "투명";
 "preview.background.state.off" = "불투명";
+
+/* 앱이 유일하게 부탁하는 것 */
+"star.title" = "FlowPeek이 마음에 드시나요?";
+"star.message" = "GitHub에 별을 남겨 주시면 다른 사람들이 FlowPeek을 찾는 데 도움이 됩니다. 이 부탁은 이번 한 번뿐입니다.";
+"star.action" = "GitHub에서 별 주기";
+"star.dismiss" = "괜찮습니다";

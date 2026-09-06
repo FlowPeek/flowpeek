@@ -106,8 +106,22 @@ final class AppState: ObservableObject {
     let ambient = AmbientPeekMonitor()
     let highlight = AmbientHighlightCoordinator()
     let indicator = ClipboardIndicatorCoordinator()
+    let starNotice = StarNudgeNoticeCoordinator()
     let shortcuts = ShortcutCenter()
     let updater = UpdaterService()
+
+    /// How much use the app has had, and whether it has already asked for its one favour. Not
+    /// `@Published`: nothing on screen renders it, and the only reader is the check that runs when
+    /// a preview closes.
+    private var starLedger = AppState.storedStarLedger {
+        didSet {
+            guard starLedger != oldValue else { return }
+            AppState.persist(starLedger)
+        }
+    }
+    /// Armed when a preview closes and cancelled if anything opens again before it fires. Held so a
+    /// second close cannot stack a second check on the first.
+    private var starCheck: Task<Void, Never>?
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Renderer")
     private var lastDetection: (text: String, detection: MermaidDetection)?
@@ -130,6 +144,12 @@ final class AppState: ObservableObject {
         // Wired here rather than in `start()`: a preview can be promoted from the demo arguments and
         // from the AI window, neither of which goes through the monitors that `start()` arms.
         previews.onPromotedChange = { [weak self] hasWindow in self?.hasPromotedPreview = hasWindow }
+        // The one moment worth asking anything: a diagram the user asked for has just been closed,
+        // so the app has demonstrably worked and the screen it was covering is theirs again.
+        previews.onVisibleSurfaceChange = { [weak self] visible in
+            self?.previewVisibilityDidChange(visible)
+        }
+        starNotice.onStar = { [weak self] in self?.openRepository() }
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: UserDefaults.standard,
@@ -165,6 +185,11 @@ final class AppState: ObservableObject {
         if ai != aiEnabled { aiEnabled = ai }
         let provider = Defaults.string(.aiProvider, default: AIProviderKind.openAI.rawValue)
         if provider != providerRawValue { providerRawValue = provider }
+        // Re-read for the same reason as the switches: `defaults delete flowpeek.star.asked` is how
+        // the notice is put back in front of a running app to be looked at, and a value taken from
+        // the store here must not be written straight back out again by the observer.
+        let star = AppState.storedStarLedger
+        if star != starLedger { starLedger = star }
     }
 
     /// The defaults keys these settings live under, named once so a view that owns the same key and
@@ -178,6 +203,9 @@ final class AppState: ObservableObject {
             case ambientEnabled = "flowpeek.ambient.enabled"
             case aiEnabled = "flowpeek.ai.enabled"
             case aiProvider = "flowpeek.ai.provider"
+            case starDiagramsOpened = "flowpeek.star.diagramsOpened"
+            case starFirstDiagram = "flowpeek.star.firstDiagram"
+            case starAsked = "flowpeek.star.asked"
         }
 
         static func bool(_ key: Key, default fallback: Bool) -> Bool {
@@ -195,6 +223,26 @@ final class AppState: ObservableObject {
         static func set(_ value: String, _ key: Key) {
             UserDefaults.standard.set(value, forKey: key.rawValue)
         }
+
+        static func integer(_ key: Key) -> Int {
+            UserDefaults.standard.integer(forKey: key.rawValue)
+        }
+
+        static func set(_ value: Int, _ key: Key) {
+            UserDefaults.standard.set(value, forKey: key.rawValue)
+        }
+
+        /// Absent rather than zero when the key was never written: 1970 is a real instant, and a
+        /// missing date read as one would make every install look years old.
+        static func date(_ key: Key) -> Date? {
+            guard let seconds = UserDefaults.standard.object(forKey: key.rawValue) as? Double else { return nil }
+            return Date(timeIntervalSince1970: seconds)
+        }
+
+        static func set(_ value: Date?, _ key: Key) {
+            guard let value else { return UserDefaults.standard.removeObject(forKey: key.rawValue) }
+            UserDefaults.standard.set(value.timeIntervalSince1970, forKey: key.rawValue)
+        }
     }
 
     func start() {
@@ -204,6 +252,13 @@ final class AppState: ObservableObject {
         if ProcessInfo.processInfo.arguments.contains("--preview-demo") {
             startEngine()
             showPreviewDemo()
+            return
+        }
+        // The notice is meant to be seen once, weeks in. Without a door like this the only way to
+        // look at its wording, its placement or its buttons is to forge forty diagrams and a date
+        // into the store and then wait for a preview to close.
+        if ProcessInfo.processInfo.arguments.contains("--star-demo") {
+            starNotice.show()
             return
         }
         if ProcessInfo.processInfo.arguments.contains("--settings-demo") {
@@ -271,6 +326,9 @@ final class AppState: ObservableObject {
         shortcuts.unregisterAll()
         indicator.hide()
         highlight.hide()
+        starCheck?.cancel()
+        starCheck = nil
+        starNotice.hide()
         forgetSelection()
     }
 
@@ -644,7 +702,7 @@ final class AppState: ObservableObject {
     }
 
     private func showCopied(_ source: MermaidSource) {
-        tutorial.noteOpened(.clipboard)
+        noteDiagramOpened(.clipboard)
         previews.showQuick(
             document: DiagramDocument(title: String(localized: "diagram.clipboard-title"), source: source)
         )
@@ -656,6 +714,85 @@ final class AppState: ObservableObject {
     private func copySampleDiagram() {
         clipboard.write(TutorialSample.text)
         previewCopied()
+    }
+
+    // MARK: - The one ask
+
+    /// A diagram the user asked for is on screen, opened by one of the three routes. The only thing
+    /// FlowPeek counts towards ever asking for anything: not launches, not selections it noticed,
+    /// not copies it badged — the moments it did the job it exists for.
+    private func noteDiagramOpened(_ lesson: TutorialProgress.Lesson) {
+        tutorial.noteOpened(lesson)
+        starLedger = starLedger.recordingDiagram(at: Date())
+    }
+
+    /// Long enough for the preview's fade to finish and for the user's eye to have left the middle
+    /// of the screen; short enough that the notice still reads as a remark about the diagram they
+    /// just closed rather than as something that arrived out of nowhere.
+    private static let starNoticeDelay: Duration = .milliseconds(900)
+
+    /// A preview appeared or went away. Only the way out is interesting, and only for a ledger that
+    /// has already earned the question — otherwise every preview every user ever closes would arm a
+    /// task for something that cannot happen for weeks, if ever.
+    private func previewVisibilityDidChange(_ visible: Bool) {
+        starCheck?.cancel()
+        starCheck = nil
+        guard !visible else { return }
+        // Asked against a clear screen on purpose: this is "has the app earned it", not "may it be
+        // said now". Promoting a quick panel into a window empties both slots for an instant, so
+        // what is actually on screen is read again when the task fires.
+        guard StarNudgePolicy.decide(ledger: starLedger, screen: .clear, now: Date()) == .ask else { return }
+        starCheck = Task { [weak self] in
+            try? await Task.sleep(for: Self.starNoticeDelay)
+            guard !Task.isCancelled else { return }
+            self?.presentStarNoticeIfEarned()
+        }
+    }
+
+    private func presentStarNoticeIfEarned() {
+        guard StarNudgePolicy.decide(ledger: starLedger, screen: starScreen, now: Date()) == .ask else { return }
+        // Written before the panel is on screen rather than when it is answered. The notice retires
+        // itself after fifteen seconds and a quit or a crash in between is not an answer either, so
+        // recording it any later is how a user ends up being asked a second time.
+        starLedger = starLedger.asking()
+        starNotice.show()
+    }
+
+    /// Everything that would make the notice an interruption rather than a remark.
+    private var starScreen: StarNudgeScreen {
+        StarNudgeScreen(
+            previewOnScreen: previews.hasVisibleSurface,
+            onboardingOnScreen: OnboardingCoordinator.shared.isPresenting,
+            otherWindowOnScreen: AppState.isShowingAnOrdinaryWindow
+        )
+    }
+
+    /// Settings, the AI window, a preview promoted to a window of its own. Asked of AppKit rather
+    /// than of each coordinator so a surface added later is covered without this being told about
+    /// it, and narrowed to `.normal` because every HUD this app puts on screen — this notice, the
+    /// copy badge, the selection overlay, the ambient outline, the quick preview, the wizard — sits
+    /// at `.floating` or above and none of them is a place the user is working.
+    private static var isShowingAnOrdinaryWindow: Bool {
+        NSApp.windows.contains { $0.isVisible && $0.level == .normal }
+    }
+
+    private func openRepository() {
+        guard let url = URL(string: StarNudgePolicy.repository) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private static var storedStarLedger: StarNudgeLedger {
+        StarNudgeLedger(
+            diagramsOpened: Defaults.integer(.starDiagramsOpened),
+            firstDiagramAt: Defaults.date(.starFirstDiagram),
+            asked: Defaults.bool(.starAsked, default: false)
+        )
+    }
+
+    private static func persist(_ ledger: StarNudgeLedger) {
+        Defaults.set(ledger.diagramsOpened, .starDiagramsOpened)
+        Defaults.set(ledger.firstDiagramAt, .starFirstDiagram)
+        Defaults.set(ledger.asked, .starAsked)
     }
 
     /// An outline is only ever drawn; opening the diagram still takes a deliberate key or click.
@@ -719,7 +856,7 @@ final class AppState: ObservableObject {
         let title = String(localized: "preview.error.title")
         do {
             let source = try MermaidSource(rawValue: candidate.detection.extractedSource)
-            tutorial.noteOpened(.ambient)
+            noteDiagramOpened(.ambient)
             previews.showQuick(
                 document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source)
             )
@@ -741,7 +878,7 @@ final class AppState: ObservableObject {
         let detection = cached ?? MermaidDetector.detect(snapshot.text)
         do {
             let source = try MermaidSource(rawValue: detection.extractedSource)
-            tutorial.noteOpened(.selection)
+            noteDiagramOpened(.selection)
             previews.showQuick(document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source))
         } catch let error as MermaidSource.ValidationError {
             previews.showMessage(title: title, message: localizedUserMessage(error))

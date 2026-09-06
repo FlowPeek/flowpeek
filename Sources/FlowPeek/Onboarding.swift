@@ -14,6 +14,11 @@ final class OnboardingCoordinator {
     ) { Self.recordProgress() }
     private var spaceObserver: NSObjectProtocol?
 
+    /// Whether the card is on screen. The window follows the user across Spaces and outlives a
+    /// deactivation, so "is FlowPeek showing the wizard" cannot be answered by asking AppKit which
+    /// window is key.
+    var isPresenting: Bool { window != nil }
+
     func show(entry: OnboardingEntry = .setup) {
         switch session.opening(entry) {
         case .front:

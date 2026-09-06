@@ -594,14 +594,35 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     /// menu-bar entry that offers the way back can appear and disappear with it.
     var onPromotedChange: ((Bool) -> Void)?
 
-    private var quickPanel: NSPanel?
+    /// Fired whenever the answer to "is FlowPeek showing a diagram right now" changes. The quick
+    /// panel and the promoted windows are separate slots and either can be the last one on screen,
+    /// so the question is asked of both together rather than of whichever one moved.
+    var onVisibleSurfaceChange: ((Bool) -> Void)?
+
+    var hasVisibleSurface: Bool { quickPanel != nil || !promoted.isEmpty }
+
+    private var quickPanel: NSPanel? {
+        didSet { reportVisibleSurface() }
+    }
     private var quickModel: DiagramViewModel?
     private var promoted: [Promoted] = [] {
         didSet {
+            reportVisibleSurface()
             guard promoted.isEmpty != oldValue.isEmpty else { return }
             updateWindowKeyMonitor()
             onPromotedChange?(!promoted.isEmpty)
         }
+    }
+    /// What the last report said. Both slots are cleared along more than one path — a quick panel
+    /// dismissed by hand also arrives again through `windowWillClose` — and a listener should hear
+    /// about the answer changing, not about each write that leaves it where it was.
+    private var reportedVisibleSurface = false
+
+    private func reportVisibleSurface() {
+        let visible = hasVisibleSurface
+        guard visible != reportedVisibleSurface else { return }
+        reportedVisibleSurface = visible
+        onVisibleSurfaceChange?(visible)
     }
     private var dismissMonitors: [Any] = []
     private var windowKeyMonitor: Any?

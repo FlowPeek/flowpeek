@@ -701,10 +701,17 @@ final class AppState: ObservableObject {
     /// The combination that opens this route, or `nil` while nothing holds one. A dormant or
     /// clashing action has no registered hot key, so naming its stored chord would advertise a key
     /// that goes nowhere — and this panel is reachable from a menu row that is always enabled.
-    var clipboardShortcutDisplay: String? {
-        guard shortcuts.activeActions.contains(.previewClipboard),
-              !shortcuts.unavailableActions.contains(.previewClipboard) else { return nil }
-        return shortcuts.shortcuts[.previewClipboard].display
+    var clipboardShortcutDisplay: String? { shortcutDisplay(for: .previewClipboard) }
+
+    /// The combination an action currently holds, or nil when it holds none.
+    ///
+    /// Two things make it nil, and both mean the same thing to the reader: the feature behind it is
+    /// switched off, so FlowPeek never asked for the chord, or macOS refused to hand it over
+    /// because another app has it. Printing a key that will not work is worse than printing none.
+    func shortcutDisplay(for action: FlowPeekShortcutAction) -> String? {
+        guard shortcuts.activeActions.contains(action),
+              !shortcuts.unavailableActions.contains(action) else { return nil }
+        return shortcuts.shortcuts[action].display
     }
 
     /// Two sentences rather than one with an empty slot: the chord is rendered from the store when

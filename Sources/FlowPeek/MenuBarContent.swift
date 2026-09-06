@@ -69,7 +69,7 @@ struct MenuBarContent: View {
     // MARK: - Who FlowPeek is and how it is doing
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: app.menuBarStatus.symbolName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(statusTint)
@@ -92,7 +92,17 @@ struct MenuBarContent: View {
                         .padding(.top, 2)
                 }
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 6)
+            // The switch belongs beside the sentence it is about: the status line and this are the
+            // same fact said twice, and the one thing a person opens this panel to change is
+            // whether FlowPeek is watching at all. Its label is hidden because the line to its left
+            // already says what it says -- VoiceOver still reads it.
+            Toggle(isOn: detection) {
+                Text(app.isEnabled ? "menu.detection.on" : "menu.detection.paused")
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)
@@ -178,6 +188,23 @@ struct MenuBarContent: View {
                     }
                 }
             }
+            // The AI window has no other door: it is opened by a chord, and a chord nobody
+            // remembers is a feature nobody has. Only while the experiment is on, because the row
+            // would otherwise open a window telling the user to go and switch it on.
+            if app.aiEnabled {
+                PanelRow(action: { dismiss(); app.presentAIPrompt() }) {
+                    HStack(spacing: 10) {
+                        rowIcon("wand.and.stars")
+                        Text("shortcut.ai-prompt").font(.system(size: 12))
+                        Spacer(minLength: 6)
+                        if let chord = app.shortcutDisplay(for: .aiPrompt) {
+                            Text(verbatim: chord)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
             // Only while there is one to go back to. A promoted preview is borderless, so it has no
             // Dock icon and no entry in the Window menu: once another app covered it there was
             // nothing that could raise it again.
@@ -190,17 +217,22 @@ struct MenuBarContent: View {
                     }
                 }
             }
-            HStack(spacing: 10) {
-                rowIcon(app.isEnabled ? "eye" : "pause.circle")
-                Toggle(isOn: detection) {
-                    Text(app.isEnabled ? "menu.detection.on" : "menu.detection.paused")
-                        .font(.system(size: 12))
+            if let chord = app.shortcutDisplay(for: .ambientPeek) {
+                // A gesture, not a command: there is no row to press, so the combination is simply
+                // stated. It appears only while hold to peek actually holds the key, which is the
+                // same condition under which pressing it does anything.
+                HStack(spacing: 10) {
+                    rowIcon("hand.point.up.left")
+                    Text("settings.ambient").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Spacer(minLength: 6)
+                    Text(verbatim: chord)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
-                .toggleStyle(.switch)
-                .controlSize(.mini)
+                .padding(.horizontal, 14)
+                .padding(.top, 4)
+                .padding(.bottom, 2)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
         }
         .padding(.vertical, 6)
     }

@@ -936,19 +936,11 @@ final class AppState: ObservableObject {
         // Belt and braces: with the activation policy in force this key is not even registered while
         // the experiment is off, so there is nothing to explain here.
         guard aiEnabled else { return }
-        guard let selection = lastSelection, !selection.text.isEmpty else {
-            // The prompt has nothing to work from, and saying nothing at all is what made the
-            // shortcut look broken.
-            previews.showMessage(
-                title: String(localized: "preview.error.title"),
-                message: String(
-                    format: String(localized: "ai.no-selection"),
-                    shortcuts.shortcuts[.aiPrompt].display
-                )
-            )
-            return
-        }
-        AIPromptCoordinator.shared.show(context: selection.text)
+        // No selection is an ordinary way to open this window, not a reason to refuse. "Draw me a
+        // sequence diagram for a login flow" needs no context whatsoever, and the shortcut used to
+        // do nothing but put up an error unless the user happened to have text selected — which
+        // made the feature unreachable for the request it is best at.
+        AIPromptCoordinator.shared.show(context: lastSelection?.text ?? "")
     }
 
     var launchAtLoginState: LaunchAtLoginState { launchAtLogin.state }

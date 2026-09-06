@@ -121,6 +121,9 @@
 "shortcut.inactive.ai" = "Turn on AI Diagram Generation in the AI tab to use this.";
 "shortcut.inactive.ambient" = "Turn on “Hold to Peek” in General, and allow Accessibility, to use this.";
 "shortcut.inactive.paused" = "Detection is paused. Turn it back on from the FlowPeek menu to use this.";
+"shortcut.history" = "Open the diagram shelf";
+"shortcut.history.detail" = "Raises the shelf of diagrams you have made, with the search field ready. Everything on it can be reached from the keyboard.";
+"shortcut.inactive.history" = "Turn on “Remembered Diagrams” in General to use this.";
 "shortcut.error.no-modifier" = "A global shortcut needs at least one of Command, Option, or Control.";
 "shortcut.error.reserved" = "%@ is reserved by macOS.";
 "shortcut.error.already-used" = "Already assigned to “%@”.";
@@ -357,6 +360,13 @@
 "history.search" = "Search";
 "history.search.clear" = "Clear the search";
 "history.search.related" = "No exact match. The closest by meaning:";
+"history.keys.move" = "Move";
+"history.keys.open" = "Open";
+"history.keys.copy" = "Copy";
+"history.keys.forget" = "Forget";
+"history.keys.close" = "Close";
+"history.copied" = "Copied";
+"history.card.hint" = "Return opens it, Command-C copies the diagram, Delete forgets it.";
 "history.search.none.title" = "Nothing Matches";
 "history.search.none.message" = "No remembered diagram has those words in it, and none of them looked close enough to suggest. Matching by meaning needs a language model macOS ships; for Korean and others it matches the words themselves.";
 "history.count" = "%1$lld of %2$lld kept";

@@ -164,6 +164,7 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
     case previewClipboard
     case aiPrompt
     case ambientPeek
+    case history
 
     public var defaultShortcut: FlowPeekShortcut {
         switch self {
@@ -172,6 +173,9 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         // The same virtual key the ambient monitor watched for: ⌥Space, now registered so macOS
         // hands it to FlowPeek instead of also typing a non-breaking space into the app underneath.
         case .ambientPeek: FlowPeekShortcut(keyCode: 0x31, modifiers: [.option])
+        // H for history, on the same Command-Option-Shift the clipboard route uses: the two are the
+        // ways back to a diagram, and they should feel like a pair.
+        case .history: FlowPeekShortcut(keyCode: 0x04, modifiers: [.command, .option, .shift])
         }
     }
 
@@ -181,6 +185,7 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         case .aiPrompt: 1
         case .previewClipboard: 2
         case .ambientPeek: 3
+        case .history: 4
         }
     }
 
@@ -189,7 +194,7 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
     /// stays with the frontmost app until the ambient experiment is actually on.
     public var registersOnlyWhenActive: Bool {
         switch self {
-        case .previewClipboard, .aiPrompt: false
+        case .previewClipboard, .aiPrompt, .history: false
         case .ambientPeek: true
         }
     }
@@ -199,6 +204,7 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         case .previewClipboard: "shortcut.preview-clipboard"
         case .aiPrompt: "shortcut.ai-prompt"
         case .ambientPeek: "shortcut.ambient-peek"
+        case .history: "shortcut.history"
         }
     }
 
@@ -207,6 +213,7 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         case .previewClipboard: "shortcut.preview-clipboard.detail"
         case .aiPrompt: "shortcut.ai-prompt.detail"
         case .ambientPeek: "shortcut.ambient-peek.detail"
+        case .history: "shortcut.history.detail"
         }
     }
 
@@ -217,6 +224,9 @@ public enum FlowPeekShortcutAction: String, CaseIterable, Codable, Sendable {
         case .previewClipboard: "shortcut.inactive.clipboard"
         case .aiPrompt: "shortcut.inactive.ai"
         case .ambientPeek: "shortcut.inactive.ambient"
+        // Nothing to switch on: the history is either being kept or it is not, and when it is not
+        // there is no shelf for a chord to open.
+        case .history: "shortcut.inactive.history"
         }
     }
 

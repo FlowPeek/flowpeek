@@ -121,6 +121,9 @@
 "shortcut.inactive.ai" = "AI 탭에서 AI 다이어그램 생성을 켜야 사용할 수 있습니다.";
 "shortcut.inactive.ambient" = "일반 탭에서 ‘홀드해서 엿보기’를 켜고 접근성 권한을 허용해야 사용할 수 있습니다.";
 "shortcut.inactive.paused" = "감지가 일시 정지 상태입니다. FlowPeek 메뉴에서 다시 켜야 사용할 수 있습니다.";
+"shortcut.history" = "다이어그램 셸프 열기";
+"shortcut.history.detail" = "지금까지 만든 다이어그램 셸프를 띄우고 검색창에 바로 입력할 수 있게 합니다. 셸프의 모든 동작은 키보드만으로 가능합니다.";
+"shortcut.inactive.history" = "사용하려면 일반 설정에서 “기억한 다이어그램”을 켜세요.";
 "shortcut.error.no-modifier" = "전역 단축키에는 Command·Option·Control 중 하나 이상이 필요합니다.";
 "shortcut.error.reserved" = "%@은(는) macOS가 선점한 조합입니다.";
 "shortcut.error.already-used" = "이미 ‘%@’에 지정되어 있습니다.";
@@ -357,6 +360,13 @@
 "history.search" = "검색";
 "history.search.clear" = "검색어 지우기";
 "history.search.related" = "정확히 일치하는 것이 없습니다. 의미가 가까운 것:";
+"history.keys.move" = "이동";
+"history.keys.open" = "열기";
+"history.keys.copy" = "복사";
+"history.keys.forget" = "삭제";
+"history.keys.close" = "닫기";
+"history.copied" = "복사됨";
+"history.card.hint" = "Return으로 열고, Command-C로 다이어그램을 복사하고, Delete로 삭제합니다.";
 "history.search.none.title" = "일치하는 것이 없음";
 "history.search.none.message" = "그 단어가 들어 있는 다이어그램도, 제안할 만큼 가까운 다이어그램도 없습니다. 의미로 찾는 기능은 macOS가 제공하는 언어 모델이 필요하며, 한국어 등에서는 단어 자체로 찾습니다.";
 "history.count" = "%2$lld개 중 %1$lld개 보관 중";

@@ -142,6 +142,7 @@ final class KeyboardShortcutTests: XCTestCase {
             .previewClipboard: "shortcut.preview-clipboard",
             .aiPrompt: "shortcut.ai-prompt",
             .ambientPeek: "shortcut.ambient-peek",
+            .history: "shortcut.history",
         ]
         XCTAssertEqual(keys.count, FlowPeekShortcutAction.allCases.count)
 
@@ -244,6 +245,7 @@ final class ShortcutInactiveHintTests: XCTestCase {
             case .previewClipboard: "shortcut.inactive.clipboard"
             case .aiPrompt: "shortcut.inactive.ai"
             case .ambientPeek: "shortcut.inactive.ambient"
+            case .history: "shortcut.inactive.history"
             }
             XCTAssertEqual(action.inactiveHintKey(detectionPaused: false), expected, "\(action)")
         }

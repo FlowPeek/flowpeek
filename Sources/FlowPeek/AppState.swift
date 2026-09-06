@@ -311,6 +311,7 @@ final class AppState: ObservableObject {
             .aiPrompt: { [weak self] in self?.presentAIPrompt() },
             .previewClipboard: { [weak self] in self?.previewCopied() },
             .ambientPeek: { [weak self] in self?.ambient.activate() },
+            .history: { DiagramHistoryCoordinator.shared.show() },
         ]
         startEngine()
         // Registers the hot keys as well, and only the ones whose feature is on — which is why there
@@ -396,7 +397,8 @@ final class AppState: ObservableObject {
                 clipboardWatchEnabled: clipboardWatchEnabled,
                 aiEnabled: aiEnabled,
                 ambientPeekEnabled: ambientPeekEnabled,
-                accessibilityGranted: accessibilityGranted
+                accessibilityGranted: accessibilityGranted,
+                historyEnabled: DiagramHistoryStore.shared.isRemembering
             )
         )
         refreshMenuBarStatus()

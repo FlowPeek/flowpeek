@@ -9,10 +9,13 @@ public enum ShortcutActivationPolicy {
         clipboardWatchEnabled: Bool,
         aiEnabled: Bool,
         ambientPeekEnabled: Bool = false,
-        accessibilityGranted: Bool = false
+        accessibilityGranted: Bool = false,
+        historyEnabled: Bool = true
     ) -> Set<FlowPeekShortcutAction> {
         guard isEnabled else { return [] }
         var actions: Set<FlowPeekShortcutAction> = []
+        // The shelf reads nothing and watches nothing; it only needs there to be a history to show.
+        if historyEnabled { actions.insert(.history) }
         if clipboardWatchEnabled { actions.insert(.previewClipboard) }
         if aiEnabled { actions.insert(.aiPrompt) }
         // Ambient peek reads the accessibility tree, so without the grant the feature cannot raise

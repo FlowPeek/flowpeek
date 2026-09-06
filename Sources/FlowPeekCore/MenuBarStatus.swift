@@ -1,3 +1,4 @@
+import Foundation
 /// What the menu-bar icon is saying about FlowPeek right now.
 ///
 /// Only states the user can act on. There is deliberately no "warming up" case and none for a
@@ -67,6 +68,51 @@ public enum MenuBarStatus: Sendable, Equatable, CaseIterable {
         case .permissionMissing: "exclamationmark.triangle.fill"
         case .nothingWatched: "eye.slash"
         case .engineBroken: "exclamationmark.octagon.fill"
+        }
+    }
+}
+
+/// The one thing worth offering to do about the state the icon is drawing.
+///
+/// The menu used to carry a row for every complaint at once: a line about the permission, a button
+/// for it, a line about the engine, a button for it, a line about a shortcut and a button for that
+/// — up to six rows, in a menu whose other half is eight. They are not independent, though. Only
+/// one of them is the reason FlowPeek is not doing its job, and it is the same one the icon has
+/// already picked, so the menu offers that one and stays the same shape whatever is wrong.
+public enum MenuBarRemedy: Equatable, Sendable {
+    case grantPermission
+    case recheckEngine
+    case fixShortcut
+
+    public var titleKey: String.LocalizationValue {
+        switch self {
+        case .grantPermission: "permission.open-settings"
+        case .recheckEngine: "menu.engine.recheck"
+        case .fixShortcut: "menu.shortcuts.fix"
+        }
+    }
+
+    /// - Parameters:
+    ///   - isCheckingEngine: nothing is offered while the canary is still running; the answer that
+    ///     would decide what to offer has not arrived.
+    ///   - hasUnavailableShortcut: a combination macOS refused to hand over. Last in precedence:
+    ///     the feature behind it is reachable from the menu anyway, where a missing permission or a
+    ///     broken engine leaves nothing working at all.
+    public static func resolve(
+        status: MenuBarStatus,
+        isCheckingEngine: Bool,
+        engineComplained: Bool,
+        hasUnavailableShortcut: Bool
+    ) -> MenuBarRemedy? {
+        guard !isCheckingEngine else { return nil }
+        switch status {
+        case .engineBroken: return .recheckEngine
+        case .permissionMissing, .nothingWatched: return .grantPermission
+        case .armed, .paused:
+            // A degraded engine that still draws: worth offering the re-check, because the verdict
+            // is one canary at one launch and taking it again is the only way to move it.
+            if engineComplained { return .recheckEngine }
+            return hasUnavailableShortcut ? .fixShortcut : nil
         }
     }
 }

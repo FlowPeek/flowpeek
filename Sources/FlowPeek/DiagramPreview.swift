@@ -640,6 +640,14 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
 
     var hasVisibleSurface: Bool { visibleSurface != .none }
 
+    /// What is drawn right now, so a caller that wants to file it does not have to have kept a copy
+    /// from the moment it asked for the preview.
+    var shownDiagram: (title: String, source: String)? {
+        if let model = quickModel, model.hasDrawn { return (model.title, model.source) }
+        guard let model = promoted.last(where: { $0.model.hasDrawn })?.model else { return nil }
+        return (model.title, model.source)
+    }
+
     private var quickPanel: NSPanel? {
         didSet { reportVisibleSurface() }
     }

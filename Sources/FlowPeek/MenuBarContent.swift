@@ -4,74 +4,56 @@ import SwiftUI
 
 struct MenuBarContent: View {
     @EnvironmentObject private var app: AppState
+    /// Observed, not read once. A diagram filed while this menu is on screen -- the AI window is
+    /// perfectly capable of finishing one behind it -- has to appear in the list below, and an
+    /// unobserved `shared` would leave the menu showing whatever was true when it was last drawn.
+    @ObservedObject private var history = DiagramHistoryStore.shared
 
     var body: some View {
-        // The menu opens with the same verdict the icon is drawing, in words: this is the only
-        // surface a user with no window open can consult when FlowPeek has gone quiet, and it used
-        // to say nothing at all about permission — the state that switches two of the three routes
-        // off — while offering "Refresh Accessibility Permission" as a command whose click closed
-        // the menu and reported nothing.
+        // One line, then at most one thing to do about it. The menu used to grow a row for every
+        // complaint at once -- a line and a button for the permission, another pair for the engine,
+        // another for a shortcut macOS refused -- so its shape changed with the weather and the
+        // reader had to work out which of three problems was the one stopping them. Only one of
+        // them ever is, and the icon has already picked it.
         Text(statusLine)
-        if !app.accessibilityGranted {
-            // Said here even when the icon stays calm because the user declined the switch: the
-            // menu is where someone can find out what that costs and change their mind, and it is
-            // the place to say it without turning the icon into a permanent nag.
-            if !statusLineCoversPermission {
-                Text("menu.status.permission")
-            }
-            Button("permission.open-settings") { app.openAccessibilitySettings() }
-        }
-        if app.isCheckingEngine {
-            Text("menu.engine.checking")
-        } else {
-            if let complaint = engineComplaint {
-                Text(complaint)
-            }
-            // Offered for a degraded engine too: the complaint is about one canary at one launch,
-            // and taking it again is the only way to find out whether it still stands.
-            if app.engineHealth?.menuDescription != nil {
-                Button("menu.engine.recheck") { app.recheckEngine() }
-            }
-        }
-        // A stored combination the OS refused to hand over leaves the feature reachable only from
-        // here, and until now the red line saying so lived in the Shortcuts pane alone.
-        if !app.shortcuts.unavailableActions.isEmpty {
-            Text("menu.shortcuts.unavailable")
-            // Straight to the pane that holds the field, the way the tutorial's own buttons open the
-            // step they are about: this row exists to fix a combination, and `handle(.showSettings)`
-            // would land the user on General with nothing on it about shortcuts.
-            Button("menu.shortcuts.fix") { SettingsWindowCoordinator.shared.show(section: .shortcuts) }
+        if let remedy {
+            Button(String(localized: remedy.titleKey)) { perform(remedy) }
         }
         Divider()
+
+        // The diagrams the user made, at the top, because coming back to one is the commonest
+        // reason to open this menu at all. The store reads its file once per launch, on the first
+        // touch, and is in memory afterwards.
+        Menu("menu.recent") {
+            ForEach(recent) { entry in
+                Button(entry.title) { open(entry) }
+            }
+            if recent.isEmpty {
+                Text("menu.recent.empty")
+            } else {
+                Divider()
+            }
+            Button("menu.recent.all") { DiagramHistoryCoordinator.shared.show() }
+        }
         // The only mouse-reachable door to the clipboard route once the badge has faded, and the
         // one place the chord is legible without opening Settings.
         Button(clipboardTitle) { app.previewCopied() }
         Toggle(String(localized: app.isEnabled ? "menu.detection.on" : "menu.detection.paused"), isOn: detection)
-        Divider()
-        // Offered whether or not anything is in it: a window that says it is empty is how someone
-        // finds out the feature exists, and a row that appears only once there is something to
-        // find is a row nobody knows to look for. It deliberately reads nothing from the store —
-        // the file behind it is only opened once this is clicked, not every time the menu is drawn.
-        Button("menu.history") { DiagramHistoryCoordinator.shared.show() }
-        Divider()
         // Only while there is one to go back to. A promoted preview is borderless, so it has no
         // Dock icon and no entry in the Window menu: once another app covered it there was nothing
         // that could raise it again.
         if app.hasPromotedPreview {
             Button("menu.preview.reveal") { app.handle(.revealPreview) }
-            Divider()
         }
-        Button("menu.settings") {
-            app.handle(.showSettings)
-        }
-        // The only other opener is the launch-time check, which now stops firing once the permission
-        // question has an answer — so without this the wizard would be unreachable after dismissal.
-        Button("menu.onboarding") { OnboardingCoordinator.shared.show() }
-        // The three gestures are the whole app, and a week later nobody remembers whether it was
-        // hold-Option or Option-drag. This is the way back to just the checklist and the practice
-        // page, without walking through setup again.
-        Button("menu.tutorial") { OnboardingCoordinator.shared.show(entry: .tutorial) }
         Divider()
+
+        // One door, not two. "Show Setup Guide" and "How FlowPeek Works" opened the same window,
+        // and everything the setup steps carry is reachable without them: the permission from the
+        // row above and from the tutorial's own locked lesson, launching at login from Settings.
+        Button("menu.help") { OnboardingCoordinator.shared.show(entry: .tutorial) }
+        Button("menu.settings") { app.handle(.showSettings) }
+        Divider()
+
         Button("menu.update") {
             // Sparkle is wired in the Xcode distribution target when an appcast URL is supplied.
             NotificationCenter.default.post(name: .flowPeekCheckForUpdates, object: nil)
@@ -80,6 +62,41 @@ struct MenuBarContent: View {
         Divider()
         Button("menu.quit") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
+    }
+
+    /// How many of the user's diagrams the menu itself offers. Enough to recognise the one you
+    /// meant, short enough that the menu does not become the history window.
+    private static let recentCount = 5
+
+    private var recent: [DiagramHistoryEntry] {
+        Array(history.entries.prefix(Self.recentCount))
+    }
+
+    private func open(_ entry: DiagramHistoryEntry) {
+        guard let document = entry.document(fallbackTitle: String(localized: "diagram.default-title")) else { return }
+        app.previews.openWindow(document: document)
+    }
+
+    /// The one thing worth offering about the state above, chosen by the same precedence the icon
+    /// uses so the two can never disagree.
+    private var remedy: MenuBarRemedy? {
+        MenuBarRemedy.resolve(
+            status: app.menuBarStatus,
+            isCheckingEngine: app.isCheckingEngine,
+            engineComplained: app.engineHealth?.menuDescription != nil,
+            hasUnavailableShortcut: !app.shortcuts.unavailableActions.isEmpty
+        )
+    }
+
+    private func perform(_ remedy: MenuBarRemedy) {
+        switch remedy {
+        case .grantPermission: app.openAccessibilitySettings()
+        case .recheckEngine: app.recheckEngine()
+        // Straight to the pane that holds the field, the way the tutorial's own buttons open the
+        // step they are about: `handle(.showSettings)` would land the user on General with nothing
+        // on it about shortcuts.
+        case .fixShortcut: SettingsWindowCoordinator.shared.show(section: .shortcuts)
+        }
     }
 
     /// The pause switch. A binding whose setter does the work, rather than `$app.isEnabled` with an
@@ -106,19 +123,6 @@ struct MenuBarContent: View {
         // the app, and a menu that only speaks up about problems cannot answer it either.
         case .armed: String(localized: "menu.status.ready")
         }
-    }
-
-    /// Whether the line above has already said that Accessibility is off, so the extra row for the
-    /// decliner does not repeat it back to them.
-    private var statusLineCoversPermission: Bool {
-        app.menuBarStatus == .permissionMissing || app.menuBarStatus == .nothingWatched
-    }
-
-    /// The engine's complaint, unless the status row above is already carrying it — which it is
-    /// whenever the engine is the top-priority problem.
-    private var engineComplaint: String? {
-        guard app.menuBarStatus != .engineBroken else { return nil }
-        return app.engineHealth?.menuDescription
     }
 
     /// The glyphs are appended from the shortcut store rather than translated into the title: the

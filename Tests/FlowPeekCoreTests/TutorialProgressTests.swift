@@ -464,7 +464,7 @@ final class TutorialProgressTests: XCTestCase {
     /// The checklist is read aloud through these, so a key that reaches only one catalogue ships as
     /// its own identifier — VoiceOver saying "tutorial.state.done".
     func testEveryKeyTheChecklistReadsAloudIsInBothCatalogs() throws {
-        var keys = ["tutorial.state.off", "tutorial.restart", "menu.tutorial", "tutorial.page.hint"]
+        var keys = ["tutorial.state.off", "tutorial.restart", "menu.help", "tutorial.page.hint"]
         keys += [TutorialProgress.State.waiting, .detected, .missed, .done].map { Self.key($0.titleKey) }
         keys += TutorialProgress.Lesson.allCases.map { Self.key($0.nudgeKey) }
         keys += TutorialProgress.Lesson.allCases.compactMap { $0.missedKey }.map(Self.key)

@@ -102,3 +102,54 @@ final class MenuBarStatusTests: XCTestCase {
         XCTAssertFalse(symbols.contains(where: \.isEmpty))
     }
 }
+
+final class MenuBarRemedyTests: XCTestCase {
+    private func remedy(
+        _ status: MenuBarStatus,
+        checking: Bool = false,
+        complained: Bool = false,
+        shortcut: Bool = false
+    ) -> MenuBarRemedy? {
+        MenuBarRemedy.resolve(
+            status: status,
+            isCheckingEngine: checking,
+            engineComplained: complained,
+            hasUnavailableShortcut: shortcut
+        )
+    }
+
+    /// The reason nothing works outranks the inconvenience. All three can be true at once, and a
+    /// menu that offered all three would be asking the reader to work out which one matters.
+    func testTheWorstProblemIsTheOneOffered() {
+        XCTAssertEqual(remedy(.engineBroken, complained: true, shortcut: true), .recheckEngine)
+        XCTAssertEqual(remedy(.permissionMissing, shortcut: true), .grantPermission)
+        XCTAssertEqual(remedy(.nothingWatched, shortcut: true), .grantPermission)
+        XCTAssertEqual(remedy(.armed, shortcut: true), .fixShortcut)
+    }
+
+    /// Working, and nothing to do about it: the row is absent rather than disabled, so the menu is
+    /// one line shorter when there is nothing wrong.
+    func testNothingIsOfferedWhenNothingIsWrong() {
+        XCTAssertNil(remedy(.armed))
+        XCTAssertNil(remedy(.paused))
+    }
+
+    /// A verdict that has not arrived is not a problem to act on.
+    func testNothingIsOfferedWhileTheEngineIsStillBeingChecked() {
+        XCTAssertNil(remedy(.engineBroken, checking: true, complained: true, shortcut: true))
+        XCTAssertNil(remedy(.armed, checking: true, shortcut: true))
+    }
+
+    /// A degraded engine still draws, so it is not `.engineBroken` — and the re-check is still the
+    /// only thing that can move the verdict.
+    func testADegradedEngineOffersTheRecheck() {
+        XCTAssertEqual(remedy(.armed, complained: true), .recheckEngine)
+        XCTAssertEqual(remedy(.paused, complained: true), .recheckEngine)
+    }
+
+    func testEveryRemedyNamesAKey() {
+        for remedy in [MenuBarRemedy.grantPermission, .recheckEngine, .fixShortcut] {
+            XCTAssertFalse(String(localized: remedy.titleKey).isEmpty)
+        }
+    }
+}

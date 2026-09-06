@@ -267,13 +267,11 @@ struct SettingsView: View {
                 HStack(alignment: .top, spacing: 14) {
                     settingIcon("viewfinder", color: .pink)
                     VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: 8) {
-                            Text("settings.ambient")
-                                .font(.headline)
-                                // Reads the accessibility tree, so without the grant it is a title
-                                // for something that cannot happen yet.
-                                .foregroundStyle(app.accessibilityGranted ? .primary : .secondary)
-                        }
+                        Text("settings.ambient")
+                            .font(.headline)
+                            // Reads the accessibility tree, so without the grant it is a title for
+                            // something that cannot happen yet.
+                            .foregroundStyle(app.accessibilityGranted ? .primary : .secondary)
                         Text(verbatim: ambientDescription)
                             .font(.callout)
                             .foregroundStyle(.secondary)

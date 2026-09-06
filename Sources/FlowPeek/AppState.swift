@@ -36,7 +36,8 @@ final class AppState: ObservableObject {
     @Published var clipboardWatchEnabled = Defaults.bool(.clipboardEnabled, default: true) {
         didSet { Defaults.set(clipboardWatchEnabled, .clipboardEnabled) }
     }
-    /// Experimental: hold Option to outline Mermaid under the pointer. Off until asked for.
+    /// Hold Option to outline Mermaid under the pointer. Off until asked for: while it is on, that
+    /// key belongs to FlowPeek rather than to whatever the user is typing in.
     @Published var ambientPeekEnabled = Defaults.bool(.ambientEnabled, default: false) {
         didSet { Defaults.set(ambientPeekEnabled, .ambientEnabled) }
     }
@@ -746,11 +747,34 @@ final class AppState: ObservableObject {
     /// what opens for it is an apology.
     private func noteDiagramOpened(_ lesson: TutorialProgress.Lesson) {
         tutorial.noteOpened(lesson)
+        pendingOrigin = switch lesson {
+        case .selection: .selection
+        case .clipboard: .clipboard
+        case .ambient: .ambient
+        }
     }
 
+    /// A diagram is on screen. Both the ledger and the history follow this rather than the opening:
+    /// a source that passes validation can still be refused by the engine, and neither "the app has
+    /// been useful" nor "here is a diagram you had" is true of an apology.
     private func noteDiagramDrawn() {
         starLedger = starLedger.recordingDiagram(at: Date())
+        guard let origin = pendingOrigin, let diagram = previews.shownDiagram else { return }
+        pendingOrigin = nil
+        _ = DiagramHistoryStore.shared.record(
+            // The diagram's own words, not the route's. What the selection, clipboard and pointer
+            // routes hand over is the name of the route -- "Copied Diagram" on every row -- which
+            // makes a list of five of them unreadable. The AI route is left alone: it files itself,
+            // under the title it asked the model for.
+            title: DiagramLabel.describe(diagram.source) ?? diagram.title,
+            source: diagram.source,
+            origin: origin
+        )
     }
+
+    /// Which route opened the preview that is about to draw. Cleared when it is filed, so a second
+    /// render of the same preview -- a re-fit, an appearance change -- files nothing.
+    private var pendingOrigin: DiagramOrigin?
 
     /// Long enough for the preview's fade to finish and for the user's eye to have left the middle
     /// of the screen; short enough that the notice still reads as a remark about the diagram they

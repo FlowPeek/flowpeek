@@ -48,6 +48,12 @@ struct MenuBarContent: View {
         Button(clipboardTitle) { app.previewCopied() }
         Toggle(String(localized: app.isEnabled ? "menu.detection.on" : "menu.detection.paused"), isOn: detection)
         Divider()
+        // Offered whether or not anything is in it: a window that says it is empty is how someone
+        // finds out the feature exists, and a row that appears only once there is something to
+        // find is a row nobody knows to look for. It deliberately reads nothing from the store —
+        // the file behind it is only opened once this is clicked, not every time the menu is drawn.
+        Button("menu.history") { DiagramHistoryCoordinator.shared.show() }
+        Divider()
         // Only while there is one to go back to. A promoted preview is borderless, so it has no
         // Dock icon and no entry in the Window menu: once another app covered it there was nothing
         // that could raise it again.

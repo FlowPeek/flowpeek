@@ -18,6 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         AppState.shared.stop()
+        // The remembered diagrams are written off the main actor. Quitting a moment after a
+        // recording -- or after clearing the history, which is two rows above Quit in the same menu
+        // -- would otherwise take the process away before the file caught up with what the user was
+        // shown.
+        DiagramHistoryStore.flushSharedIfOpened()
     }
 
     private var isHostingTests: Bool {

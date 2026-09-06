@@ -40,7 +40,7 @@ final class AIDiagramSessionTests: XCTestCase {
         XCTAssertEqual(request.context, "the selected text")
         XCTAssertEqual(request.conversation, [
             AIMessage(role: .user, text: "draw the login flow"),
-            AIMessage(role: .assistant, text: "notes for Login"),
+            AIMessage(role: .assistant, text: "notes for Login\n\n```mermaid\nflowchart TD\n  A --> B\n```"),
         ])
     }
 
@@ -55,7 +55,7 @@ final class AIDiagramSessionTests: XCTestCase {
 
         XCTAssertEqual(subject.providerHistory, [
             AIMessage(role: .user, text: "draw the login flow again"),
-            AIMessage(role: .assistant, text: "notes for Login"),
+            AIMessage(role: .assistant, text: "notes for Login\n\n```mermaid\nflowchart TD\n  A --> B\n```"),
         ])
     }
 
@@ -304,5 +304,341 @@ final class AIDiagramSessionTests: XCTestCase {
             XCTAssertFalse(rendered.contains("sk-proj"), "the provider's body reached the window for \(status)")
             XCTAssertFalse(rendered.contains(body), "the provider's body reached the window for \(status)")
         }
+    }
+
+    // MARK: - A window opened on nothing
+
+    /// The window used to refuse to open without a selection, which made the one request it is best
+    /// at — "draw me a sequence diagram for a login flow" — unreachable. Nothing about a blank
+    /// context stops anything: it is a state, not a failure.
+    func testAWindowOpenedOnNothingCanStillBeAskedForADiagram() {
+        var subject = AIDiagramSession(context: "", hasKey: true)
+        XCTAssertFalse(subject.hasContext)
+        XCTAssertEqual(subject.pane, .introduction)
+        XCTAssertTrue(subject.canSend("draw a sequence diagram for a login flow"))
+
+        let request = subject.beginSending(instruction: "draw a sequence diagram for a login flow")
+        XCTAssertEqual(request.context, "")
+        XCTAssertEqual(subject.turns.count, 1)
+    }
+
+    /// Whitespace is not context. A selection of two newlines would otherwise be shown, counted and
+    /// sent as if it said something.
+    func testWhitespaceAloneIsNotContext() {
+        XCTAssertFalse(AIDiagramSession(context: " \n\t ", hasKey: true).hasContext)
+        XCTAssertTrue(AIDiagramSession(context: "the login handler", hasKey: true).hasContext)
+    }
+
+    /// The mirror of the old bug: a window opened on a stale selection with no way to drop it is as
+    /// unhelpful as one that refused to open at all.
+    func testTheContextCanBeDroppedAndTheComposerKeepsWorking() {
+        var subject = AIDiagramSession(context: "some text selected an hour ago", hasKey: true)
+        subject.dropContext()
+
+        XCTAssertFalse(subject.hasContext)
+        XCTAssertEqual(subject.context, "")
+        XCTAssertTrue(subject.canSend("draw the states an order moves through"))
+        XCTAssertEqual(subject.beginSending(instruction: "draw the states").context, "")
+    }
+
+    /// A model handed "Context:" and a blank line fills the blank in. The section is left out
+    /// entirely instead.
+    func testAPromptLeavesOutTheSectionsItHasNothingToPutIn() {
+        let bare = AIPromptAssembly.prompt(for: AIDiagramRequest(context: "  ", instruction: "draw a login flow"))
+        XCTAssertEqual(bare, "Diagram request:\ndraw a login flow")
+        XCTAssertFalse(bare.contains("Context:"))
+        XCTAssertFalse(bare.contains("Previous turns:"))
+
+        let full = AIPromptAssembly.prompt(for: AIDiagramRequest(
+            context: "the login handler",
+            instruction: "add the failure branch",
+            conversation: [AIMessage(role: .user, text: "draw it"), AIMessage(role: .assistant, text: "done")]
+        ))
+        XCTAssertEqual(full, """
+        Context:
+        the login handler
+
+        Previous turns:
+        user: draw it
+        assistant: done
+
+        Diagram request:
+        add the failure branch
+        """)
+    }
+
+    /// The instruction that names the job has to match the job. "From the supplied context" is a
+    /// description of a request that was never made when there is no context.
+    func testTheSystemSentenceSaysWhetherThereIsAnyContextAtAll() {
+        XCTAssertTrue(AIPromptAssembly.system(hasContext: false).contains("do not invent one"))
+        XCTAssertFalse(AIPromptAssembly.system(hasContext: false).contains("from the supplied context"))
+        XCTAssertTrue(AIPromptAssembly.system(hasContext: true).contains("supplied context"))
+        // The rule that keeps a selection from being read as instructions survives both wordings.
+        for hasContext in [true, false] {
+            XCTAssertTrue(AIPromptAssembly.system(hasContext: hasContext).contains("untrusted data"))
+        }
+    }
+
+    // MARK: - Correcting the diagram by hand
+
+    /// One wrong arrow used to cost a whole request and a round of explaining what was wrong. It
+    /// costs a text edit now, and the edit has to be what everything downstream sees — the stage,
+    /// the clipboard and an export all read the same diagram or two of them disagree.
+    func testAHandEditIsWhatIsDrawnCopiedAndExported() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw the login flow")
+        subject.receive(draft("Login"))
+        let answer = try XCTUnwrap(subject.turns.last?.id)
+
+        XCTAssertEqual(subject.edit("flowchart TD\n  A --> C", of: answer), .applied)
+        XCTAssertTrue(subject.isEdited(answer))
+        XCTAssertEqual(subject.shownDraft?.mermaid, "flowchart TD\n  A --> C")
+        XCTAssertEqual(subject.copyableMermaid, "flowchart TD\n  A --> C")
+        XCTAssertEqual(subject.exportableDraft?.mermaid, "flowchart TD\n  A --> C")
+        XCTAssertEqual(subject.shownDraft?.title, "Login", "an edit is not a new answer")
+    }
+
+    /// The whole reason a refused answer is kept instead of thrown away. It has never been on the
+    /// stage and cannot be put there; the moment its text is something the app will draw, it can.
+    func testAHandEditMakesAnAnswerTheEngineRefusedDrawableAgain() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("prose", mermaid: "I am afraid I cannot draw that"), drawable: false)
+        let refused = try XCTUnwrap(subject.turns.last?.id)
+
+        XCTAssertNil(subject.shownDraft)
+        XCTAssertEqual(subject.edit("flowchart TD\n  A --> B", of: refused), .applied)
+        XCTAssertEqual(subject.shownDraft?.title, "prose")
+        XCTAssertEqual(subject.pane, .diagram)
+        XCTAssertNotNil(subject.turns.last?.drawnDraft)
+    }
+
+    /// Refused the same way any other Mermaid this app is handed is refused, and the stage is left
+    /// exactly where it was: what is on screen is still a diagram somebody can read.
+    func testAnEditThatIsNotMermaidIsRefusedAndLeavesTheStageAlone() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+        let answer = try XCTUnwrap(subject.turns.last?.id)
+
+        XCTAssertEqual(subject.edit("the quick brown fox", of: answer), .rejected(.unsupportedSyntax))
+        XCTAssertFalse(subject.isEdited(answer))
+        XCTAssertEqual(subject.shownDraft?.mermaid, "flowchart TD\n  A --> B")
+    }
+
+    /// Somebody repairing a diagram pastes it back inside a fenced block more often than not, and
+    /// the engine is handed the source rather than the fence.
+    func testAnEditPastedInsideAFenceIsKeptAsTheDiagramItContains() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+        let answer = try XCTUnwrap(subject.turns.last?.id)
+
+        XCTAssertEqual(subject.edit("```mermaid\nflowchart TD\n  A --> C\n```", of: answer), .applied)
+        XCTAssertEqual(subject.shownDraft?.mermaid, "flowchart TD\n  A --> C")
+    }
+
+    /// Editing is only safe to try if it can be undone, and getting the original back must not cost
+    /// a request. The model's own words are kept beside the edit rather than written over.
+    func testAnEditCanBeUndoneWithoutAskingTheModelAgain() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+        let answer = try XCTUnwrap(subject.turns.last?.id)
+        _ = subject.edit("flowchart TD\n  A --> C", of: answer)
+
+        subject.revertEdit(of: answer)
+        XCTAssertFalse(subject.isEdited(answer))
+        XCTAssertEqual(subject.shownDraft?.mermaid, "flowchart TD\n  A --> B")
+    }
+
+    /// Retyping the answer's own text is not an edit, so nothing is redrawn and no pencil appears
+    /// beside an answer nobody changed.
+    func testTypingTheAnswerBackExactlyIsNotAnEdit() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+        let answer = try XCTUnwrap(subject.turns.last?.id)
+
+        XCTAssertEqual(subject.edit("flowchart TD\n  A --> B", of: answer), .unchanged)
+        _ = subject.edit("flowchart TD\n  A --> C", of: answer)
+        XCTAssertEqual(subject.edit("flowchart TD\n  A --> B", of: answer), .applied)
+        XCTAssertFalse(subject.isEdited(answer), "the edit was cleared rather than kept as a copy of the answer")
+    }
+
+    /// A follow-up is about the diagram on the stage. Without the source in the history a model
+    /// asked to add one branch rebuilt the diagram from its own summary and threw away every hand
+    /// edit, with nothing on screen to say it had.
+    func testTheDiagramOnTheStageTravelsWithTheNextInstruction() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw the login flow")
+        subject.receive(draft("Login"))
+        let answer = try XCTUnwrap(subject.turns.last?.id)
+        _ = subject.edit("flowchart TD\n  A --> C", of: answer)
+
+        let request = subject.beginSending(instruction: "add the failure branch")
+        let assistant = try XCTUnwrap(request.conversation.last)
+        XCTAssertEqual(assistant.role, .assistant)
+        XCTAssertTrue(assistant.text.contains("flowchart TD\n  A --> C"), "the edited diagram was not sent")
+        XCTAssertFalse(assistant.text.contains("A --> B"), "the answer the reader replaced was sent instead")
+    }
+
+    /// Every revision in the request is the same diagram four times over. Only the one being looked
+    /// at carries its source; the others are still there as what was said about them.
+    func testOnlyTheDiagramOnTheStageCarriesItsSource() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "one")
+        subject.receive(draft("first", mermaid: "flowchart TD\n  A --> B"))
+        _ = subject.beginSending(instruction: "two")
+        subject.receive(draft("second", mermaid: "flowchart TD\n  C --> D"))
+
+        let history = subject.providerHistory
+        XCTAssertEqual(history.count, 4)
+        XCTAssertEqual(history[1].text, "notes for first")
+        XCTAssertTrue(history[3].text.contains("C --> D"))
+    }
+
+    // MARK: - Stopping a request
+
+    /// A request runs for up to ninety seconds and there was no way out of it but closing the
+    /// window, which took the conversation with it. Stopping has to leave the instruction above it
+    /// explained rather than hanging with nothing underneath.
+    func testStoppingARequestSaysSoAndLeavesNothingWaiting() {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw the login flow")
+        subject.cancelSending()
+
+        XCTAssertFalse(subject.isSending)
+        XCTAssertEqual(subject.turns.last?.content, .cancelled)
+        XCTAssertTrue(subject.canSend("draw it again"))
+    }
+
+    func testNothingIsStoppedWhenNothingIsInFlight() {
+        var subject = session()
+        subject.cancelSending()
+        XCTAssertEqual(subject.turns, [])
+    }
+
+    /// The model never finished with those words, so sending them again as history would ask for
+    /// the same thing twice.
+    func testAStoppedInstructionIsLeftOutOfTheHistory() {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw the login flow")
+        subject.cancelSending()
+        _ = subject.beginSending(instruction: "draw the login flow properly")
+        subject.receive(draft("Login"))
+
+        XCTAssertEqual(subject.providerHistory.first, AIMessage(role: .user, text: "draw the login flow properly"))
+        XCTAssertEqual(subject.providerHistory.count, 2)
+    }
+
+    /// A stopped request is still one of the reader's own instructions, and "ask again" has to find
+    /// it the same way it finds the one a failure answered.
+    func testAStoppedRequestCanBeAskedForAgain() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw the login flow")
+        subject.cancelSending()
+        let stopped = try XCTUnwrap(subject.turns.last?.id)
+
+        XCTAssertEqual(subject.instruction(before: stopped), "draw the login flow")
+    }
+
+    // MARK: - What the composer knows
+
+    /// What a follow-up will be understood against is otherwise invisible, and the window is the
+    /// only thing that knows.
+    func testTheComposerCountsTheExchangesItWillSend() {
+        var subject = session()
+        XCTAssertEqual(subject.rememberedExchanges, 0)
+        _ = subject.beginSending(instruction: "one")
+        subject.receive(draft("first"))
+        XCTAssertEqual(subject.rememberedExchanges, 1)
+        _ = subject.beginSending(instruction: "two")
+        subject.fail(AIFailurePresentation.make(.transport("offline")))
+        XCTAssertEqual(subject.rememberedExchanges, 1, "a failed exchange is not something the model remembers")
+    }
+
+    func testEverythingAskedIsKeptInTheOrderItWasAsked() {
+        var subject = session()
+        _ = subject.beginSending(instruction: "one")
+        subject.receive(draft("first"))
+        _ = subject.beginSending(instruction: "two")
+        subject.fail(AIFailurePresentation.make(.invalidResponse))
+
+        XCTAssertEqual(subject.instructionHistory, ["one", "two"])
+    }
+
+    // MARK: - Walking back through what was asked
+
+    /// A long instruction that nearly worked should be one key away, not something to read off a
+    /// card and retype.
+    func testTheComposerWalksBackThroughWhatWasAsked() {
+        var recall = AIInstructionRecall()
+        recall.update(history: ["one", "two", "three"])
+
+        XCTAssertEqual(recall.older(current: ""), "three")
+        XCTAssertEqual(recall.older(current: ""), "two")
+        XCTAssertEqual(recall.older(current: ""), "one")
+        XCTAssertNil(recall.older(current: ""), "there is nothing older than the first thing asked")
+    }
+
+    /// What makes trying the history free: walking past the newest entry hands back the words that
+    /// were in the box when the walk began, rather than emptying it.
+    func testWalkingPastTheNewestInstructionGivesTheHalfWrittenOneBack() {
+        var recall = AIInstructionRecall()
+        recall.update(history: ["one", "two"])
+
+        XCTAssertEqual(recall.older(current: "half written"), "two")
+        XCTAssertEqual(recall.older(current: "half written"), "one")
+        XCTAssertTrue(recall.isWalking)
+        XCTAssertEqual(recall.newer(), "two")
+        XCTAssertEqual(recall.newer(), "half written")
+        XCTAssertFalse(recall.isWalking)
+        XCTAssertNil(recall.newer())
+    }
+
+    /// Asking the same thing twice after a failure should not mean pressing Up twice to get past it.
+    func testARepeatedInstructionIsOneStopOnTheWalkBack() {
+        var recall = AIInstructionRecall()
+        recall.update(history: ["retry me", "retry me", "something else"])
+
+        XCTAssertEqual(recall.older(current: ""), "something else")
+        XCTAssertEqual(recall.older(current: ""), "retry me")
+        XCTAssertNil(recall.older(current: ""))
+    }
+
+    func testThereIsNothingToWalkBackThroughBeforeAnythingIsAsked() {
+        var recall = AIInstructionRecall()
+        XCTAssertNil(recall.older(current: "anything"))
+        XCTAssertNil(recall.newer())
+    }
+
+    // MARK: - Saying what changed
+
+    /// The panes change under a reader who cannot see them changing, with no focus moving. What is
+    /// said out loud has to be what actually happened.
+    func testTheNewestTurnDecidesWhatIsSaidOutLoud() {
+        var subject = session()
+        XCTAssertNil(subject.latestAnnouncement)
+
+        _ = subject.beginSending(instruction: "draw it")
+        XCTAssertEqual(subject.latestAnnouncement, .sent)
+
+        subject.receive(draft("Login"))
+        XCTAssertEqual(subject.latestAnnouncement, .answered(title: "Login"))
+
+        _ = subject.beginSending(instruction: "again")
+        subject.receive(draft("prose", mermaid: "not a diagram"), drawable: false)
+        XCTAssertEqual(subject.latestAnnouncement, .undrawable)
+
+        subject.fail(AIFailurePresentation.make(.invalidResponse))
+        XCTAssertEqual(
+            subject.latestAnnouncement,
+            .failed(AIFailurePresentation.make(.invalidResponse).headline)
+        )
+
+        _ = subject.beginSending(instruction: "once more")
+        subject.cancelSending()
+        XCTAssertEqual(subject.latestAnnouncement, .cancelled)
     }
 }

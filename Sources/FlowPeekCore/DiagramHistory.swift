@@ -150,11 +150,49 @@ public struct DiagramHistory: Equatable, Sendable {
     /// press a button fifteen times to get there.
     public static let limitStep = 5
 
+    /// How long a diagram is kept, for people who think about their history in days rather than in
+    /// rows. Both limits apply at once and whichever forgets first wins: twenty diagrams, none
+    /// older than a week, is a coherent thing to ask for and neither number alone says it.
+    public enum Age: String, CaseIterable, Codable, Sendable {
+        case forever
+        case day
+        case week
+        case month
+        case quarter
+
+        public var seconds: TimeInterval? {
+            switch self {
+            case .forever: nil
+            case .day: 24 * 60 * 60
+            case .week: 7 * 24 * 60 * 60
+            case .month: 30 * 24 * 60 * 60
+            case .quarter: 90 * 24 * 60 * 60
+            }
+        }
+
+        public var titleKey: String.LocalizationValue {
+            switch self {
+            case .forever: "settings.history.age.forever"
+            case .day: "settings.history.age.day"
+            case .week: "settings.history.age.week"
+            case .month: "settings.history.age.month"
+            case .quarter: "settings.history.age.quarter"
+            }
+        }
+    }
+
     public private(set) var entries: [DiagramHistoryEntry]
     public private(set) var limit: Int
+    public private(set) var age: Age
 
-    public init(entries: [DiagramHistoryEntry] = [], limit: Int = defaultLimit) {
+    public init(
+        entries: [DiagramHistoryEntry] = [],
+        limit: Int = defaultLimit,
+        age: Age = .forever,
+        now: Date = .now
+    ) {
         self.limit = Self.clamp(limit)
+        self.age = age
         // What comes in may be a hand-edited file: out of order, with the same diagram in it twice.
         // Sorted and folded here so everything downstream can assume newest-first and one row per
         // diagram.
@@ -168,7 +206,7 @@ public struct DiagramHistory: Equatable, Sendable {
             // cannot tell apart -- removing the one that was clicked would take the other. The
             // newer of each pair is the one kept.
             .filter { seenSources.insert($0.source).inserted && seenIDs.insert($0.id).inserted }
-        trim()
+        trim(now: now)
     }
 
     /// Any number at or below zero is off; anything else is pulled into the range. There is no
@@ -184,9 +222,29 @@ public struct DiagramHistory: Equatable, Sendable {
     /// Lowering the maximum takes effect immediately, not at the next recording: the number in
     /// Settings is a promise about what is on disk, and a promise that waits for the next diagram
     /// is one the user has no way to tell has been kept.
-    public mutating func setLimit(_ value: Int) {
+    public mutating func setLimit(_ value: Int, now: Date = .now) {
         limit = Self.clamp(value)
-        trim()
+        trim(now: now)
+    }
+
+    /// Shortening the age forgets what is already too old immediately, for the same reason
+    /// lowering the maximum does: the setting is a promise about what is on disk, and one that
+    /// waits for the next diagram is one the user cannot tell has been kept.
+    public mutating func setAge(_ value: Age, now: Date = .now) {
+        age = value
+        trim(now: now)
+    }
+
+    /// Drops whatever has aged out since the last time anything happened.
+    ///
+    /// Needed because time passes with the app doing nothing: a history capped at a day, left alone
+    /// over a weekend, is three days stale until something is recorded. Called when the shelf opens
+    /// and at launch, which are the two moments the list is about to be believed.
+    @discardableResult
+    public mutating func pruneExpired(now: Date = .now) -> Bool {
+        let before = entries.count
+        trim(now: now)
+        return entries.count != before
     }
 
     /// Remembers a diagram, or folds it into the row it is another go at.
@@ -241,7 +299,10 @@ public struct DiagramHistory: Equatable, Sendable {
 
         guard let match else {
             insert(candidate)
-            trim()
+            // The clock the caller passed, not the wall clock: a recording is also the moment to
+            // drop what has aged out, and trimming against `.now` here would measure the age of a
+            // diagram recorded at `date` against a different instant than the one it was given.
+            trim(now: date)
             return candidate
         }
 
@@ -253,6 +314,7 @@ public struct DiagramHistory: Equatable, Sendable {
         existing.recordedAt = date
         existing.origin = origin
         insert(existing)
+        trim(now: date)
         return existing
     }
 
@@ -301,7 +363,14 @@ public struct DiagramHistory: Equatable, Sendable {
         entries.insert(entry, at: index)
     }
 
-    private mutating func trim() {
+    /// Both limits, in the order that cannot surprise anyone: what is too old goes first, and then
+    /// what is left is cut to the maximum. Doing it the other way round gives the same answer, and
+    /// this way the count the user sees is the count of diagrams that are still worth keeping.
+    private mutating func trim(now: Date = .now) {
+        if let seconds = age.seconds {
+            let oldest = now.addingTimeInterval(-seconds)
+            entries.removeAll { $0.recordedAt < oldest }
+        }
         guard entries.count > limit else { return }
         entries.removeLast(entries.count - limit)
     }

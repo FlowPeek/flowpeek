@@ -57,6 +57,21 @@ final class DiagramExporter {
         return format == .png ? try await session.png() : try await session.pdf()
     }
 
+    /// A small bitmap of the diagram, for a list that is looked at rather than read.
+    ///
+    /// The same throw-away page an export uses, captured at a width of our choosing rather than at
+    /// the diagram's own pixel count: a wall-sized flowchart and a three-box one both have to come
+    /// back as a card. Opaque, for the same reason a PNG export is -- a thumbnail is looked at
+    /// against whatever the shelf is made of, and a transparent one loses its strokes.
+    func thumbnail(for request: Request, width: CGFloat = DiagramThumbnailArchive.maximumWidth) async throws -> Data {
+        guard !request.svg.isEmpty, request.size.width > 0, request.size.height > 0 else {
+            throw Failure.nothingRendered
+        }
+        let session = try await Session(request: request, opaque: true, logger: logger)
+        defer { session.finish() }
+        return try await session.png(pixelWidth: width)
+    }
+
     /// Writes an export to a file the user picks. Returns false when they cancel.
     @discardableResult
     func save(_ format: DiagramExportFormat, for request: Request, title: String) async throws -> Bool {
@@ -151,7 +166,8 @@ final class DiagramExporter {
             return try await webView.pdf(configuration: configuration)
         }
 
-        func png() async throws -> Data {
+        /// - Parameter pixelWidth: the bitmap's width, or nil for the diagram's own export size.
+        func png(pixelWidth: CGFloat? = nil) async throws -> Data {
             let configuration = WKSnapshotConfiguration()
             configuration.rect = CGRect(origin: .zero, size: size)
             configuration.afterScreenUpdates = true
@@ -159,9 +175,11 @@ final class DiagramExporter {
             // scale of the screen the view is on: measured, a snapshotWidth of 216 came back 432
             // pixels wide on this display. So the requested pixel count is divided back out, and a
             // 2x export is 2x on a Retina display and on a 1x one alike.
-            if let pixels = DiagramExportImage.pixelSize(for: natural) {
+            let wanted = pixelWidth.map { CGFloat(min($0, size.width * 2)) }
+                ?? DiagramExportImage.pixelSize(for: natural).map { CGFloat($0.width) }
+            if let wanted {
                 let backing = NSScreen.main?.backingScaleFactor ?? 2
-                configuration.snapshotWidth = NSNumber(value: Double(pixels.width) / max(1, backing))
+                configuration.snapshotWidth = NSNumber(value: Double(wanted) / max(1, backing))
             }
             let image = try await webView.takeSnapshot(configuration: configuration)
             guard let tiff = image.tiffRepresentation,

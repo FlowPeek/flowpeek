@@ -354,6 +354,11 @@
 /* Diagram history */
 "history.window.title" = "Diagram History";
 "history.subtitle" = "Newest first";
+"history.search" = "Search";
+"history.search.clear" = "Clear the search";
+"history.search.related" = "No exact match. The closest by meaning:";
+"history.search.none.title" = "Nothing Matches";
+"history.search.none.message" = "No remembered diagram has those words in it, and none of them looked close enough to suggest. Matching by meaning needs a language model macOS ships; for Korean and others it matches the words themselves.";
 "history.count" = "%1$lld of %2$lld kept";
 "history.open.help" = "Open this diagram in a preview window";
 "history.remove" = "Forget This Diagram";
@@ -371,6 +376,12 @@
 "history.origin.ambient" = "Pointed at";
 "history.origin.unknown" = "Kept";
 "settings.history" = "Remembered Diagrams";
-"settings.history.description" = "Keep the diagrams you make, so you can come back to one after the window that made it is gone. They are kept in a file on this Mac and never sent anywhere; switching this off deletes it.";
+"settings.history.description" = "Keep the diagrams you make, so you can come back to one after the window that made it is gone. Kept on this Mac -- the diagram and a small picture of it -- and never sent anywhere; switching this off deletes both.";
 "settings.history.count" = "Keep %lld";
 "settings.history.open" = "Open History…";
+"settings.history.age" = "Forget after";
+"settings.history.age.forever" = "Never";
+"settings.history.age.day" = "A day";
+"settings.history.age.week" = "A week";
+"settings.history.age.month" = "A month";
+"settings.history.age.quarter" = "Three months";

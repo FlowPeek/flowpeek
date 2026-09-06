@@ -774,7 +774,7 @@ final class AppState: ObservableObject {
         guard let pending, let diagram = previews.shownDiagram, diagram.source == pending.source else { return }
         self.pending = nil
         let origin = pending.origin
-        _ = DiagramHistoryStore.shared.record(
+        let identity = DiagramHistoryStore.shared.record(
             // The diagram's own words, not the route's. What the selection, clipboard and pointer
             // routes hand over is the name of the route -- "Copied Diagram" on every row -- which
             // makes a list of five of them unreadable. The AI route is left alone: it files itself,
@@ -783,6 +783,27 @@ final class AppState: ObservableObject {
             source: diagram.source,
             origin: origin
         )
+        guard let identity, let picture = diagram.picture else { return }
+        captureThumbnail(picture, for: identity)
+    }
+
+    /// Draws the picture the shelf shows, once, after the diagram the user asked for is already on
+    /// screen.
+    ///
+    /// Detached and unawaited on purpose: this costs a WebKit page load, and nothing about the
+    /// preview in front of the user waits on it. A capture that fails leaves the card without a
+    /// picture, which is the same state as a diagram remembered before pictures existed -- the
+    /// shelf draws those too.
+    private func captureThumbnail(_ request: DiagramExporter.Request, for identity: DiagramHistoryEntry.ID) {
+        Task { @MainActor in
+            do {
+                let data = try await DiagramExporter().thumbnail(for: request)
+                DiagramHistoryStore.shared.storeThumbnail(data, for: identity)
+            } catch {
+                // Not the user's problem: they have their diagram. Logged without the diagram.
+                logger.debug("thumbnail capture failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     /// Which route opened the preview that is about to draw, and what it opened. Cleared when it is

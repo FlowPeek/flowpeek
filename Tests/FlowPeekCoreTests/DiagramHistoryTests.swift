@@ -390,3 +390,87 @@ extension DiagramHistoryTests {
         XCTAssertTrue(history.entries.isEmpty)
     }
 }
+
+// MARK: - Kept by age as well as by count
+
+extension DiagramHistoryTests {
+    private func aged(_ title: String, hoursAgo: Double, now: Date) -> DiagramHistoryEntry {
+        DiagramHistoryEntry(
+            id: UUID(),
+            title: title,
+            source: "flowchart LR\n  \(title) --> Done",
+            recordedAt: now.addingTimeInterval(-hoursAgo * 3600),
+            origin: .clipboard
+        )
+    }
+
+    func testForeverIsTheDefaultAndKeepsEverything() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let history = DiagramHistory(
+            entries: [aged("Old", hoursAgo: 24 * 400, now: now)],
+            limit: 20,
+            now: now
+        )
+        XCTAssertEqual(history.age, .forever)
+        XCTAssertEqual(history.entries.count, 1)
+    }
+
+    func testWhatIsOlderThanTheAgeIsNotLoaded() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let history = DiagramHistory(
+            entries: [aged("Fresh", hoursAgo: 2, now: now), aged("Stale", hoursAgo: 30, now: now)],
+            limit: 20,
+            age: .day,
+            now: now
+        )
+        XCTAssertEqual(history.entries.map(\.title), ["Fresh"])
+    }
+
+    func testShorteningTheAgeForgetsNowRatherThanAtTheNextDiagram() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var history = DiagramHistory(
+            entries: [aged("Fresh", hoursAgo: 2, now: now), aged("Older", hoursAgo: 48, now: now)],
+            limit: 20,
+            age: .week,
+            now: now
+        )
+        XCTAssertEqual(history.entries.count, 2)
+        history.setAge(.day, now: now)
+        XCTAssertEqual(history.entries.map(\.title), ["Fresh"])
+    }
+
+    func testTimePassingWithNothingHappeningStillForgets() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var history = DiagramHistory(entries: [aged("Fresh", hoursAgo: 2, now: now)], limit: 20, age: .day, now: now)
+        XCTAssertEqual(history.entries.count, 1)
+        // Nothing recorded, nothing changed -- two days simply went by.
+        XCTAssertTrue(history.pruneExpired(now: now.addingTimeInterval(48 * 3600)))
+        XCTAssertTrue(history.entries.isEmpty)
+    }
+
+    func testPruningReportsWhetherItChangedAnything() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var history = DiagramHistory(entries: [aged("Fresh", hoursAgo: 1, now: now)], limit: 20, age: .day, now: now)
+        XCTAssertFalse(history.pruneExpired(now: now))
+    }
+
+    func testWhicheverLimitForgetsFirstWins() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let rows = (0..<10).map { aged("D\($0)", hoursAgo: Double($0) * 3, now: now) }
+        // Five rows by count; the age would have kept eight.
+        let byCount = DiagramHistory(entries: rows, limit: 5, age: .day, now: now)
+        XCTAssertEqual(byCount.entries.count, 5)
+        // Nine rows by age -- everything up to and including the one recorded exactly a day ago --
+        // where the maximum would have kept all ten.
+        let byAge = DiagramHistory(entries: rows, limit: 20, age: .day, now: now)
+        XCTAssertEqual(byAge.entries.count, 9)
+    }
+
+    func testRecordingAlsoDropsWhatHasAgedOut() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        var history = DiagramHistory(entries: [aged("Stale", hoursAgo: 2, now: now)], limit: 20, age: .day, now: now)
+        let later = now.addingTimeInterval(48 * 3600)
+        history.record(title: "New", source: "flowchart LR\n  X --> Y", origin: .clipboard, at: later)
+        XCTAssertEqual(history.entries.map(\.title), ["New"])
+    }
+}

@@ -25,12 +25,19 @@ public final class DiagramHistoryStore: ObservableObject {
     /// The maximum lives in the preferences domain because it is a number about diagrams, not a
     /// diagram. Nothing the user wrote is ever written here.
     public static let limitDefaultsKey = "flowpeek.history.limit"
+    /// The age lives beside the maximum, and for the same reason: it is a number about diagrams,
+    /// not a diagram.
+    public static let ageDefaultsKey = "flowpeek.history.age"
 
     /// Newest first. Published, so a list drawn from it follows a recording made while it is open.
     @Published public private(set) var entries: [DiagramHistoryEntry] = []
 
     private var history: DiagramHistory
     private let archive: DiagramHistoryArchive?
+    /// The pictures. Separate from the list because they are read one at a time, when a card is
+    /// about to be drawn, and because everything that forgets a diagram has to forget its picture:
+    /// a thumbnail is the most legible thing FlowPeek writes down.
+    private let thumbnails: DiagramThumbnailArchive?
     private let defaults: UserDefaults
     /// One queue, so writes happen in the order they were asked for and `flush` can wait on all of
     /// them by putting one more behind them.
@@ -44,18 +51,24 @@ public final class DiagramHistoryStore: ObservableObject {
         archive: DiagramHistoryArchive? = DiagramHistoryArchive.defaultURL(
             bundleIdentifier: Bundle.main.bundleIdentifier
         ).map(DiagramHistoryArchive.init(url:)),
+        thumbnails: DiagramThumbnailArchive? = DiagramThumbnailArchive.defaultURL(
+            bundleIdentifier: Bundle.main.bundleIdentifier
+        ).map(DiagramThumbnailArchive.init(directory:)),
         defaults: UserDefaults = .standard
     ) {
         self.archive = archive
+        self.thumbnails = thumbnails
         self.defaults = defaults
         let limit = defaults.object(forKey: Self.limitDefaultsKey) as? Int ?? DiagramHistory.defaultLimit
+        let age = (defaults.string(forKey: Self.ageDefaultsKey)).flatMap(DiagramHistory.Age.init(rawValue:))
+            ?? .forever
         // Read here rather than in the background, because the first thing that touches this store
         // is a user action — opening the history, or the AI window recording a diagram — and a list
         // that fills in a moment later is a list the user has already been shown as empty. What
         // makes that safe is `DiagramHistoryArchive.maximumFileBytes`: the read is bounded by a
         // number rather than by whatever is on disk.
         let loaded = archive?.load() ?? []
-        history = DiagramHistory(entries: loaded, limit: limit)
+        history = DiagramHistory(entries: loaded, limit: limit, age: age)
         entries = history.entries
         // A file written when the maximum was higher, or reordered by hand, is put right by the
         // initialiser above — and then written back, so the list in memory and the list on disk
@@ -64,9 +77,40 @@ public final class DiagramHistoryStore: ObservableObject {
             // Off, with a file from before it was switched off: emptying it is the promise, and a
             // launch is the first chance to keep it if the app was quit before the write landed.
             if !loaded.isEmpty, let archive { writes.async { archive.removeFile() } }
-        } else if history.entries != loaded {
-            save()
+            if let thumbnails { writes.async { thumbnails.removeAll() } }
+        } else {
+            if history.entries != loaded { save() }
+            // The list trims itself without knowing the picture folder exists -- a maximum lowered
+            // from forty to twenty forgets twenty diagrams in one go -- so the folder is swept once
+            // a launch against whatever survived.
+            if let thumbnails {
+                let kept = history.entries.map(\.id)
+                writes.async { thumbnails.prune(keeping: kept) }
+            }
         }
+    }
+
+    /// How long a diagram is kept. Shortening it forgets what is already too old now, not at the
+    /// next recording.
+    public var age: DiagramHistory.Age {
+        get { history.age }
+        set {
+            guard newValue != history.age else { return }
+            // Sent by hand as well as by `entries`: an age lengthened from a week to a month
+            // changes nothing about the list, and the control showing it still has to redraw.
+            objectWillChange.send()
+            history.setAge(newValue)
+            defaults.set(newValue.rawValue, forKey: Self.ageDefaultsKey)
+            publish()
+        }
+    }
+
+    /// Drops whatever has aged out while the app was doing nothing. Called when a surface that
+    /// shows the history is about to open: time passes without recordings, and a list capped at a
+    /// day is a day stale the moment nobody makes a diagram.
+    public func pruneExpired() {
+        guard history.pruneExpired() else { return }
+        publish()
     }
 
     /// Whether anything is being remembered at all, for a menu that should not offer a list when
@@ -89,6 +133,7 @@ public final class DiagramHistoryStore: ObservableObject {
             // Switching it off is a statement about the disk, not just about the list, so the file
             // goes the same way it does for Clear History rather than being rewritten empty.
             entries = []
+            if let thumbnails { writes.async { thumbnails.removeAll() } }
             guard let archive else { return }
             writes.async { archive.removeFile() }
         }
@@ -133,14 +178,45 @@ public final class DiagramHistoryStore: ObservableObject {
     public func remove(_ id: DiagramHistoryEntry.ID) {
         guard history.remove(id) else { return }
         publish()
+        guard let thumbnails else { return }
+        writes.async { thumbnails.remove(id) }
+    }
+
+    /// The same picture, readable from off the main actor. The shelf loads one file per card and
+    /// must be on screen before its pictures are, not after; the folder is the shared thing, not
+    /// this actor's state.
+    public nonisolated static func thumbnailData(for id: DiagramHistoryEntry.ID) -> Data? {
+        DiagramThumbnailArchive.defaultURL(bundleIdentifier: Bundle.main.bundleIdentifier)
+            .map(DiagramThumbnailArchive.init(directory:))?
+            .load(id)
+    }
+
+    /// The picture for a diagram, or nil when there is none: a diagram remembered before pictures
+    /// existed, one whose capture failed, and one still being drawn all answer the same way, and
+    /// the card that asked draws itself without a picture.
+    public func thumbnail(for id: DiagramHistoryEntry.ID) -> Data? {
+        thumbnails?.load(id)
+    }
+
+    /// Files the picture for a diagram that was just remembered. Written off the main actor like
+    /// everything else here; a picture that lands after the shelf was drawn shows up the next time
+    /// it opens, which is the right trade against blocking on a bitmap.
+    public func storeThumbnail(_ data: Data, for id: DiagramHistoryEntry.ID) {
+        // Not for a diagram that is no longer in the list, and not at all when the user has said
+        // not to remember: a picture with no row is a picture nothing will ever delete.
+        guard history.isRemembering, history.entries.contains(where: { $0.id == id }), let thumbnails else { return }
+        writes.async { thumbnails.save(data, for: id) }
+        // Redraw: a card that was showing a placeholder has a picture now.
+        objectWillChange.send()
     }
 
     public func removeAll() {
         guard !history.entries.isEmpty else { return }
         history.removeAll()
         entries = []
-        // The file goes rather than being rewritten empty: a history the user cleared that is still
-        // readable on disk is not cleared.
+        // The files go rather than being rewritten empty: a history the user cleared that is still
+        // readable on disk is not cleared, and its pictures are the readable part.
+        if let thumbnails { writes.async { thumbnails.removeAll() } }
         guard let archive else { return }
         writes.async { archive.removeFile() }
     }
@@ -168,8 +244,13 @@ public final class DiagramHistoryStore: ObservableObject {
 
     private func publish() {
         guard entries != history.entries else { return }
+        let dropped = Set(entries.map(\.id)).subtracting(history.entries.map(\.id))
         entries = history.entries
         save()
+        // Whatever fell off the end -- trimmed by the maximum, or folded into another row -- takes
+        // its picture with it.
+        guard let thumbnails, !dropped.isEmpty else { return }
+        writes.async { for id in dropped { thumbnails.remove(id) } }
     }
 
     private func save() {

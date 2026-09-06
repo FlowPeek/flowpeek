@@ -642,10 +642,12 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
 
     /// What is drawn right now, so a caller that wants to file it does not have to have kept a copy
     /// from the moment it asked for the preview.
-    var shownDiagram: (title: String, source: String)? {
-        if let model = quickModel, model.hasDrawn { return (model.title, model.source) }
+    var shownDiagram: (title: String, source: String, picture: DiagramExporter.Request?)? {
+        if let model = quickModel, model.hasDrawn {
+            return (model.title, model.source, model.exportRequest)
+        }
         guard let model = promoted.last(where: { $0.model.hasDrawn })?.model else { return nil }
-        return (model.title, model.source)
+        return (model.title, model.source, model.exportRequest)
     }
 
     private var quickPanel: NSPanel? {

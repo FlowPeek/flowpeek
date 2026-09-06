@@ -370,6 +370,21 @@ struct SettingsView: View {
                         Button("settings.history.open") { DiagramHistoryCoordinator.shared.show() }
                             .controlSize(.small)
                     }
+                    // Both limits at once, because they answer different questions: "how many do I
+                    // want to scroll through" and "how long do I want this on my disk". Whichever
+                    // forgets first wins.
+                    HStack {
+                        Text("settings.history.age").font(.callout)
+                        Picker("settings.history.age", selection: historyAgeBinding) {
+                            ForEach(DiagramHistory.Age.allCases, id: \.rawValue) { age in
+                                Text(String(localized: age.titleKey)).tag(age)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .fixedSize()
+                        Spacer()
+                    }
                 }
             }
 
@@ -535,6 +550,10 @@ struct SettingsView: View {
             get: { history.limit > DiagramHistory.off },
             set: { history.limit = $0 ? DiagramHistory.defaultLimit : DiagramHistory.off }
         )
+    }
+
+    private var historyAgeBinding: Binding<DiagramHistory.Age> {
+        Binding(get: { history.age }, set: { history.age = $0 })
     }
 
     private var historyLimitBinding: Binding<Int> {

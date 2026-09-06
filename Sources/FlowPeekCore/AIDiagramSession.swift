@@ -34,10 +34,13 @@ public struct AITurn: Identifiable, Equatable, Sendable {
         return draft
     }
 
-    /// The draft only if it drew. What the stage, and everything that copies from it, may use.
-    public var drawnDraft: AIDiagramDraft? {
-        guard case .answer(let draft, let drawable) = content, drawable else { return nil }
-        return draft
+    /// Whether the engine took the answer as it came back. Not the same question as whether it can
+    /// be drawn now: a correction can revive an answer the engine refused, and taking the correction
+    /// away refuses it again. The session answers that one, because it is the half that holds the
+    /// corrections.
+    public var arrivedDrawable: Bool {
+        guard case .answer(_, let drawable) = content else { return false }
+        return drawable
     }
 
     public var instruction: String? {
@@ -61,7 +64,9 @@ public enum AIPromptPane: Equatable, Sendable {
 /// What a hand edit of the diagram text did. The reader typed it, so it is answered the same way
 /// any other Mermaid the app is handed is answered: drawn, or refused with the reason.
 public enum AIDiagramEdit: Equatable {
-    /// The text is what the answer already said. Nothing is redrawn and nothing is recorded.
+    /// The text says what the diagram already says, once the fence and the whitespace are off it.
+    /// Nothing is redrawn and nothing is recorded, and the editor is put back to the text that is
+    /// actually kept — a reader who added a trailing newline has to be able to see that it went.
     case unchanged
     /// Accepted and on the stage.
     case applied
@@ -100,6 +105,12 @@ public struct AIDiagramSession: Equatable, Sendable {
     /// them: the model's own words stay in the conversation, so a fix that made things worse can be
     /// undone without spending a request to get the original back.
     public private(set) var edits: [AITurn.ID: String] = [:]
+    /// The answer the text editor is pointed at, which is not always the answer on the stage: the
+    /// one that most needs correcting is very often the one that never reached it.
+    public private(set) var editingTurn: AITurn.ID?
+    /// Typing that has not been applied yet, by the answer it was typed against. An edit belongs to
+    /// its answer rather than to the window, so nothing that happens to another answer can take it.
+    private var pending: [AITurn.ID: String] = [:]
     /// Whether the chosen provider has a key. Owned by the window, which reads the Keychain.
     public var hasKey: Bool
 
@@ -132,8 +143,18 @@ public struct AIDiagramSession: Equatable, Sendable {
     }
 
     public var shownDraft: AIDiagramDraft? {
-        guard let shownTurn else { return nil }
+        guard let shownTurn, isDrawable(shownTurn) else { return nil }
         return draft(for: shownTurn)
+    }
+
+    /// Whether the answer *as it now stands* is something this app will draw: what came back, if
+    /// the engine took it, or any correction of it, since a correction is validated before it is
+    /// kept. Two facts rather than one flag that gets flipped — a flag that only ever went one way
+    /// left a revived answer marked drawable after its correction had been taken back, and the
+    /// session went on handing that prose to the stage, the clipboard and an export.
+    public func isDrawable(_ id: AITurn.ID) -> Bool {
+        guard let turn = turns.first(where: { $0.id == id }), turn.draft != nil else { return false }
+        return turn.arrivedDrawable || edits[id] != nil
     }
 
     /// An answer as it now stands: what came back, with the reader's edit of it in place of the
@@ -200,6 +221,9 @@ public struct AIDiagramSession: Equatable, Sendable {
         let turn = AITurn(content: .answer(draft, drawable: drawable))
         turns.append(turn)
         if drawable { shownTurn = turn.id }
+        // The editor follows the answer that just arrived — the one that drew, or the one that
+        // could not and is the only thing here that needs correcting — unless it is pinned.
+        followStageIfClean(turn.id)
         isSending = false
     }
 
@@ -220,22 +244,96 @@ public struct AIDiagramSession: Equatable, Sendable {
     /// The reader picking an earlier answer out of the conversation. Anything that is not a drawable
     /// answer is ignored: an instruction and a failure have no diagram to put on the stage.
     public mutating func show(_ id: AITurn.ID) {
-        guard turns.first(where: { $0.id == id })?.drawnDraft != nil else { return }
+        guard isDrawable(id) else { return }
         shownTurn = id
+        followStageIfClean(id)
     }
 
-    // MARK: - Editing what came back
+    // MARK: - Correcting the diagram by hand
+
+    // What an edit is, in one place, because the window kept answering it differently.
+    //
+    // It is the reader's, and it belongs to the answer it was typed against — never to the window,
+    // which is why an answer arriving on the other side of the screen cannot take it. It becomes
+    // the diagram at exactly one moment, `applyEditorChanges()`, and only then do the stage, a copy,
+    // an export and the history sent with the next instruction read it. Until then it sits under its
+    // answer, and the only things that can destroy it are the reader applying it and the reader
+    // throwing it away.
+
+    /// What the editor is showing: unapplied typing if there is any, otherwise the answer as it
+    /// stands.
+    public var editorText: String {
+        guard let editingTurn else { return "" }
+        return pending[editingTurn] ?? draft(for: editingTurn)?.mermaid ?? ""
+    }
+
+    /// Whether the editor holds text nobody has applied.
+    public var editorHasUnappliedChanges: Bool {
+        editingTurn.map { pending[$0] != nil } ?? false
+    }
+
+    /// Whether that particular answer is carrying unapplied typing. Read by its card, which is on
+    /// screen even while the window is showing the drawing rather than the text.
+    public func hasUnappliedChanges(_ id: AITurn.ID) -> Bool { pending[id] != nil }
+
+    /// The editor holding one answer while the stage draws another, because typing pinned it there.
+    /// Nothing else on screen gives that away, and two panes quietly showing two different diagrams
+    /// is how somebody ends up correcting the one they are not looking at.
+    public var editorIsPinned: Bool {
+        editorHasUnappliedChanges && editingTurn != shownTurn
+    }
+
+    /// The reader choosing an answer to work on. Their own gesture, so it always moves; whatever
+    /// was half-typed against the answer being left stays parked under that answer.
+    public mutating func beginEditing(_ id: AITurn.ID) {
+        guard turns.contains(where: { $0.id == id && $0.draft != nil }) else { return }
+        editingTurn = id
+    }
+
+    /// The reader typing. Text that says what the answer already says is not a change, so retyping
+    /// the last character back leaves the editor as clean as never having touched it.
+    public mutating func typeInEditor(_ text: String) {
+        guard let id = editingTurn else { return }
+        pending[id] = text == (draft(for: id)?.mermaid ?? "") ? nil : text
+    }
+
+    /// Committing what is in the editor: the one moment typing becomes the diagram.
+    @discardableResult
+    public mutating func applyEditorChanges() -> AIDiagramEdit {
+        guard let id = editingTurn else { return .unchanged }
+        let outcome = edit(editorText, of: id)
+        switch outcome {
+        case .applied, .unchanged:
+            // Back to the text the session actually kept: normalised, fence stripped, trailing
+            // newline gone. Nothing else puts the button out, and a control left lit over a change
+            // that has already been dealt with is a control that does nothing, silently, forever.
+            pending[id] = nil
+        case .rejected:
+            // Throwing away what somebody is halfway through fixing is worse than any message.
+            break
+        }
+        return outcome
+    }
+
+    /// The reader throwing away typing they never applied. The counterpart of never losing it by
+    /// accident: an editor only the reader can move has to give them a way to move it.
+    public mutating func discardEditorChanges() {
+        guard let id = editingTurn else { return }
+        pending[id] = nil
+        followStageIfClean()
+    }
 
     /// The reader correcting the diagram themselves.
     ///
     /// One wrong arrow does not need another request: it needs a text field. The edit is validated
     /// the same way every other Mermaid this app draws is validated, and an answer the engine
-    /// refused becomes drawable the moment the text is something it will draw — which is the whole
-    /// reason a broken answer is kept in the conversation instead of thrown away.
+    /// refused becomes drawable for as long as the text is something it will draw — which is the
+    /// whole reason a broken answer is kept in the conversation instead of thrown away.
     @discardableResult
     public mutating func edit(_ mermaid: String, of id: AITurn.ID) -> AIDiagramEdit {
-        guard let index = turns.firstIndex(where: { $0.id == id }),
-              case .answer(let original, let drawable) = turns[index].content else { return .unchanged }
+        guard case .answer(let original, _)? = turns.first(where: { $0.id == id })?.content else {
+            return .unchanged
+        }
         // Compared against what is on the stage rather than against the answer, or clearing an edit
         // by retyping the original would report "unchanged" and leave the edit in place.
         let standing = edits[id] ?? original.mermaid
@@ -253,17 +351,40 @@ public struct AIDiagramSession: Equatable, Sendable {
         let normalized = source.text
         if normalized == standing { return .unchanged }
         edits[id] = normalized == original.mermaid ? nil : normalized
-        if !drawable {
-            turns[index] = AITurn(id: id, content: .answer(original, drawable: true))
+        if isDrawable(id) {
+            shownTurn = id
+        } else {
+            // Typing a refused answer's own prose back over a correction refuses it again.
+            restageIfUndrawable(id)
         }
-        shownTurn = id
         return .applied
     }
 
     /// Back to what the model actually said. Cheap to offer and the only thing that makes editing
     /// safe to try.
     public mutating func revertEdit(of id: AITurn.ID) {
+        guard edits[id] != nil else { return }
         edits[id] = nil
+        pending[id] = nil
+        restageIfUndrawable(id)
+    }
+
+    /// The editor follows the stage whenever it has nothing unapplied in it. Unapplied typing pins
+    /// it, and that is the whole rule: nothing but the reader moves an editor with their words in
+    /// it. A request they started ninety seconds ago finishing is not their consent to lose what
+    /// they typed while it ran.
+    private mutating func followStageIfClean(_ preferred: AITurn.ID? = nil) {
+        guard !editorHasUnappliedChanges, let next = preferred ?? shownTurn else { return }
+        editingTurn = next
+    }
+
+    /// An answer the engine refused only ever reached the stage on the strength of a correction, so
+    /// taking the correction away has to take it off the stage. The newest answer that still draws
+    /// takes its place, and where there is none the window goes back to having nothing to show:
+    /// either way what is on the stage is a diagram, never prose the engine has already refused.
+    private mutating func restageIfUndrawable(_ id: AITurn.ID) {
+        guard shownTurn == id, !isDrawable(id) else { return }
+        shownTurn = turns.last(where: { $0.id != id && isDrawable($0.id) })?.id
     }
 
     /// The instruction a given turn was the outcome of: the nearest one before it, since every

@@ -249,12 +249,19 @@ final class DiagramViewModel: ObservableObject {
     /// The Mermaid text itself. On the Option-hover route this is the only thing that never ends up
     /// on the user's clipboard, and it is the one form of the diagram a screen reader can read.
     func copySource() {
+        copySource(source)
+    }
+
+    /// The text the caller has on display, which is not always the text on the stage: the AI window
+    /// can have one answer drawn and another open in its editor, and a button under a box copies
+    /// the box. Same feedback either way, so the copy is never silent.
+    func copySource(_ text: String) {
         // An image copy already in flight would land on the clipboard after this one and take the
         // text back off it.
         exportTask?.cancel()
         feedbackTask?.cancel()
-        guard !source.isEmpty else { return }
-        DiagramPasteboard.write(text: source)
+        guard !text.isEmpty else { return }
+        DiagramPasteboard.write(text: text)
         show(.copied)
     }
 

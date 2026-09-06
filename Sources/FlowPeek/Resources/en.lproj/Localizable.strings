@@ -220,6 +220,14 @@
 "ai.composer.context.on" = "The context above is sent too.";
 "ai.composer.context.off" = "No context is sent.";
 "ai.composer.a11y.hint" = "Describe the diagram you want. Press the Up arrow in an empty box to bring back an earlier instruction.";
+"ai.source.unapplied" = "Changes you have not applied";
+"ai.source.discard" = "Discard Changes";
+"ai.source.discarded" = "Your unapplied changes were discarded.";
+"ai.source.unchanged" = "This says exactly what the diagram already says, so nothing was redrawn.";
+"ai.source.pinned" = "These are your unapplied changes to “%@”. They stay here, and stay off the stage, until you apply or discard them.";
+"ai.source.unstaged" = "That answer only drew because of your changes, so it has left the stage.";
+"ai.a11y.source.kept" = "Your unapplied changes were kept. The Mermaid pane is still showing the answer you were correcting.";
+"ai.context.none.hint.history" = "The selection is no longer sent. What you have already asked, and the diagram on the stage, still travel with the next request.";
 "ai.a11y.conversation" = "Conversation";
 "ai.a11y.sent" = "Sent to %@. Waiting for an answer.";
 "ai.a11y.answered" = "%@ is now on the stage.";

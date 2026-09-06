@@ -111,16 +111,19 @@ final class AIPromptModel: ObservableObject {
     @Published private(set) var session: AIDiagramSession
     @Published var instruction = ""
     @Published var stage: AIStageMode = .diagram
-    /// The Mermaid as it is being typed. Held here rather than in the view so it survives a rebuild
-    /// of the pane and can be put back in step whenever the stage changes underneath it.
-    @Published var sourceDraft = ""
-    /// Which answer the buffer above belongs to. Named rather than worked out from the stage: the
-    /// answer being repaired is very often the one that never reached the stage, and an editor that
-    /// guessed would write a refused answer's text over the diagram somebody was looking at.
-    @Published private(set) var editingTurn: AITurn.ID?
-    /// Why the last apply was refused, in the reader's own language. Cleared by the next keystroke:
-    /// a warning about text that is no longer on screen is just noise.
-    @Published private(set) var sourceRejection: String?
+    /// The two ways Apply can come back without redrawing anything. Both are named rather than left
+    /// to a button that simply stops responding: a control that does nothing and says nothing is the
+    /// one thing a reader cannot tell apart from a broken one.
+    enum SourceNote: Equatable {
+        /// Not Mermaid this app will draw, with the reason the rest of the app gives for it.
+        case rejected(String)
+        /// Already the diagram on the stage, once the fence and the whitespace are off it.
+        case unchanged
+    }
+
+    /// What the last apply did, when what it did was not a redraw. Cleared by the next keystroke:
+    /// a message about text that is no longer on screen is just noise.
+    @Published private(set) var sourceNote: SourceNote?
     /// The last thing worth saying out loud, and a counter so the same sentence twice running is
     /// still two announcements. Nothing else reads it.
     @Published private(set) var announcement: (text: String, count: Int)?
@@ -200,6 +203,10 @@ final class AIPromptModel: ObservableObject {
                 outcome = .failure(error)
             }
             guard let self, !Task.isCancelled else { return }
+            // Read before the session moves. Typing nobody has applied is the reason the editor will
+            // not follow the answer that just arrived, and a pane that deliberately does not change
+            // has to say so to the reader who cannot see it not changing.
+            let wasEditing = session.editorHasUnappliedChanges
             switch outcome {
             case .success(let draft):
                 session.receive(draft)
@@ -209,6 +216,7 @@ final class AIPromptModel: ObservableObject {
                 receive(error)
             }
             announceLatest()
+            announceKeptEditing(wasEditing)
         }
     }
 
@@ -245,12 +253,11 @@ final class AIPromptModel: ObservableObject {
     private func receive(_ error: any Error) {
         if case AIProviderError.unusableDiagram(let draft, let reason) = error {
             // Recorded even though it cannot be drawn: it is the only text a repair can be asked
-            // about, and the only thing the reader can copy out of a request that went wrong. It is
-            // also now something the reader can simply fix — see `applySourceEdit`.
+            // about, the only thing the reader can copy out of a request that went wrong, and the
+            // one thing on this screen they can put right without another request. The editor opens
+            // on it unless they are already halfway through correcting something else — `receive`
+            // decides that, not this window.
             session.receive(draft, drawable: false)
-            // The refused answer is what the editor opens on: it is the one that needs fixing, and
-            // it is the one thing on this screen the reader can put right without another request.
-            loadSourceDraft(from: session.turns.last?.id)
             session.fail(AIFailurePresentation.make(.unusableDiagram(reason)))
             return
         }
@@ -300,89 +307,128 @@ final class AIPromptModel: ObservableObject {
         recalledText = nil
     }
 
-    // MARK: - Editing the diagram text
+    // MARK: - Correcting the diagram by hand
 
-    /// True while the buffer says something the answer it belongs to does not.
-    var sourceIsDirty: Bool {
-        guard let editingTurn else { return false }
-        return sourceDraft != (session.draft(for: editingTurn)?.mermaid ?? "")
-    }
+    /// The buffer belongs to the session, not to this window: an edit is the reader's, it stays with
+    /// the answer it was typed against, and the rules for when it moves and when it is committed are
+    /// in `AIDiagramSession` where they can be tested. Everything here only shows them.
+    var sourceText: String { session.editorText }
+
+    /// True while the editor says something the answer it belongs to does not.
+    var sourceIsDirty: Bool { session.editorHasUnappliedChanges }
+
+    /// The editor holding one answer while the stage draws another, because the reader was typing
+    /// when the stage moved.
+    var sourceIsPinned: Bool { session.editorIsPinned }
+
+    var editingTurn: AITurn.ID? { session.editingTurn }
 
     /// Whether the answer in the editor carries a correction of the reader's own.
     var isEditingAnEditedAnswer: Bool {
         editingTurn.map { session.isEdited($0) } ?? false
     }
 
+    /// The name of the answer the editor is holding, for the line that says which one it is when it
+    /// is not the one on the stage.
+    var editingTitle: String {
+        let title = editingTurn.flatMap { session.draft(for: $0)?.title } ?? ""
+        return title.isEmpty ? String(localized: "diagram.default-title") : title
+    }
+
     /// The reader choosing an answer to work on: the one on the stage, or the one that never got
     /// there. Drawable answers are put on the stage first, so what is drawn and what is in the
     /// editor are the same diagram.
     func edit(_ id: AITurn.ID) {
-        if session.turns.first(where: { $0.id == id })?.drawnDraft != nil {
-            session.show(id)
-            preview.title = session.shownDraft?.title ?? ""
-            preview.update(source: session.shownDraft?.mermaid ?? "")
-        }
-        loadSourceDraft(from: id)
+        session.show(id)
+        session.beginEditing(id)
+        drawShownDiagram()
     }
 
-    func noteSourceTyping() {
-        sourceRejection = nil
+    func typeInSource(_ text: String) {
+        session.typeInEditor(text)
+        sourceNote = nil
     }
 
     /// The reader's own correction, drawn. Nothing here asks a model anything: one wrong arrow is a
     /// text edit, and having to spend a request — and a round of "no, like this" — on a typo is the
     /// single most tiring thing about working in this window.
     func applySourceEdit() {
-        guard let id = editingTurn else { return }
-        switch session.edit(sourceDraft, of: id) {
+        switch session.applyEditorChanges() {
         case .unchanged:
-            sourceRejection = nil
+            // The editor has just been put back to the text the session keeps, so the button goes
+            // out under the reader's hand. Saying why is the other half: a fence, a leading space
+            // or a trailing newline is a change to look at and no change at all to draw.
+            sourceNote = .unchanged
+            announce(String(localized: "ai.source.unchanged"))
         case .applied:
-            sourceRejection = nil
-            // The edit put its answer on the stage, so the drawing comes first and the buffer is
-            // reloaded from what the session actually kept: the normalised text, which is what
-            // makes the Apply button go quiet again.
+            sourceNote = nil
+            // The edit put its answer on the stage, so the drawing comes first and the editor now
+            // reads back the normalised text the session kept.
             drawShownDiagram()
             recordInHistory()
             announce(String(localized: "ai.source.applied"))
         case .rejected(let error):
             let reason = localizedUserMessage(error)
-            sourceRejection = reason
+            sourceNote = .rejected(reason)
             announce(reason)
         }
+    }
+
+    /// The reader throwing away typing they never applied. The only thing in this window that
+    /// destroys an unapplied edit, and it is a button they press.
+    func discardSourceEdit() {
+        guard session.editorHasUnappliedChanges else { return }
+        session.discardEditorChanges()
+        sourceNote = nil
+        announce(String(localized: "ai.source.discarded"))
     }
 
     /// Back to what the model said, for a fix that made things worse.
     func revertSourceEdit() {
         guard let id = editingTurn, session.isEdited(id) else { return }
+        let wasShown = session.shownTurn == id
         session.revertEdit(of: id)
+        sourceNote = nil
         drawShownDiagram()
-        loadSourceDraft(from: id)
         announce(String(localized: "ai.source.reverted"))
+        // A correction can be the only reason an answer the engine refused was ever drawn, so taking
+        // it back takes the answer off the stage. The stage emptying under a reader who cannot see
+        // it is exactly the change that has to be said in words.
+        if wasShown, session.shownTurn != id {
+            announce(String(localized: "ai.source.unstaged"))
+        }
     }
 
-    /// The buffer, and the answer it belongs to, put back in step. Called wherever the diagram
-    /// changes under it — a new answer, an earlier one brought back, an edit applied or reverted —
-    /// because a box still holding the previous diagram's text is a box that will write that
-    /// diagram over this one on the next apply.
-    private func loadSourceDraft(from id: AITurn.ID?) {
-        editingTurn = id
-        sourceDraft = id.flatMap { session.draft(for: $0)?.mermaid } ?? ""
-        sourceRejection = nil
+    /// The text in this pane, not the diagram on the stage. They are two different answers whenever
+    /// somebody is correcting one while another is drawn, and a button under a box copies the box.
+    func copySourceText() {
+        preview.copySource(session.editorText)
     }
 
     // MARK: - Taking it away
 
     func show(_ turn: AITurn) {
+        let wasEditing = session.editorHasUnappliedChanges
         session.show(turn.id)
         drawShownDiagram()
+        announceKeptEditing(wasEditing)
     }
 
     private func drawShownDiagram() {
-        guard let draft = session.shownDraft else { return }
+        guard let draft = session.shownDraft else {
+            // The stage can empty: taking back a correction takes back the only reason an answer the
+            // engine refused was ever drawn, and leaving the drawing up would say it is still good.
+            preview.title = ""
+            preview.update(source: "")
+            return
+        }
         preview.title = draft.title
         preview.update(source: draft.mermaid)
-        loadSourceDraft(from: session.shownTurn)
+        // The stage may never have been on screen. A first answer that could not be drawn is
+        // repaired from the Mermaid pane, and the engine is only ever checked out by the diagram
+        // pane appearing — so without this the redraw is announced and nothing is drawn until the
+        // reader happens to switch panes.
+        preview.attach()
     }
 
     /// Every diagram this window produces passes through here on its way to the app's history: an
@@ -455,6 +501,14 @@ final class AIPromptModel: ObservableObject {
         case .cancelled:
             announce(String(localized: "ai.a11y.stopped"))
         }
+    }
+
+    /// The stage moving out from under the editor. Unapplied typing pins the editor where it is;
+    /// a reader who cannot see the two panes has no other way to learn that one of them stayed put
+    /// on purpose, and that their text is the reason.
+    private func announceKeptEditing(_ wasEditing: Bool) {
+        guard wasEditing, session.editorIsPinned else { return }
+        announce(String(localized: "ai.a11y.source.kept"))
     }
 
     private func announce(_ text: String) {
@@ -776,9 +830,11 @@ struct AIPromptView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
-                Button("preview.export.copy-text") { preview.copySource() }
+                // The text on display here, which is the diagram on the stage only when the two
+                // panes are looking at the same answer. A button under a box copies the box.
+                Button("preview.export.copy-text") { model.copySourceText() }
                     .controlSize(.small)
-                    .disabled(model.session.copyableMermaid == nil)
+                    .disabled(model.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if model.editingTurn == nil {
                 Text("ai.source.none")
@@ -787,26 +843,17 @@ struct AIPromptView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .multilineTextAlignment(.center)
             } else {
-                TextEditor(text: $model.sourceDraft)
+                if model.sourceIsPinned { pinnedNote }
+                TextEditor(text: sourceBinding)
                     .font(.system(size: 12, design: .monospaced))
                     .scrollContentBackground(.hidden)
                     .focused($focus, equals: .source)
                     .padding(8)
                     .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 13).stroke(.white.opacity(0.16)))
-                    .onChange(of: model.sourceDraft) { _, _ in model.noteSourceTyping() }
                     .accessibilityLabel(Text("ai.source.a11y"))
                     .accessibilityHint(Text("ai.source.a11y.hint"))
-                if let rejection = model.sourceRejection {
-                    Label {
-                        Text(verbatim: rejection)
-                            .font(.caption)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    }
-                    .font(.caption)
-                }
+                if let note = model.sourceNote { sourceNoteRow(note) }
                 HStack(spacing: 8) {
                     Button("ai.source.apply") { model.applySourceEdit() }
                         .buttonStyle(.borderedProminent)
@@ -815,6 +862,12 @@ struct AIPromptView: View {
                         // live at once in a window where either box can hold the focus.
                         .keyboardShortcut(.return, modifiers: [.command, .shift])
                         .disabled(!model.sourceIsDirty)
+                    // The one thing in this window that destroys typing nobody applied, and it is a
+                    // button with a name on it rather than something an arriving answer does.
+                    if model.sourceIsDirty {
+                        Button("ai.source.discard") { model.discardSourceEdit() }
+                            .controlSize(.small)
+                    }
                     if model.isEditingAnEditedAnswer {
                         Button("ai.source.revert") { model.revertSourceEdit() }
                             .controlSize(.small)
@@ -829,6 +882,46 @@ struct AIPromptView: View {
             }
         }
         .padding(14)
+    }
+
+    /// Typing goes to the session, which decides whether it is a change at all. Held there rather
+    /// than in a `@State` of this view so it belongs to the answer rather than to the pane, and
+    /// survives everything that rebuilds the pane.
+    private var sourceBinding: Binding<String> {
+        Binding(get: { model.sourceText }, set: { model.typeInSource($0) })
+    }
+
+    /// The editor holding one answer while the stage draws another. It happens on purpose — an
+    /// answer arriving never takes typing away — and it is invisible unless the pane says so.
+    private var pinnedNote: some View {
+        Label {
+            Text(verbatim: String(format: String(localized: "ai.source.pinned"), model.editingTitle))
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "pin.fill").foregroundStyle(.orange)
+        }
+        .font(.caption)
+    }
+
+    @ViewBuilder
+    private func sourceNoteRow(_ note: AIPromptModel.SourceNote) -> some View {
+        switch note {
+        case .rejected(let reason):
+            Label {
+                Text(verbatim: reason)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+            .font(.caption)
+        case .unchanged:
+            Label("ai.source.unchanged", systemImage: "equal.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: - Inspector
@@ -889,7 +982,11 @@ struct AIPromptView: View {
                     .accessibilityLabel(Text("ai.context"))
                 }
             } else {
-                Text("ai.context.none.hint")
+                // Once something has been asked and answered, the first sentence is no longer true:
+                // the exchange still travels, and the diagram on the stage travels with it. Somebody
+                // who pressed Remove because the selection was sensitive is the last reader in this
+                // window who may be told the comfortable thing rather than the accurate one.
+                Text(model.session.rememberedExchanges == 0 ? "ai.context.none.hint" : "ai.context.none.hint.history")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -960,8 +1057,8 @@ struct AIPromptView: View {
         switch turn.content {
         case .instruction(let text):
             instructionCard(text)
-        case .answer(let draft, let drawable):
-            answerCard(turn: turn, draft: draft, drawable: drawable)
+        case .answer(let draft, _):
+            answerCard(turn: turn, draft: draft)
         case .failure(let presentation):
             failureCard(presentation, on: turn)
         case .cancelled:
@@ -995,8 +1092,12 @@ struct AIPromptView: View {
         .accessibilityLabel(Text(verbatim: String(format: String(localized: "ai.a11y.turn.you"), text)))
     }
 
-    private func answerCard(turn: AITurn, draft: AIDiagramDraft, drawable: Bool) -> some View {
+    private func answerCard(turn: AITurn, draft: AIDiagramDraft) -> some View {
         let isShown = model.session.shownTurn == turn.id
+        // Whether it can be drawn *now* rather than whether the engine took it as it arrived: a
+        // correction revives an answer the engine refused, and taking the correction back refuses it
+        // again. Offering Show for the second of those handed out prose as a diagram.
+        let drawable = model.session.isDrawable(turn.id)
         let name = draft.title.isEmpty ? String(localized: "diagram.default-title") : draft.title
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -1008,12 +1109,25 @@ struct AIPromptView: View {
                     .font(.callout.weight(.semibold))
                     .lineLimit(2)
                 Spacer(minLength: 6)
-                if model.session.isEdited(turn.id) {
+                // Typing nobody has applied is the state this window used to have no sign of at
+                // all. It shows on the card rather than only in the editor, because the card is
+                // what is on screen while the window is showing the drawing.
+                if model.session.hasUnappliedChanges(turn.id) {
+                    Label("ai.source.unapplied", systemImage: "pencil.circle.fill")
+                        .labelStyle(.iconOnly)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .help(Text("ai.source.unapplied"))
+                        // Said once, in the card's own label, rather than twice by a badge that has
+                        // no name of its own to a reader stepping through the conversation.
+                        .accessibilityHidden(true)
+                } else if model.session.isEdited(turn.id) {
                     Label("ai.source.edited", systemImage: "pencil")
                         .labelStyle(.iconOnly)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .accessibilityLabel(Text("ai.source.edited"))
+                        .help(Text("ai.source.edited"))
+                        .accessibilityHidden(true)
                 }
             }
             if !draft.notes.isEmpty {
@@ -1053,15 +1167,24 @@ struct AIPromptView: View {
                 .stroke(isShown ? Color.accentColor.opacity(0.35) : .white.opacity(0.14))
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(verbatim: answerLabel(name: name, notes: draft.notes, drawable: drawable)))
+        .accessibilityLabel(Text(verbatim: answerLabel(turn: turn, name: name, notes: draft.notes, drawable: drawable)))
         // The stage has exactly one answer on it, and which one is otherwise a green tick a reader
         // cannot see.
         .accessibilityAddTraits(isShown ? [.isSelected] : [])
     }
 
-    private func answerLabel(name: String, notes: String, drawable: Bool) -> String {
+    /// The badges are icons, so the card's own label is the only place a reader who cannot see them
+    /// learns that this answer carries a correction, or typing that has not been applied yet.
+    private func answerLabel(turn: AITurn, name: String, notes: String, drawable: Bool) -> String {
         let key = drawable ? "ai.a11y.turn.answer" : "ai.a11y.turn.answer.undrawable"
-        return String(format: String(localized: String.LocalizationValue(key)), name, notes)
+        let label = String(format: String(localized: String.LocalizationValue(key)), name, notes)
+        if model.session.hasUnappliedChanges(turn.id) {
+            return label + ". " + String(localized: "ai.source.unapplied")
+        }
+        if model.session.isEdited(turn.id) {
+            return label + ". " + String(localized: "ai.source.edited")
+        }
+        return label
     }
 
     /// The reader stopped this one. No remedy button of its own beyond asking again: nothing went

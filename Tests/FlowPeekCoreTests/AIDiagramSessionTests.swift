@@ -240,15 +240,15 @@ final class AIDiagramSessionTests: XCTestCase {
         var session = AIDiagramSession(context: "", hasKey: true)
         _ = session.beginSending(instruction: "one")
         session.receive(AIDiagramDraft(title: "A", mermaid: "flowchart TD\n A --> B", notes: ""))
-        let drawn = session.turns.compactMap(\.drawnDraft).count
+        let firstAnswer = session.turns.last?.id
         _ = session.beginSending(instruction: "two")
         session.receive(AIDiagramDraft(title: "B", mermaid: "", notes: ""), drawable: false)
 
         let refused = try? XCTUnwrap(session.turns.last?.id)
         if let refused { session.show(refused) }
         XCTAssertEqual(session.shownDraft?.title, "A", "an answer that never drew took the stage")
-        XCTAssertEqual(drawn, 1)
-        XCTAssertNil(session.turns.last?.drawnDraft, "a refused answer must not offer itself as drawn")
+        XCTAssertEqual(firstAnswer.map { session.isDrawable($0) }, true)
+        if let refused { XCTAssertFalse(session.isDrawable(refused), "a refused answer offered itself as drawn") }
         XCTAssertNotNil(session.turns.last?.draft, "and must still be readable")
     }
 
@@ -309,8 +309,9 @@ final class AIDiagramSessionTests: XCTestCase {
     // MARK: - A window opened on nothing
 
     /// The window used to refuse to open without a selection, which made the one request it is best
-    /// at — "draw me a sequence diagram for a login flow" — unreachable. Nothing about a blank
-    /// context stops anything: it is a state, not a failure.
+    /// at — "draw me a sequence diagram for a login flow" — unreachable. A blank context is a state
+    /// rather than a failure, and it has to hold all the way down: nothing sent, and a model told
+    /// there was nothing rather than left to invent something to fill the section with.
     func testAWindowOpenedOnNothingCanStillBeAskedForADiagram() {
         var subject = AIDiagramSession(context: "", hasKey: true)
         XCTAssertFalse(subject.hasContext)
@@ -319,7 +320,14 @@ final class AIDiagramSessionTests: XCTestCase {
 
         let request = subject.beginSending(instruction: "draw a sequence diagram for a login flow")
         XCTAssertEqual(request.context, "")
-        XCTAssertEqual(subject.turns.count, 1)
+
+        let prompt = AIPromptAssembly.prompt(for: request)
+        XCTAssertFalse(prompt.contains("Context:"), "an empty section was sent for a context that does not exist")
+        XCTAssertTrue(prompt.hasPrefix("Diagram request:"))
+        XCTAssertTrue(
+            AIPromptAssembly.system(hasContext: subject.hasContext).contains("do not invent one"),
+            "the model was told to work from a context that was never supplied"
+        )
     }
 
     /// Whitespace is not context. A selection of two newlines would otherwise be shown, counted and
@@ -410,7 +418,7 @@ final class AIDiagramSessionTests: XCTestCase {
         XCTAssertEqual(subject.edit("flowchart TD\n  A --> B", of: refused), .applied)
         XCTAssertEqual(subject.shownDraft?.title, "prose")
         XCTAssertEqual(subject.pane, .diagram)
-        XCTAssertNotNil(subject.turns.last?.drawnDraft)
+        XCTAssertTrue(subject.isDrawable(refused))
     }
 
     /// Refused the same way any other Mermaid this app is handed is refused, and the stage is left
@@ -464,6 +472,201 @@ final class AIDiagramSessionTests: XCTestCase {
         _ = subject.edit("flowchart TD\n  A --> C", of: answer)
         XCTAssertEqual(subject.edit("flowchart TD\n  A --> B", of: answer), .applied)
         XCTAssertFalse(subject.isEdited(answer), "the edit was cleared rather than kept as a copy of the answer")
+    }
+
+    /// A repair is asked about the diagram the reader has in front of them, which after a correction
+    /// is not the one the model sent. Reading past the correction quietly asked for the model's own
+    /// text to be fixed and threw the reader's work away in the answer.
+    func testARepairIsAskedAboutTheCorrectionRatherThanTheAnswerItReplaced() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+        let answer = try XCTUnwrap(subject.turns.last?.id)
+        _ = subject.edit("flowchart TD\n  A --> C", of: answer)
+
+        XCTAssertEqual(subject.latestDraft?.mermaid, "flowchart TD\n  A --> C")
+    }
+
+    // MARK: - What an edit is
+
+    /// An edit belongs to the answer it was typed against, not to the window. A request the reader
+    /// started ninety seconds ago finishing is not their consent to lose what they typed while it
+    /// ran, so the stage takes the new answer and the editor does not.
+    func testAnAnswerArrivingDoesNotTakeTypingNobodyApplied() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+        let first = try XCTUnwrap(subject.turns.last?.id)
+        subject.typeInEditor("flowchart TD\n  A --> C\n  C --> D")
+
+        _ = subject.beginSending(instruction: "add the failure branch")
+        subject.receive(draft("Login with failures", mermaid: "flowchart TD\n  X --> Y"))
+
+        XCTAssertEqual(subject.editingTurn, first, "the editor followed the new answer over the reader's typing")
+        XCTAssertEqual(subject.editorText, "flowchart TD\n  A --> C\n  C --> D")
+        XCTAssertTrue(subject.editorIsPinned, "nothing says the two panes are showing different answers")
+        XCTAssertEqual(subject.shownDraft?.mermaid, "flowchart TD\n  X --> Y", "the stage stopped following the newest answer")
+    }
+
+    /// The same rule from the other direction: the reader pulling an earlier answer back onto the
+    /// stage is not a reason to take the buffer either.
+    func testShowingAnotherAnswerDoesNotTakeTypingNobodyApplied() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "one")
+        subject.receive(draft("first", mermaid: "flowchart TD\n  A --> B"))
+        let older = try XCTUnwrap(subject.turns.last?.id)
+        _ = subject.beginSending(instruction: "two")
+        subject.receive(draft("second", mermaid: "flowchart TD\n  C --> D"))
+        let newer = try XCTUnwrap(subject.turns.last?.id)
+        subject.typeInEditor("flowchart TD\n  C --> E")
+
+        subject.show(older)
+
+        XCTAssertEqual(subject.shownTurn, older)
+        XCTAssertEqual(subject.editingTurn, newer)
+        XCTAssertEqual(subject.editorText, "flowchart TD\n  C --> E")
+    }
+
+    /// The reader's own gesture always moves the editor, and what they were halfway through stays
+    /// parked under the answer they left rather than being thrown away behind them.
+    func testMovingTheEditorParksTypingUnderTheAnswerItBelongsTo() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "one")
+        subject.receive(draft("first", mermaid: "flowchart TD\n  A --> B"))
+        let older = try XCTUnwrap(subject.turns.last?.id)
+        subject.typeInEditor("flowchart TD\n  A --> Z")
+        _ = subject.beginSending(instruction: "two")
+        subject.receive(draft("second", mermaid: "flowchart TD\n  C --> D"))
+        let newer = try XCTUnwrap(subject.turns.last?.id)
+
+        subject.beginEditing(newer)
+        XCTAssertEqual(subject.editorText, "flowchart TD\n  C --> D")
+        XCTAssertTrue(subject.hasUnappliedChanges(older), "the parked typing left no sign on the answer holding it")
+        XCTAssertFalse(subject.hasUnappliedChanges(newer))
+
+        subject.beginEditing(older)
+        XCTAssertEqual(subject.editorText, "flowchart TD\n  A --> Z", "the parked typing was not there to come back to")
+    }
+
+    /// Typing is the reader's until they apply it. Nothing that reads the diagram — the stage, a
+    /// copy, an export, the history sent with the next instruction — may see it before then.
+    func testNothingReadsAnEditUntilItIsApplied() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+        let answer = try XCTUnwrap(subject.turns.last?.id)
+
+        subject.typeInEditor("flowchart TD\n  A --> C")
+        XCTAssertEqual(subject.shownDraft?.mermaid, "flowchart TD\n  A --> B", "unapplied typing reached the stage")
+        XCTAssertEqual(subject.copyableMermaid, "flowchart TD\n  A --> B")
+        XCTAssertFalse(subject.isEdited(answer))
+
+        XCTAssertEqual(subject.applyEditorChanges(), .applied)
+        XCTAssertEqual(subject.shownDraft?.mermaid, "flowchart TD\n  A --> C")
+        XCTAssertTrue(subject.isEdited(answer))
+        XCTAssertFalse(subject.editorHasUnappliedChanges, "the editor stayed dirty over a change it had just committed")
+    }
+
+    /// A trailing newline is enough. The buffer says something different, the diagram says the same
+    /// thing, and Apply used to stay lit and do nothing at all however many times it was pressed —
+    /// so the editor is put back to the text that is actually kept, and the button goes out.
+    func testApplyingWhatIsAlreadyTheDiagramPutsTheEditorBackInstead() {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+
+        subject.typeInEditor("flowchart TD\n  A --> B\n")
+        XCTAssertTrue(subject.editorHasUnappliedChanges)
+
+        XCTAssertEqual(subject.applyEditorChanges(), .unchanged)
+        XCTAssertEqual(subject.editorText, "flowchart TD\n  A --> B")
+        XCTAssertFalse(subject.editorHasUnappliedChanges, "Apply left itself lit over a change it had declined to make")
+    }
+
+    /// The same for a diagram pasted back inside a fence, which is how most people bring one back.
+    func testPastingTheSameDiagramBackInsideAFenceIsNotAChangeToApply() {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+
+        subject.typeInEditor("```mermaid\nflowchart TD\n  A --> B\n```")
+        XCTAssertEqual(subject.applyEditorChanges(), .unchanged)
+        XCTAssertFalse(subject.editorHasUnappliedChanges)
+    }
+
+    /// Refused text is the one thing that is never taken away: somebody halfway through fixing a
+    /// diagram has the error in front of them and their own words still in the box.
+    func testTextTheAppWillNotDrawIsLeftInTheEditorWithTheReason() {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+
+        subject.typeInEditor("the quick brown fox")
+        XCTAssertEqual(subject.applyEditorChanges(), .rejected(.unsupportedSyntax))
+        XCTAssertEqual(subject.editorText, "the quick brown fox")
+        XCTAssertTrue(subject.editorHasUnappliedChanges)
+        XCTAssertEqual(subject.shownDraft?.mermaid, "flowchart TD\n  A --> B")
+    }
+
+    /// Retyping the last character back is not a change, and the reader deciding to drop what they
+    /// typed is the only other thing in this window that destroys it.
+    func testTypingIsOnlyEverThrownAwayOnPurpose() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("Login"))
+        let answer = try XCTUnwrap(subject.turns.last?.id)
+
+        subject.typeInEditor("flowchart TD\n  A --> C")
+        XCTAssertTrue(subject.editorHasUnappliedChanges)
+        subject.typeInEditor("flowchart TD\n  A --> B")
+        XCTAssertFalse(subject.editorHasUnappliedChanges, "typing the answer back left a change nobody had made")
+
+        subject.typeInEditor("flowchart TD\n  A --> C")
+        subject.discardEditorChanges()
+        XCTAssertFalse(subject.editorHasUnappliedChanges)
+        XCTAssertEqual(subject.editorText, "flowchart TD\n  A --> B")
+        XCTAssertEqual(subject.editingTurn, answer)
+    }
+
+    /// A correction is the only reason an answer the engine refused was ever drawn, so taking the
+    /// correction back has to take the answer off the stage. It used to stay flagged drawable, and
+    /// the stage, the clipboard and an export all went on handing out prose as a diagram.
+    func testTakingBackACorrectionTakesTheAnswerItRevivedOffTheStage() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "one")
+        subject.receive(draft("Login"))
+        let drawn = try XCTUnwrap(subject.turns.last?.id)
+        _ = subject.beginSending(instruction: "two")
+        subject.receive(draft("prose", mermaid: "I am afraid I cannot draw that"), drawable: false)
+        let refused = try XCTUnwrap(subject.turns.last?.id)
+        XCTAssertEqual(subject.edit("flowchart TD\n  A --> C", of: refused), .applied)
+        XCTAssertEqual(subject.shownTurn, refused)
+
+        subject.revertEdit(of: refused)
+
+        XCTAssertFalse(subject.isDrawable(refused), "an answer the engine refused was still offering itself as drawn")
+        XCTAssertEqual(subject.shownTurn, drawn, "the newest answer that still draws did not take the stage back")
+        XCTAssertEqual(subject.shownDraft?.mermaid, "flowchart TD\n  A --> B")
+        XCTAssertEqual(subject.copyableMermaid, "flowchart TD\n  A --> B")
+        XCTAssertEqual(subject.exportableDraft?.mermaid, "flowchart TD\n  A --> B")
+    }
+
+    /// With nothing else that draws, the window goes back to having nothing to show. An empty stage
+    /// is a state it already has copy for; a drawing of prose the engine refused is not.
+    func testTakingBackTheOnlyCorrectionLeavesTheStageEmptyRatherThanWrong() throws {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw it")
+        subject.receive(draft("prose", mermaid: "I am afraid I cannot draw that"), drawable: false)
+        let refused = try XCTUnwrap(subject.turns.last?.id)
+        _ = subject.edit("flowchart TD\n  A --> C", of: refused)
+
+        subject.revertEdit(of: refused)
+
+        XCTAssertNil(subject.shownDraft)
+        XCTAssertNil(subject.shownTurn)
+        XCTAssertNil(subject.copyableMermaid)
+        XCTAssertNil(subject.exportableDraft)
+        XCTAssertEqual(subject.pane, .introduction)
     }
 
     /// A follow-up is about the diagram on the stage. Without the source in the history a model
@@ -520,7 +723,9 @@ final class AIDiagramSessionTests: XCTestCase {
     }
 
     /// The model never finished with those words, so sending them again as history would ask for
-    /// the same thing twice.
+    /// the same thing twice. Nothing that arrives afterwards is that instruction's answer either:
+    /// the stopped request is over, and pairing it with somebody else's diagram would tell the model
+    /// it had answered a question it never saw.
     func testAStoppedInstructionIsLeftOutOfTheHistory() {
         var subject = session()
         _ = subject.beginSending(instruction: "draw the login flow")
@@ -530,6 +735,21 @@ final class AIDiagramSessionTests: XCTestCase {
 
         XCTAssertEqual(subject.providerHistory.first, AIMessage(role: .user, text: "draw the login flow properly"))
         XCTAssertEqual(subject.providerHistory.count, 2)
+    }
+
+    /// The half of the same rule the pairing above cannot see: with no second instruction between
+    /// them, an answer must not be handed back the stopped instruction as its question.
+    func testAnAnswerAfterAStopIsNotPairedWithTheStoppedInstruction() {
+        var subject = session()
+        _ = subject.beginSending(instruction: "draw the login flow")
+        subject.cancelSending()
+        subject.receive(draft("Login"))
+
+        XCTAssertEqual(
+            subject.providerHistory.map(\.role),
+            [.assistant],
+            "a stopped instruction was sent back as the question this answer answered"
+        )
     }
 
     /// A stopped request is still one of the reader's own instructions, and "ask again" has to find
@@ -583,6 +803,21 @@ final class AIDiagramSessionTests: XCTestCase {
     }
 
     /// What makes trying the history free: walking past the newest entry hands back the words that
+
+    /// A walk means nothing once the list has changed under it. The positions the cursor held are
+    /// somewhere else now, so Down would hand back an instruction from a place the reader never
+    /// chose — and a walk that survived their own new instruction would do it every time.
+    func testANewInstructionEndsAWalkThroughTheOldOnes() {
+        var recall = AIInstructionRecall()
+        recall.update(history: ["one", "two"])
+        XCTAssertEqual(recall.older(current: "half typed"), "two")
+        XCTAssertTrue(recall.isWalking)
+
+        recall.update(history: ["one", "two", "three"])
+
+        XCTAssertFalse(recall.isWalking, "the cursor was still walking a list that no longer exists")
+        XCTAssertEqual(recall.older(current: "half typed"), "three", "the walk restarted somewhere the reader did not ask for")
+    }
     /// were in the box when the walk began, rather than emptying it.
     func testWalkingPastTheNewestInstructionGivesTheHalfWrittenOneBack() {
         var recall = AIInstructionRecall()

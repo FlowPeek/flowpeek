@@ -74,7 +74,9 @@ final class StarNudgeNoticeCoordinator {
             context.duration = Self.fadeDuration
             panel.animator().alphaValue = 0
         } completionHandler: { [weak panel] in
-            panel?.orderOut(nil)
+            // AppKit runs this on the main thread; saying so is what lets the panel be touched
+            // from a closure the compiler sees as nonisolated.
+            MainActor.assumeIsolated { panel?.orderOut(nil) }
         }
     }
 

@@ -14,7 +14,10 @@ struct FlowPeekApp: App {
             MenuBarContent()
                 .environmentObject(app)
         }
-        .menuBarExtraStyle(.menu)
+        // A window, not a menu: `MenuBarContent` draws FlowPeek's own panel -- a status line, the
+        // diagrams the user made with the glyph of the route that made each one, and switches --
+        // and a system menu can only draw a column of words.
+        .menuBarExtraStyle(.window)
 
     }
 }

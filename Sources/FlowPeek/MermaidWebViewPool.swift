@@ -9,9 +9,13 @@ private final class MermaidViewportBridge: NSObject, WKScriptMessageHandler {
     @MainActor var onScale: ((Double) -> Void)?
 
     nonisolated func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any] else { return }
-        guard let scale = body["scale"] as? Double, scale.isFinite, scale > 0 else { return }
-        MainActor.assumeIsolated { self.onScale?(scale) }
+        // The whole body, not just the callback: `WKScriptMessage.body` is main-actor isolated too,
+        // and WebKit delivers this on the main thread.
+        MainActor.assumeIsolated {
+            guard let body = message.body as? [String: Any] else { return }
+            guard let scale = body["scale"] as? Double, scale.isFinite, scale > 0 else { return }
+            self.onScale?(scale)
+        }
     }
 }
 

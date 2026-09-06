@@ -722,7 +722,7 @@ final class AppState: ObservableObject {
     }
 
     private func showCopied(_ source: MermaidSource) {
-        noteDiagramOpened(.clipboard)
+        noteDiagramOpened(.clipboard, source: source)
         previews.showQuick(
             document: DiagramDocument(title: String(localized: "diagram.clipboard-title"), source: source)
         )
@@ -745,13 +745,14 @@ final class AppState: ObservableObject {
     /// here; how much use the app has had belongs to the drawing, which has not happened yet and may
     /// not happen at all -- a source that passes validation can still be refused by the engine, and
     /// what opens for it is an apology.
-    private func noteDiagramOpened(_ lesson: TutorialProgress.Lesson) {
+    private func noteDiagramOpened(_ lesson: TutorialProgress.Lesson, source: MermaidSource) {
         tutorial.noteOpened(lesson)
-        pendingOrigin = switch lesson {
+        let origin: DiagramOrigin = switch lesson {
         case .selection: .selection
         case .clipboard: .clipboard
         case .ambient: .ambient
         }
+        pending = Pending(origin: origin, source: source.text)
     }
 
     /// A diagram is on screen. Both the ledger and the history follow this rather than the opening:
@@ -759,8 +760,13 @@ final class AppState: ObservableObject {
     /// been useful" nor "here is a diagram you had" is true of an apology.
     private func noteDiagramDrawn() {
         starLedger = starLedger.recordingDiagram(at: Date())
-        guard let origin = pendingOrigin, let diagram = previews.shownDiagram else { return }
-        pendingOrigin = nil
+        // The source is checked, not just the fact that something was opened: a diagram that never
+        // drew leaves its route behind, and without this the next diagram to draw -- one opened from
+        // the history, say -- would be filed under it and dragged to the top of the list wearing
+        // somebody else's origin.
+        guard let pending, let diagram = previews.shownDiagram, diagram.source == pending.source else { return }
+        self.pending = nil
+        let origin = pending.origin
         _ = DiagramHistoryStore.shared.record(
             // The diagram's own words, not the route's. What the selection, clipboard and pointer
             // routes hand over is the name of the route -- "Copied Diagram" on every row -- which
@@ -772,9 +778,16 @@ final class AppState: ObservableObject {
         )
     }
 
-    /// Which route opened the preview that is about to draw. Cleared when it is filed, so a second
-    /// render of the same preview -- a re-fit, an appearance change -- files nothing.
-    private var pendingOrigin: DiagramOrigin?
+    /// Which route opened the preview that is about to draw, and what it opened. Cleared when it is
+    /// filed, so a second render of the same preview -- a re-fit, an appearance change -- files
+    /// nothing, and matched against what actually drew, so a route that never got there files
+    /// nothing either.
+    private struct Pending {
+        let origin: DiagramOrigin
+        let source: String
+    }
+
+    private var pending: Pending?
 
     /// Long enough for the preview's fade to finish and for the user's eye to have left the middle
     /// of the screen; short enough that the notice still reads as a remark about the diagram they
@@ -917,7 +930,7 @@ final class AppState: ObservableObject {
         let title = String(localized: "preview.error.title")
         do {
             let source = try MermaidSource(rawValue: candidate.detection.extractedSource)
-            noteDiagramOpened(.ambient)
+            noteDiagramOpened(.ambient, source: source)
             previews.showQuick(
                 document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source)
             )
@@ -939,7 +952,7 @@ final class AppState: ObservableObject {
         let detection = cached ?? MermaidDetector.detect(snapshot.text)
         do {
             let source = try MermaidSource(rawValue: detection.extractedSource)
-            noteDiagramOpened(.selection)
+            noteDiagramOpened(.selection, source: source)
             previews.showQuick(document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source))
         } catch let error as MermaidSource.ValidationError {
             previews.showMessage(title: title, message: localizedUserMessage(error))

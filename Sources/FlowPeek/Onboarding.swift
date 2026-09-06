@@ -352,7 +352,7 @@ struct OnboardingView: View {
                 let state = app.tutorial[lesson]
                 let blocker = lesson.blocker(app.tutorialSwitches)
                 // Progress outlives the switch: somebody who passed this lesson and later turned
-                // the experiment back off has still passed it, and hiding the tick behind an "off"
+                // turning hold to peek back off has still passed it, and hiding the tick behind an "off"
                 // badge would tell them otherwise.
                 let blocked = blocker != nil && state != .done
                 HStack(alignment: .top, spacing: 12) {
@@ -398,9 +398,9 @@ struct OnboardingView: View {
                         if blocked, blocker == .ambientPeekOff {
                             // Prominent because it is not an aside: nothing in this row can happen
                             // until it is pressed. Offered only where the reason line above it
-                            // appears — the experiment is the switch actually in the way, and the
+                            // appears — hold to peek is the switch actually in the way, and the
                             // row still has something left to do. With detection paused, turning
-                            // the experiment on changes nothing the user can see.
+                            // it on changes nothing the user can see.
                             Button(String(localized: TutorialProgress.Blocker.enableButtonTitleKey)) {
                                 app.enableAmbientPeek()
                                 // The page already in the browser still carries the sentence saying
@@ -654,7 +654,7 @@ struct OnboardingView: View {
     }
 
     /// One opener, because what the page prints depends on which lessons are on offer and whether
-    /// the pointing experiment is on. A second copy of that argument list is how the page and this
+    /// hold to peek is on. A second copy of that argument list is how the page and this
     /// checklist end up describing two different sets of gestures.
     private func openPracticePage() {
         // Get out of the way first: this window floats, and it was sitting squarely on top of the

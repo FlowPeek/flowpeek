@@ -39,7 +39,7 @@
 "tutorial.clipboard.detail" = "Select the diagram and press Command-C. A badge appears near the menu bar; click it or press its shortcut.";
 "tutorial.ambient.title" = "Point at it";
 "tutorial.ambient.detail" = "Hold Option and move the pointer over the diagram. It gets outlined; press %@ while still holding.";
-"tutorial.ambient.enable" = "Turn On This Experiment";
+"tutorial.ambient.enable" = "Turn On Hold to Peek";
 "tutorial.restart" = "Start Over";
 "tutorial.page.intro.blocked" = "This is a real page in your own browser. The gestures below behave exactly as they will from now on — except the ones marked as switched off.";
 "tutorial.page.hint" = "Click the block once — or focus it and press Return — to select all of it. If you drag instead, start from its first line: a selection that starts lower down has lost the line FlowPeek reads first.";
@@ -52,7 +52,7 @@
 "tutorial.nudge.selection" = "Nothing selected yet. The practice page is in your browser — switch to it and click the diagram block.";
 "tutorial.nudge.clipboard" = "No copy seen yet. Select the block on the practice page and press Command-C.";
 "tutorial.nudge.ambient" = "Nothing outlined yet. Hold Option down and keep it down while the pointer moves over the block.";
-"tutorial.ambient.switched-off" = "This one is an experiment and starts switched off, so nothing is watching for it yet.";
+"tutorial.ambient.switched-off" = "This one starts switched off, because while it is on that key belongs to FlowPeek instead of to whatever you are typing in. Nothing is watching for it yet.";
 "tutorial.ambient.blocked" = "Not switched on yet — press “%@” in the FlowPeek window at the edge of your screen, then open this page again.";
 "tutorial.paused.switched-off" = "Detection is paused, so nothing is being watched for. Turn it back on with the “%@” row in the FlowPeek menu bar menu.";
 "tutorial.paused.blocked" = "Detection is paused, so this will not happen yet. Turn it back on with the “%@” row in the FlowPeek menu bar menu, then open this page again.";
@@ -115,7 +115,7 @@
 "shortcut.ai-prompt" = "Generate with AI";
 "shortcut.ai-prompt.detail" = "Sends the current selection to your provider as context. Only active while the AI experiment is on.";
 "shortcut.ambient-peek" = "Open the outlined diagram";
-"shortcut.ambient-peek.detail" = "Opens whatever the outline is around while you hold Option. Only taken from other apps while the hold-to-peek experiment is on.";
+"shortcut.ambient-peek.detail" = "Opens whatever the outline is around while you hold Option. Only taken from other apps while hold to peek is switched on.";
 "shortcut.inactive.clipboard" = "Turn on “Watch the clipboard” in General to use this.";
 "shortcut.inactive.ai" = "Turn on AI Diagram Generation in the AI tab to use this.";
 "shortcut.inactive.ambient" = "Turn on “Hold to Peek” in General, and allow Accessibility, to use this.";
@@ -138,7 +138,7 @@
 "settings.language.relaunch.action" = "Restart Now";
 "settings.language.relaunch.title" = "Restart FlowPeek to change language?";
 "settings.ambient" = "Hold to peek";
-"settings.ambient.description" = "Hold Option and point at a diagram: FlowPeek outlines it and %@ opens it. Only reads while Option is down: what is under the pointer, and in an editor that exposes nothing there — VS Code and other Electron apps — the document it has open, anchored on the text cursor. Apps that draw their own text — a terminal rendering to a canvas, for one — expose nothing to read; copying still works there.";
+"settings.ambient.description" = "Hold Option and point at a diagram: FlowPeek outlines it and %@ opens it. Only reads while Option is down: what is under the pointer, and in an editor that exposes nothing there — VS Code and other Electron apps — the document it has open, anchored on the text cursor. Apps that draw their own text — a terminal rendering to a canvas, for one — expose nothing to read; copying still works there. It is a switch rather than always on: while it is on, that key belongs to FlowPeek instead of to whatever you are typing in.";
 "settings.ambient.needs-permission" = "Needs Accessibility permission before it can see anything.";
 "ambient.hint.generic" = "Mermaid";
 "ambient.hint.help" = "Open this diagram";

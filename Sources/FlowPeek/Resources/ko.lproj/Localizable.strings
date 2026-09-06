@@ -39,7 +39,7 @@
 "tutorial.clipboard.detail" = "다이어그램을 선택하고 Command-C를 누르세요. 메뉴 막대 근처에 배지가 뜨면 누르거나 표시된 단축키를 씁니다.";
 "tutorial.ambient.title" = "가리키기";
 "tutorial.ambient.detail" = "Option을 누른 채 포인터를 다이어그램 위로 옮기세요. 테두리가 생기면 계속 누른 상태로 %@를 누릅니다.";
-"tutorial.ambient.enable" = "이 실험 기능 켜기";
+"tutorial.ambient.enable" = "홀드해서 엿보기 켜기";
 "tutorial.restart" = "처음부터 다시";
 "tutorial.page.intro.blocked" = "여기는 여러분의 브라우저에 열린 실제 페이지입니다. 아래 동작들은 지금부터 쓰실 그대로 작동합니다 — 꺼져 있다고 표시된 것만 빼고요.";
 "tutorial.page.hint" = "블록을 한 번 클릭하거나, 포커스를 준 뒤 Return을 누르면 전체가 선택됩니다. 드래그할 때는 첫 줄부터 시작하세요 — 중간부터 시작한 선택은 FlowPeek이 가장 먼저 읽는 줄을 놓칩니다.";
@@ -52,7 +52,7 @@
 "tutorial.nudge.selection" = "아직 선택된 것이 없습니다. 연습 페이지가 브라우저에 열려 있으니 그쪽으로 가서 다이어그램 블록을 클릭하세요.";
 "tutorial.nudge.clipboard" = "아직 복사가 감지되지 않았습니다. 연습 페이지에서 블록을 선택하고 Command-C를 누르세요.";
 "tutorial.nudge.ambient" = "아직 테두리가 생기지 않았습니다. Option을 누른 상태를 유지한 채 포인터를 블록 위로 옮기세요.";
-"tutorial.ambient.switched-off" = "이 기능은 실험 기능이라 꺼진 상태로 시작합니다. 그래서 아직 아무것도 감시하지 않습니다.";
+"tutorial.ambient.switched-off" = "이 기능은 켜져 있는 동안 그 키가 입력 중인 앱이 아니라 FlowPeek의 것이 되기 때문에 꺼진 상태로 시작합니다. 그래서 아직 아무것도 감시하지 않습니다.";
 "tutorial.ambient.blocked" = "아직 켜지 않았습니다 — 화면 가장자리의 FlowPeek 창에서 “%@”를 누른 뒤 이 페이지를 다시 열어주세요.";
 "tutorial.paused.switched-off" = "감지가 일시 정지되어 있어서 아무것도 감시하지 않습니다. 메뉴 막대 FlowPeek 메뉴의 “%@” 항목을 눌러 다시 켜주세요.";
 "tutorial.paused.blocked" = "감지가 일시 정지되어 있어서 아직은 아무 일도 일어나지 않습니다. 메뉴 막대 FlowPeek 메뉴의 “%@” 항목을 눌러 다시 켠 뒤 이 페이지를 다시 열어주세요.";
@@ -115,7 +115,7 @@
 "shortcut.ai-prompt" = "AI로 생성";
 "shortcut.ai-prompt.detail" = "현재 선택 영역을 맥락으로 제공자에게 보냅니다. AI 실험 기능이 켜져 있을 때만 동작합니다.";
 "shortcut.ambient-peek" = "테두리가 생긴 다이어그램 열기";
-"shortcut.ambient-peek.detail" = "Option을 누른 동안 테두리가 생긴 다이어그램을 엽니다. 홀드해서 엿보기 실험 기능이 켜져 있을 때만 다른 앱에서 이 키를 가져옵니다.";
+"shortcut.ambient-peek.detail" = "Option을 누른 동안 테두리가 생긴 다이어그램을 엽니다. 홀드해서 엿보기가 켜져 있을 때만 다른 앱에서 이 키를 가져옵니다.";
 "shortcut.inactive.clipboard" = "일반 탭에서 ‘클립보드 감시’를 켜야 사용할 수 있습니다.";
 "shortcut.inactive.ai" = "AI 탭에서 AI 다이어그램 생성을 켜야 사용할 수 있습니다.";
 "shortcut.inactive.ambient" = "일반 탭에서 ‘홀드해서 엿보기’를 켜고 접근성 권한을 허용해야 사용할 수 있습니다.";
@@ -138,7 +138,7 @@
 "settings.language.relaunch.action" = "지금 다시 시작";
 "settings.language.relaunch.title" = "언어를 바꾸려면 FlowPeek을 다시 시작할까요?";
 "settings.ambient" = "홀드해서 엿보기";
-"settings.ambient.description" = "Option을 누른 채 다이어그램을 가리키면 테두리가 생기고 %@로 엽니다. Option을 누르고 있는 동안에만 읽습니다. 포인터 아래를 읽고, 포인터 아래에 아무것도 노출하지 않는 편집기—VS Code 같은 Electron 앱—에서는 열려 있는 문서를 읽어 텍스트 커서 위치를 기준으로 삼습니다. 화면을 직접 그리는 앱—예를 들어 캔버스로 출력하는 터미널—은 읽을 텍스트를 노출하지 않으며, 그런 곳에서는 복사가 계속 동작합니다.";
+"settings.ambient.description" = "Option을 누른 채 다이어그램을 가리키면 테두리가 생기고 %@로 엽니다. Option을 누르고 있는 동안에만 읽습니다. 포인터 아래를 읽고, 포인터 아래에 아무것도 노출하지 않는 편집기—VS Code 같은 Electron 앱—에서는 열려 있는 문서를 읽어 텍스트 커서 위치를 기준으로 삼습니다. 화면을 직접 그리는 앱—예를 들어 캔버스로 출력하는 터미널—은 읽을 텍스트를 노출하지 않으며, 그런 곳에서는 복사가 계속 동작합니다. 항상 켜두지 않고 스위치로 둔 이유는, 켜져 있는 동안 그 키가 입력 중인 앱이 아니라 FlowPeek의 것이 되기 때문입니다.";
 "settings.ambient.needs-permission" = "손쉬운 사용 권한이 없으면 아무것도 읽지 못합니다.";
 "ambient.hint.generic" = "머메이드";
 "ambient.hint.help" = "이 다이어그램 열기";

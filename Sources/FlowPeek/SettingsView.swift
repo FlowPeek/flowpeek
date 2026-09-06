@@ -270,12 +270,6 @@ struct SettingsView: View {
                                 // Reads the accessibility tree, so without the grant it is a title
                                 // for something that cannot happen yet.
                                 .foregroundStyle(app.accessibilityGranted ? .primary : .secondary)
-                            Text("settings.experimental")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.pink)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(Color.pink.opacity(0.12), in: Capsule())
                         }
                         Text(verbatim: ambientDescription)
                             .font(.callout)

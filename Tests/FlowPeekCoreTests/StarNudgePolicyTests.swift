@@ -45,6 +45,27 @@ final class StarNudgePolicyTests: XCTestCase {
         )
     }
 
+    /// The two numbers the restraint is made of, written out. Every other test here says "the
+    /// threshold", which keeps them honest about the shape of the rule and says nothing at all
+    /// about its size — and the size is the decision: forty diagrams over three days is a user who
+    /// kept FlowPeek, and three diagrams over a second is anybody who opened it once.
+    func testTheThresholdsAreTheOnesThatWereChosen() {
+        XCTAssertEqual(StarNudgePolicy.diagramsBeforeAsking, 40)
+        XCTAssertEqual(StarNudgePolicy.minimumTenure, 3 * 24 * 60 * 60)
+    }
+
+    /// The tenure is a floor, not a fence to be past: the instant it is reached, it is met.
+    func testTheTenureIsMetExactlyOnTheBoundary() {
+        XCTAssertEqual(
+            StarNudgePolicy.decide(
+                ledger: earned(),
+                screen: .clear,
+                now: epoch.addingTimeInterval(StarNudgePolicy.minimumTenure)
+            ),
+            .ask
+        )
+    }
+
     /// A user still working out what FlowPeek is has not been asked anything, and one diagram short
     /// of the threshold is still that user.
     func testOneDiagramShortIsNotEnough() {
@@ -121,14 +142,6 @@ final class StarNudgePolicyTests: XCTestCase {
         XCTAssertEqual(StarNudgePolicy.decide(ledger: ledger, screen: .clear, now: wellAfterTenure), .ask)
     }
 
-    /// A busy screen must not be able to answer the question by accident — `asked` is written by
-    /// the notice appearing and by nothing else.
-    func testDecidingDoesNotChangeTheLedger() {
-        let ledger = earned()
-        _ = StarNudgePolicy.decide(ledger: ledger, screen: .clear, now: wellAfterTenure)
-        XCTAssertEqual(ledger, earned())
-    }
-
     // MARK: - Ledger
 
     func testTheFirstDiagramStartsTheClock() {
@@ -170,9 +183,46 @@ final class StarNudgePolicyTests: XCTestCase {
         XCTAssertEqual(ledger.recordingDiagram(at: wellAfterTenure).diagramsOpened, .max)
     }
 
-    func testTheRepositoryAddressIsAUsableURL() {
+    /// The one address the one button opens. Pinned in full: a scheme and a host would be just as
+    /// happy with somebody else's repository, and nobody would find out until the button was
+    /// pressed — once, by a user who had already decided to be generous.
+    func testTheRepositoryAddressIsTheRepository() {
+        XCTAssertEqual(StarNudgePolicy.repository, "https://github.com/FlowPeek/flowpeek")
         let url = URL(string: StarNudgePolicy.repository)
         XCTAssertEqual(url?.scheme, "https")
         XCTAssertEqual(url?.host, "github.com")
+    }
+
+    // MARK: - The moment
+
+    /// The failure notice and the diagram share a panel slot, so an emptied slot on its own does
+    /// not say the app worked. Only a diagram going away does.
+    func testOnlyADiagramLeavingTheScreenIsAMomentToAsk() {
+        XCTAssertTrue(StarNudgePolicy.isAskableMoment(previous: .diagram, current: .none))
+
+        // FlowPeek has just said it could not do the thing that was asked of it, and the user has
+        // closed the notice saying so. Everything about that looks like a preview closing.
+        XCTAssertFalse(StarNudgePolicy.isAskableMoment(previous: .message, current: .none))
+        XCTAssertFalse(StarNudgePolicy.isAskableMoment(previous: .none, current: .none))
+    }
+
+    /// A diagram replaced by a failure, or promoted into a window, has not left the screen.
+    func testADiagramGivingWayToSomethingElseIsNotAMoment() {
+        XCTAssertFalse(StarNudgePolicy.isAskableMoment(previous: .diagram, current: .message))
+        XCTAssertFalse(StarNudgePolicy.isAskableMoment(previous: .diagram, current: .diagram))
+    }
+
+    /// Nothing arriving is never the moment, whatever arrives.
+    func testAnArrivalIsNeverAMoment() {
+        for arriving in [PreviewSurface.diagram, .message] {
+            XCTAssertFalse(
+                StarNudgePolicy.isAskableMoment(previous: .none, current: arriving),
+                "\(arriving) appearing should not be a moment to ask"
+            )
+            XCTAssertFalse(
+                StarNudgePolicy.isAskableMoment(previous: .message, current: arriving),
+                "\(arriving) replacing a failure notice should not be a moment to ask"
+            )
+        }
     }
 }

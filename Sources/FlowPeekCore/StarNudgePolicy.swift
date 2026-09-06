@@ -13,9 +13,10 @@ public struct StarNudgeLedger: Equatable, Sendable {
     public var diagramsOpened: Int
     /// When the first of them was drawn. `nil` until there has been one.
     public var firstDiagramAt: Date?
-    /// The question has been put. Set when the notice appears rather than when it is answered:
-    /// the notice retires itself after a few seconds, so "dismissed" is not an event that reliably
-    /// arrives, and a second appearance is the nag this whole type exists to prevent.
+    /// The question has been put. Set once the notice has been in front of the user rather than
+    /// when it is answered: the notice retires itself after a few seconds, so "dismissed" is not an
+    /// event that reliably arrives, and a second appearance is the nag this whole type exists to
+    /// prevent.
     public var asked: Bool
 
     public init(diagramsOpened: Int = 0, firstDiagramAt: Date? = nil, asked: Bool = false) {
@@ -72,6 +73,21 @@ public struct StarNudgeScreen: Equatable, Sendable {
     public var isBusy: Bool { previewOnScreen || onboardingOnScreen || otherWindowOnScreen }
 }
 
+/// What FlowPeek is showing in the panel slot every preview route ends in.
+///
+/// A drawn diagram and a "that did not work" notice take turns in that slot, and to anything
+/// watching the slot empty out they look the same. To the one question this file governs they are
+/// opposites, so which of them was there is carried as a value rather than read back off a panel
+/// that has already gone.
+public enum PreviewSurface: Equatable, Sendable {
+    case none
+    /// A diagram the user asked for, drawn and readable.
+    case diagram
+    /// A failure in words: Mermaid that would not parse, an engine that would not run, a clipboard
+    /// with nothing in it.
+    case message
+}
+
 public enum StarNudgeDecision: Equatable, Sendable {
     case ask
     /// Already put, once, however it was answered. Terminal: nothing moves a ledger out of here.
@@ -95,6 +111,18 @@ public enum StarNudgePolicy {
     /// Three days between the first diagram and the question, so the forty cannot all be one
     /// sitting. A trial that ends the same evening never sees the notice at all.
     public static let minimumTenure: TimeInterval = 3 * 24 * 60 * 60
+
+    /// Whether the preview slot moving from `previous` to `current` is a moment worth asking after.
+    ///
+    /// Only one move is: a diagram the user asked for going away, because that is the app having
+    /// just done the job it exists for and handing the screen back. The failure notice is the whole
+    /// reason this is a question and not `current == .none` — it uses the same slot as a diagram,
+    /// so an empty slot on its own says only that something went away, and the something might have
+    /// been FlowPeek explaining that it could not do what was asked. There is one ask and no second
+    /// chance, and spending it on the beat after an apology is the worst use there is for it.
+    public static func isAskableMoment(previous: PreviewSurface, current: PreviewSurface) -> Bool {
+        previous == .diagram && current == .none
+    }
 
     public static func decide(ledger: StarNudgeLedger, screen: StarNudgeScreen, now: Date) -> StarNudgeDecision {
         // First, and before anything else can be considered: this is the answer for the rest of

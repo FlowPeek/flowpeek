@@ -126,4 +126,49 @@ final class PreviewLifecycleTests: XCTestCase {
         XCTAssertFalse(coordinator.hasPromotedPreviews)
         XCTAssertEqual(offered, [true, false], "the entry has to disappear with the last window")
     }
+
+    /// A diagram and a "that did not work" notice take the same panel slot, so a listener that only
+    /// heard the slot empty out would read FlowPeek's apology as a diagram the user finished with.
+    /// The report says which of the two went away, because the only thing FlowPeek ever asks of a
+    /// user has to follow the one and never the other.
+    func testTheReportSaysWhetherTheSlotHeldADiagramOrAFailure() throws {
+        let scope = WindowScope()
+        let pool = MermaidWebViewPool()
+        pool.warmUp()
+        let coordinator = PreviewCoordinator(pool: pool)
+        var reported: [PreviewSurface] = []
+        coordinator.onVisibleSurfaceChange = { reported.append($0) }
+
+        coordinator.showQuick(document: try document("drawn"))
+        XCTAssertEqual(coordinator.visibleSurface, .diagram)
+        coordinator.closeQuick()
+
+        coordinator.showMessage(title: "nothing to draw", message: "the clipboard has no diagram in it")
+        XCTAssertEqual(coordinator.visibleSurface, .message)
+        XCTAssertTrue(coordinator.hasVisibleSurface, "the notice is still something the user is reading")
+        coordinator.closeQuick()
+
+        XCTAssertEqual(reported, [.diagram, .none, .message, .none])
+        scope.previews.forEach { $0.close() }
+    }
+
+    /// Promoting empties the quick slot for an instant before the window arrives, so the report
+    /// carries a diagram leaving that nobody closed. Anything acting on one has to survive the beat
+    /// and hear the window land.
+    func testPromotingReportsTheGapAndThenTheWindow() throws {
+        let scope = WindowScope()
+        let pool = MermaidWebViewPool()
+        pool.warmUp()
+        let coordinator = PreviewCoordinator(pool: pool)
+        var reported: [PreviewSurface] = []
+        coordinator.onVisibleSurfaceChange = { reported.append($0) }
+
+        coordinator.showQuick(document: try document("promoted"))
+        coordinator.promote()
+        XCTAssertEqual(reported, [.diagram, .none, .diagram])
+        XCTAssertEqual(coordinator.visibleSurface, .diagram)
+
+        try scope.preview(titled: "promoted").close()
+        XCTAssertEqual(reported, [.diagram, .none, .diagram, .none])
+    }
 }

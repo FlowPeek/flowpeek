@@ -594,12 +594,22 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     /// menu-bar entry that offers the way back can appear and disappear with it.
     var onPromotedChange: ((Bool) -> Void)?
 
-    /// Fired whenever the answer to "is FlowPeek showing a diagram right now" changes. The quick
-    /// panel and the promoted windows are separate slots and either can be the last one on screen,
-    /// so the question is asked of both together rather than of whichever one moved.
-    var onVisibleSurfaceChange: ((Bool) -> Void)?
+    /// Fired whenever the answer to "what is FlowPeek showing right now" changes. The quick panel
+    /// and the promoted windows are separate slots and either can be the last one on screen, so the
+    /// question is asked of both together rather than of whichever one moved. The kind travels with
+    /// it because the quick panel holds a diagram and a failure notice by turns, and a listener
+    /// that saw only the slot empty could not tell which of the two it had just lost.
+    var onVisibleSurfaceChange: ((PreviewSurface) -> Void)?
 
-    var hasVisibleSurface: Bool { quickPanel != nil || !promoted.isEmpty }
+    /// A diagram in either slot wins over a message: a promoted window still holds a diagram the
+    /// user is reading, whichever panel happens to be in front of it.
+    var visibleSurface: PreviewSurface {
+        if !promoted.isEmpty { return .diagram }
+        guard quickPanel != nil else { return .none }
+        return quickPanelIsDiagram ? .diagram : .message
+    }
+
+    var hasVisibleSurface: Bool { visibleSurface != .none }
 
     private var quickPanel: NSPanel? {
         didSet { reportVisibleSurface() }
@@ -616,18 +626,20 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     /// What the last report said. Both slots are cleared along more than one path — a quick panel
     /// dismissed by hand also arrives again through `windowWillClose` — and a listener should hear
     /// about the answer changing, not about each write that leaves it where it was.
-    private var reportedVisibleSurface = false
+    private var reportedSurface: PreviewSurface = .none
 
     private func reportVisibleSurface() {
-        let visible = hasVisibleSurface
-        guard visible != reportedVisibleSurface else { return }
-        reportedVisibleSurface = visible
-        onVisibleSurfaceChange?(visible)
+        let surface = visibleSurface
+        guard surface != reportedSurface else { return }
+        reportedSurface = surface
+        onVisibleSurfaceChange?(surface)
     }
     private var dismissMonitors: [Any] = []
     private var windowKeyMonitor: Any?
     private let pool: MermaidWebViewPool
-    /// The message panel reuses `quickPanel` but has a fixed size, so its frame is never stored.
+    /// Which of the two things the quick panel is showing. The message panel reuses `quickPanel`
+    /// but has a fixed size, so its frame is never stored — and it is not a diagram, so closing it
+    /// is not the app having worked.
     private var quickPanelIsDiagram = false
     /// Surfaces whose layout has settled. The resizes that happen while a surface is being built
     /// are FlowPeek's own; recording them made the remembered size grow with every open.

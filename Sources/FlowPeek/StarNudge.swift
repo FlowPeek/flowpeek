@@ -11,9 +11,14 @@ import SwiftUI
 /// the copy badge's parts for the same reason.
 @MainActor
 final class StarNudgeNoticeCoordinator {
-    /// The one thing this notice can set in motion. Saying no needs no callback: the question was
-    /// written off as asked the moment the notice appeared, so "no" is just the panel going away.
+    /// The one thing this notice can set in motion.
     var onStar: (() -> Void)?
+
+    /// The question has been put: the notice has been up long enough to have been read, or it has
+    /// been answered. Separate from `show()` because ordering a panel on screen and asking somebody
+    /// something are not the same event — FlowPeek can be paused, or the screen locked, a moment
+    /// after the notice appears and take it back down again, and there is only one ask to spend.
+    var onAsked: (() -> Void)?
 
     static let size = CGSize(width: 330, height: 118)
     /// Longer than the copy badge's five seconds: that one names a key for something the user just
@@ -23,6 +28,9 @@ final class StarNudgeNoticeCoordinator {
     /// VoiceOver has to reach the end of both buttons before the panel describing them is gone.
     static let voiceOverDuration: TimeInterval = 28
     private static let fadeDuration: TimeInterval = 0.18
+    /// A glance, and a little over the fade. Past this the notice has been seen whether or not
+    /// anybody presses anything, and the app has spent the one question it had.
+    private static let readingTime: Duration = .seconds(2)
 
     /// The top-right slot belongs to the copy badge: that one answers something the user just did
     /// and can fire at any moment, including while this is up. This one is unsolicited, so it takes
@@ -31,11 +39,16 @@ final class StarNudgeNoticeCoordinator {
 
     private var panel: NSPanel?
     private var dismissal: Task<Void, Never>?
+    private var reading: Task<Void, Never>?
+    private var reportedAsked = false
 
     func show() {
         let panel = panel ?? makePanel()
         panel.setFrame(CGRect(origin: placement(), size: Self.size), display: false)
         if !panel.isVisible {
+            // A fresh presentation. Only reachable again once the ledger has been put back — the
+            // notice is shown once for the life of an install — and that door has to work.
+            reportedAsked = false
             panel.alphaValue = 0
             // Never `makeKeyAndOrderFront`: taking the keyboard away from whatever the user is
             // typing in, to ask them for a favour, is the one thing this must not do.
@@ -46,11 +59,16 @@ final class StarNudgeNoticeCoordinator {
             panel.animator().alphaValue = 1
         }
         scheduleDismissal()
+        scheduleAskedReport()
     }
 
     func hide() {
         dismissal?.cancel()
         dismissal = nil
+        // Cancelled, not reported: a notice taken down before it could be read was never a
+        // question that was asked.
+        reading?.cancel()
+        reading = nil
         guard let panel, panel.isVisible else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.fadeDuration
@@ -68,6 +86,25 @@ final class StarNudgeNoticeCoordinator {
             dismissal = nil
         } else if panel?.isVisible == true {
             scheduleDismissal()
+        }
+    }
+
+    /// Pressing either button is the question having been put, however it is answered — and it
+    /// arrives before the panel starts fading, so the answer cannot be lost to the teardown.
+    private func reportAsked() {
+        reading?.cancel()
+        reading = nil
+        guard !reportedAsked else { return }
+        reportedAsked = true
+        onAsked?()
+    }
+
+    private func scheduleAskedReport() {
+        guard !reportedAsked, reading == nil else { return }
+        reading = Task { [weak self] in
+            try? await Task.sleep(for: Self.readingTime)
+            guard !Task.isCancelled else { return }
+            self?.reportAsked()
         }
     }
 
@@ -101,10 +138,10 @@ final class StarNudgeNoticeCoordinator {
             backing: .buffered,
             defer: false
         )
-        // Above ordinary windows and full-screen content, below the menu bar itself — the same
-        // shelf the copy badge sits on.
-        panel.level = .statusBar
+        // Above ordinary windows and full-screen content, below the menu bar itself. The level is
+        // set after `isFloatingPanel`, which puts a panel back at `.floating` on its way through.
         panel.isFloatingPanel = true
+        panel.level = .statusBar
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -113,10 +150,14 @@ final class StarNudgeNoticeCoordinator {
         panel.contentViewController = NSHostingController(
             rootView: StarNudgeNoticeView(
                 star: { [weak self] in
+                    self?.reportAsked()
                     self?.hide()
                     self?.onStar?()
                 },
-                dismiss: { [weak self] in self?.hide() },
+                dismiss: { [weak self] in
+                    self?.reportAsked()
+                    self?.hide()
+                },
                 hover: { [weak self] hovering in self?.setHovering(hovering) }
             )
         )

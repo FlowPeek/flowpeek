@@ -146,10 +146,14 @@ final class AppState: ObservableObject {
         previews.onPromotedChange = { [weak self] hasWindow in self?.hasPromotedPreview = hasWindow }
         // The one moment worth asking anything: a diagram the user asked for has just been closed,
         // so the app has demonstrably worked and the screen it was covering is theirs again.
-        previews.onVisibleSurfaceChange = { [weak self] visible in
-            self?.previewVisibilityDidChange(visible)
+        previews.onVisibleSurfaceChange = { [weak self] surface in
+            self?.previewSurfaceDidChange(surface)
         }
         starNotice.onStar = { [weak self] in self?.openRepository() }
+        // The question is spent when it has been in front of the user, not when it was ordered on
+        // screen: `stop()` takes the notice with it, and one swallowed a second after it appeared
+        // would leave the app with nothing left to ask and nobody having been asked.
+        starNotice.onAsked = { [weak self] in self?.recordStarAsked() }
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: UserDefaults.standard,
@@ -258,6 +262,9 @@ final class AppState: ObservableObject {
         // look at its wording, its placement or its buttons is to forge forty diagrams and a date
         // into the store and then wait for a preview to close.
         if ProcessInfo.processInfo.arguments.contains("--star-demo") {
+            // For looking at, not for spending: the ledger is left alone so the next run shows it
+            // again.
+            starNotice.onAsked = nil
             starNotice.show()
             return
         }
@@ -731,13 +738,21 @@ final class AppState: ObservableObject {
     /// just closed rather than as something that arrived out of nowhere.
     private static let starNoticeDelay: Duration = .milliseconds(900)
 
-    /// A preview appeared or went away. Only the way out is interesting, and only for a ledger that
-    /// has already earned the question — otherwise every preview every user ever closes would arm a
-    /// task for something that cannot happen for weeks, if ever.
-    private func previewVisibilityDidChange(_ visible: Bool) {
+    /// The last thing the preview slots reported, because the moment worth asking after is a move
+    /// and not a state: what was there matters as much as what is there now.
+    private var previewSurface: PreviewSurface = .none
+
+    /// A preview appeared, was replaced, or went away. The one interesting move is a diagram the
+    /// user asked for leaving the screen — the app has just done the job it exists for and handed
+    /// the screen back. FlowPeek says "that did not work" in the same slot, and closing that is an
+    /// apology ending rather than a diagram; asking a favour on the beat after it would be the
+    /// worst use there is for the only ask this app will ever make.
+    private func previewSurfaceDidChange(_ surface: PreviewSurface) {
+        let previous = previewSurface
+        previewSurface = surface
         starCheck?.cancel()
         starCheck = nil
-        guard !visible else { return }
+        guard StarNudgePolicy.isAskableMoment(previous: previous, current: surface) else { return }
         // Asked against a clear screen on purpose: this is "has the app earned it", not "may it be
         // said now". Promoting a quick panel into a window empties both slots for an instant, so
         // what is actually on screen is read again when the task fires.
@@ -751,11 +766,14 @@ final class AppState: ObservableObject {
 
     private func presentStarNoticeIfEarned() {
         guard StarNudgePolicy.decide(ledger: starLedger, screen: starScreen, now: Date()) == .ask else { return }
-        // Written before the panel is on screen rather than when it is answered. The notice retires
-        // itself after fifteen seconds and a quit or a crash in between is not an answer either, so
-        // recording it any later is how a user ends up being asked a second time.
-        starLedger = starLedger.asking()
         starNotice.show()
+    }
+
+    /// The notice has been read, or answered. Recorded here rather than when it goes away: it
+    /// retires itself after fifteen seconds and a quit or a crash in between is not an answer
+    /// either, so waiting for one is how a user ends up being asked a second time.
+    private func recordStarAsked() {
+        starLedger = starLedger.asking()
     }
 
     /// Everything that would make the notice an interruption rather than a remark.

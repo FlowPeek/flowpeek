@@ -289,4 +289,49 @@ final class MermaidFailurePresentationTests: XCTestCase {
         let range = NSRange(value.startIndex..., in: value)
         return pattern.matches(in: value, range: range).map { (value as NSString).substring(with: $0.range) }
     }
+
+    // MARK: - Front matter
+
+    /// mermaid counts from the first line it parsed, and it parses what is left after the front
+    /// matter comes off. Quoting its number against the source the reader is looking at named a
+    /// theme variable as the fault in a diagram whose real mistake was ten lines further down.
+    func testALineNumberIsMeasuredAgainstTheSourceTheReaderCanSee() throws {
+        let source = """
+        ---
+        config:
+          theme: 'base'
+          themeVariables:
+            primaryColor: '#BB2528'
+            primaryTextColor: '#fff'
+            primaryBorderColor: '#7C0000'
+            lineColor: '#F8B229'
+        ---
+        graph TD
+          A[Christmas] --> B(Go shopping)
+          B --> C{Let me think}
+          subgr aph section
+          end
+        """
+        // mermaid's own number: `graph TD` is its line 1, so the broken line is its line 4.
+        let presentation = MermaidFailurePresentation.make(.parseFailure(message: "Parse error on line 4", line: 4), source: source)
+        XCTAssertEqual(presentation.lineNumber, 13)
+        XCTAssertEqual(presentation.quotedLine, "subgr aph section")
+    }
+
+    /// Without front matter nothing moves, which is every diagram that names no theme.
+    func testASourceWithNoFrontMatterIsQuotedUnshifted() {
+        let source = "graph TD\n  A --> B\n  oops here"
+        let presentation = MermaidFailurePresentation.make(.parseFailure(message: "Parse error on line 3", line: 3), source: source)
+        XCTAssertEqual(presentation.lineNumber, 3)
+        XCTAssertEqual(presentation.quotedLine, "oops here")
+    }
+
+    /// An opening fence with no closing one is not front matter: mermaid parses it as part of the
+    /// diagram, so the count must not skip it either.
+    func testAnUnclosedFenceIsNotTreatedAsFrontMatter() {
+        let source = "---\nconfig:\ngraph TD\n  A --> B"
+        XCTAssertEqual(MermaidFailurePresentation.frontMatterLines(in: source), 0)
+        XCTAssertEqual(MermaidFailurePresentation.frontMatterLines(in: "graph TD\n A --> B"), 0)
+        XCTAssertEqual(MermaidFailurePresentation.frontMatterLines(in: "---\ntitle: x\n---\ngraph TD"), 3)
+    }
 }

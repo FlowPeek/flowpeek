@@ -58,6 +58,20 @@ public struct MermaidFailurePresentation: Equatable, Sendable {
 
     /// `source` is the normalised text that was handed to mermaid, so mermaid's line numbers index
     /// the same string; pass "" where there is no source to point at (an engine that never started).
+    /// How many leading lines a front-matter block occupies, or zero when there is none.
+    ///
+    /// A block is `---` on its own line, some lines, and `---` on its own line. An opening fence
+    /// with no closing one is not front matter -- mermaid parses it as part of the diagram, and so
+    /// must this.
+    static func frontMatterLines(in source: String) -> Int {
+        let lines = source.components(separatedBy: "\n")
+        guard let opening = lines.firstIndex(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+              lines[opening].trimmingCharacters(in: .whitespaces) == "---" else { return 0 }
+        guard let closing = lines.indices.dropFirst(opening + 1)
+            .first(where: { lines[$0].trimmingCharacters(in: .whitespaces) == "---" }) else { return 0 }
+        return closing + 1
+    }
+
     public static func make(_ error: MermaidRenderError, source: String = "") -> MermaidFailurePresentation {
         let key = error.localizationKey
         let headline = String(localized: String.LocalizationValue(Self.headlineKey(for: key)))
@@ -112,6 +126,11 @@ public struct MermaidFailurePresentation: Equatable, Sendable {
                 recovery: error.recovery
             )
         case .parseFailure(let message, let line):
+            // mermaid counts from the first line it parsed, and it parses what is left after the
+            // front matter is taken off. The reader is looking at the source with the front matter
+            // still in it, so the offset goes back on before anything is named or quoted --
+            // otherwise a fault in the diagram points at a perfectly good theme variable.
+            let line = line.map { $0 + Self.frontMatterLines(in: source) }
             let lineCount = source.isEmpty ? 0 : source.components(separatedBy: "\n").count
             // A number past the end of the source points at nothing, so fall back to the headline
             // that claims no line at all rather than naming a line the user cannot find.

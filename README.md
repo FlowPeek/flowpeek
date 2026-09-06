@@ -44,6 +44,15 @@ Editors work too. In VS Code the outline follows the caret, because an editor ca
 
 <img src="docs/images/vscode.gif" width="680" alt="A fenced mermaid block in VS Code outlined by FlowPeek with a hint reading flowchart at the cursor, Option-Space, then drawn in the preview">
 
+## In Finder
+
+FlowPeek installs a Quick Look extension, so a `.mmd` or `.mermaid` file is a diagram when you press
+the space bar — no app to open, no window to switch to.
+
+<p align="center">
+  <img src="docs/images/quicklook.gif" width="620" alt="A .mmd file selected in Finder; pressing space draws the diagram in the Quick Look panel">
+</p>
+
 ## The shelf
 
 Every diagram FlowPeek draws is kept. ⌥⇧⌘H raises a shelf of them — as pictures, because that is
@@ -95,6 +104,11 @@ Releases are built, signed and notarized by `.github/workflows/release.yml` on e
   sends only when you press Generate. Searching by meaning runs on your Mac.
 - Mermaid is bundled, so drawing a diagram makes no network request at all.
 - Only Accessibility is requested. Not Screen Recording, not Input Monitoring.
+- The Quick Look extension is sandboxed and declares the network client entitlement, which is the
+  only way WebKit will start inside a sandbox at all — measured: without it the preview page never
+  loads and no navigation callback ever arrives. It buys the right to launch WebKit's helper
+  processes, not the ability to fetch: the preview document carries `default-src 'none'`, Mermaid is
+  a local script, and there is no URL in it to load.
 
 ## Requirements
 

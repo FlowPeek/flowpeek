@@ -32,6 +32,9 @@ CURRENT_PROJECT_VERSION = "1"
 BUNDLE_ID = "com.selenehyun.FlowPeek"
 # Carried by SPM's `.process("Resources")` rule, not by the app bundle.
 EXCLUDED_RESOURCES = ["placeholder.txt", ".DS_Store"].freeze
+# What the Quick Look extension needs a copy of. Only the engine: it draws one diagram and says
+# nothing, so it carries no catalogue and no icon.
+QUICKLOOK_RESOURCES = ["mermaid.min.js", "flowpeek-glue.js"].freeze
 
 root = File.expand_path("..", __dir__)
 project_path = File.join(root, "FlowPeek.xcodeproj")
@@ -80,8 +83,16 @@ app = project.new_target(:application, "FlowPeek", :osx, DEPLOYMENT_TARGET)
 app.add_dependency(core)
 app.frameworks_build_phase.add_file_reference(core.product_reference)
 
+# The Quick Look extension. A separate process with a bundle of its own, which is why it carries
+# its own copy of mermaid and the glue rather than reaching into the app's.
+quicklook_group = sources.new_group("FlowPeekQuickLook", "FlowPeekQuickLook")
+quicklook = project.new_target(:app_extension, "FlowPeekQuickLook", :osx, DEPLOYMENT_TARGET)
+quicklook.add_dependency(core)
+quicklook.frameworks_build_phase.add_file_reference(core.product_reference)
+
 add_swift_sources(root, "Sources/FlowPeekCore", core_group, core)
 add_swift_sources(root, "Sources/FlowPeek", app_group, app, excluding: ["Resources"])
+add_swift_sources(root, "Sources/FlowPeekQuickLook", quicklook_group, quicklook)
 
 # Every non-Swift file under Resources ships, so adding one cannot be forgotten here.
 # .lproj files are wired separately, as variant groups.
@@ -95,6 +106,9 @@ relative_files(resources_root, "*").each do |relative|
 
   reference = group_for(resources_group, resources_cache, File.dirname(relative)).new_file(File.basename(relative))
   app.resources_build_phase.add_file_reference(reference)
+  # The engine and the glue again, in the extension: `Bundle.main` inside an app extension is the
+  # extension, so a preview that reached for the app's copy would find nothing.
+  quicklook.resources_build_phase.add_file_reference(reference) if QUICKLOOK_RESOURCES.include?(File.basename(relative))
 end
 
 # The Icon Composer document. actool compiles `.icon` directly -- it is not an asset catalogue and
@@ -120,6 +134,8 @@ project.root_object.known_regions = localizations + ["Base"]
 
 config_group.new_file("Info.plist")
 config_group.new_file("FlowPeek.entitlements")
+config_group.new_file("FlowPeekQuickLook-Info.plist")
+config_group.new_file("FlowPeekQuickLook.entitlements")
 
 package = project.new(Xcodeproj::Project::Object::XCRemoteSwiftPackageReference)
 package.repositoryURL = "https://github.com/sparkle-project/Sparkle"
@@ -183,6 +199,35 @@ app.build_configurations.each do |configuration|
     "LD_RUNPATH_SEARCH_PATHS" => "$(inherited) @executable_path/../Frameworks",
   })
 end
+
+quicklook.build_configurations.each do |configuration|
+  configuration.build_settings.merge!({
+    "PRODUCT_BUNDLE_IDENTIFIER" => "#{BUNDLE_ID}.QuickLook",
+    "PRODUCT_NAME" => "FlowPeekQuickLook",
+    "PRODUCT_MODULE_NAME" => "FlowPeekQuickLook",
+    "INFOPLIST_FILE" => "Config/FlowPeekQuickLook-Info.plist",
+    "GENERATE_INFOPLIST_FILE" => "NO",
+    "CODE_SIGN_ENTITLEMENTS" => "Config/FlowPeekQuickLook.entitlements",
+    "CODE_SIGN_STYLE" => "Automatic",
+    "DEVELOPMENT_TEAM" => DEVELOPMENT_TEAM,
+    # Sandboxed even though the app is not: an app extension has to be, and this one only ever
+    # reads the single file Quick Look hands it.
+    "ENABLE_APP_SANDBOX" => "YES",
+    "ENABLE_HARDENED_RUNTIME" => configuration.name == "Debug" ? "NO" : "YES",
+    "MARKETING_VERSION" => MARKETING_VERSION,
+    "CURRENT_PROJECT_VERSION" => CURRENT_PROJECT_VERSION,
+    "SWIFT_VERSION" => SWIFT_VERSION,
+    "SKIP_INSTALL" => "YES",
+    "LD_RUNPATH_SEARCH_PATHS" => "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks",
+  })
+end
+
+# Embedded in the app, which is the only way macOS ever finds it.
+embed = app.new_copy_files_build_phase("Embed Foundation Extensions")
+embed.symbol_dst_subfolder_spec = :plug_ins
+embed.dst_path = ""
+embed.add_file_reference(quicklook.product_reference, true)
+app.add_dependency(quicklook)
 
 [core_tests, renderer_tests].each do |target|
   target.build_configurations.each do |configuration|

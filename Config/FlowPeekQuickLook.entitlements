@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- An app extension has to be sandboxed even when its container app is not: FlowPeek itself
+         reads other applications through the accessibility API and cannot be, but this one only
+         ever reads the single file Quick Look hands it. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-only</key>
+    <true/>
+    <!-- WebKit will not start inside a sandboxed extension without this: measured, the page never
+         loaded and no navigation callback ever arrived until it was granted. It buys the right to
+         launch WebKit's helper processes, not the ability to fetch anything -- the preview document
+         carries `default-src 'none'`, mermaid is a local script, and there is no URL in it to
+         load. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>

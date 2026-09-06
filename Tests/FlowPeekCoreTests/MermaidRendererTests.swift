@@ -403,3 +403,28 @@ final class MermaidRendererTests: XCTestCase {
         return nil
     }()
 }
+
+// MARK: - The identifier mermaid scopes its stylesheet with
+
+extension MermaidRendererTests {
+    /// mermaid emits `#<renderID> .node rect { … }`, so the identifier has to be a valid CSS
+    /// identifier. It is not a cosmetic rule: a `UUID().uuidString` starts with a digit about three
+    /// times in five, and when it did the entire generated stylesheet silently failed to match --
+    /// black fills, no strokes, no visible labels, and nothing anywhere saying why.
+    func testARenderIdentifierIsAValidCSSIdentifier() {
+        let pattern = "^[A-Za-z][A-Za-z0-9_-]*$"
+        for counter in [0, 1, 9, 10, 1_000, UInt64.max] {
+            let id = MermaidRenderIdentifier.renderID(counter)
+            XCTAssertNotNil(
+                id.range(of: pattern, options: .regularExpression),
+                "\(id) cannot be used in a CSS selector"
+            )
+        }
+    }
+
+    /// The seed shares the constraint: it is handed to mermaid as an id too.
+    func testASeedIsAValidCSSIdentifier() {
+        let seed = MermaidRenderIdentifier.seed(for: UUID())
+        XCTAssertNotNil(seed.range(of: "^[A-Za-z][A-Za-z0-9_-]*$", options: .regularExpression), seed)
+    }
+}

@@ -38,5 +38,30 @@
     <string>JxNKL7N4ydZGNSFrjODUHBpt+746seri2LLtfnVxQgk=</string>
     <key>SUScheduledCheckInterval</key>
     <integer>86400</integer>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <!-- macOS ships no type for a Mermaid file, so FlowPeek declares one. Conforming to
+                 plain text keeps every editor able to open it; the Quick Look extension asks for
+                 this identifier by name. -->
+            <key>UTTypeIdentifier</key>
+            <string>com.selenehyun.flowpeek.mermaid</string>
+            <key>UTTypeDescription</key>
+            <string>Mermaid Diagram</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+                <string>public.source-code</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>mmd</string>
+                    <string>mermaid</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
 </dict>
 </plist>

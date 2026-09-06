@@ -371,6 +371,6 @@
 "history.origin.ambient" = "포인터로 집어서";
 "history.origin.unknown" = "보관됨";
 "settings.history" = "보관하는 다이어그램";
-"settings.history.description" = "만든 다이어그램을 몇 개까지 보관할지 정합니다. 숫자를 줄이면 오래된 것부터 바로 지워집니다. 전용 파일에 보관되며 어디로도 전송되지 않습니다.";
+"settings.history.description" = "만든 다이어그램을 기억해 두어, 창을 닫은 뒤에도 다시 열어볼 수 있습니다. 이 Mac의 파일에만 저장되며 어디로도 전송되지 않습니다. 끄면 그 파일을 삭제합니다.";
 "settings.history.count" = "%lld개 보관";
 "settings.history.open" = "기록 열기…";

@@ -141,6 +141,11 @@ public struct DiagramHistory: Equatable, Sendable {
     /// Below five the list stops being a history; above a hundred it stops being scrollable, and
     /// the file behind it stops being something we are willing to parse at once.
     public static let limitRange = 5...100
+    /// Remember nothing. FlowPeek's claim is that what you point at stays on your Mac and mostly
+    /// stays in memory, and the history is the one part that writes a diagram down; somebody who
+    /// would rather it did not has to be able to say so, and saying so has to empty the file rather
+    /// than merely stop adding to it.
+    public static let off = 0
     /// The step the Settings control moves in. A person choosing "about twenty" does not want to
     /// press a button fifteen times to get there.
     public static let limitStep = 5
@@ -166,9 +171,15 @@ public struct DiagramHistory: Equatable, Sendable {
         trim()
     }
 
+    /// Any number at or below zero is off; anything else is pulled into the range. There is no
+    /// gap between "off" and "five" for a stored value to fall into.
     public static func clamp(_ limit: Int) -> Int {
-        min(max(limit, limitRange.lowerBound), limitRange.upperBound)
+        guard limit > 0 else { return off }
+        return min(max(limit, limitRange.lowerBound), limitRange.upperBound)
     }
+
+    /// Whether anything is being remembered at all.
+    public var isRemembering: Bool { limit > Self.off }
 
     /// Lowering the maximum takes effect immediately, not at the next recording: the number in
     /// Settings is a promise about what is on disk, and a promise that waits for the next diagram
@@ -208,6 +219,9 @@ public struct DiagramHistory: Equatable, Sendable {
         at date: Date = .now,
         revising identity: DiagramHistoryEntry.ID? = nil
     ) -> DiagramHistoryEntry? {
+        // Checked before anything is built: switched off means no row is made, not a row that is
+        // made and then trimmed away.
+        guard isRemembering else { return nil }
         let text = Self.normalize(source)
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let candidate = DiagramHistoryEntry(

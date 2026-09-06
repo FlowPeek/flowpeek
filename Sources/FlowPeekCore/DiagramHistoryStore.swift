@@ -60,11 +60,21 @@ public final class DiagramHistoryStore: ObservableObject {
         // A file written when the maximum was higher, or reordered by hand, is put right by the
         // initialiser above — and then written back, so the list in memory and the list on disk
         // agree from the first moment rather than from the next recording.
-        if history.entries != loaded { save() }
+        if !history.isRemembering {
+            // Off, with a file from before it was switched off: emptying it is the promise, and a
+            // launch is the first chance to keep it if the app was quit before the write landed.
+            if !loaded.isEmpty, let archive { writes.async { archive.removeFile() } }
+        } else if history.entries != loaded {
+            save()
+        }
     }
 
-    /// How many diagrams are kept. Lowering it forgets the extra ones now, not at the next
-    /// recording.
+    /// Whether anything is being remembered at all, for a menu that should not offer a list when
+    /// the user has said not to keep one.
+    public var isRemembering: Bool { history.isRemembering }
+
+    /// How many diagrams are kept, or `DiagramHistory.off` for none. Lowering it forgets the extra
+    /// ones now, not at the next recording, and switching it off deletes the file.
     public var limit: Int {
         get { history.limit }
         set {
@@ -75,7 +85,12 @@ public final class DiagramHistoryStore: ObservableObject {
             objectWillChange.send()
             history.setLimit(clamped)
             defaults.set(clamped, forKey: Self.limitDefaultsKey)
-            publish()
+            guard clamped == DiagramHistory.off else { return publish() }
+            // Switching it off is a statement about the disk, not just about the list, so the file
+            // goes the same way it does for Clear History rather than being rewritten empty.
+            entries = []
+            guard let archive else { return }
+            writes.async { archive.removeFile() }
         }
     }
 

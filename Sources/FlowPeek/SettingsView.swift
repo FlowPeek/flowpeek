@@ -340,27 +340,36 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 14)
-                    // A stepper rather than a slider: the number itself is the setting, and the
-                    // step is five because a person choosing "about twenty" should not have to
-                    // press a button fifteen times to get there.
-                    Stepper(
-                        value: historyLimitBinding,
-                        in: DiagramHistory.limitRange,
-                        step: DiagramHistory.limitStep
-                    ) {
-                        Text(verbatim: String(
-                            format: String(localized: "settings.history.count"),
-                            history.limit
-                        ))
-                        .font(.callout.weight(.medium))
-                        .monospacedDigit()
-                    }
-                    .fixedSize()
+                    // A switch as well as a number, because this is the one part of FlowPeek that
+                    // writes down what you looked at. Off deletes the file rather than merely
+                    // stopping the next write.
+                    Toggle("settings.history", isOn: historyEnabledBinding)
+                        .labelsHidden()
+                        .accessibilityHint(Text("settings.history.description"))
                 }
-                HStack {
-                    Spacer()
-                    Button("settings.history.open") { DiagramHistoryCoordinator.shared.show() }
-                        .controlSize(.small)
+                if history.limit > DiagramHistory.off {
+                    Divider().opacity(0.5)
+                    HStack {
+                        // A stepper rather than a slider: the number itself is the setting, and the
+                        // step is five because a person choosing "about twenty" should not have to
+                        // press a button fifteen times to get there.
+                        Stepper(
+                            value: historyLimitBinding,
+                            in: DiagramHistory.limitRange,
+                            step: DiagramHistory.limitStep
+                        ) {
+                            Text(verbatim: String(
+                                format: String(localized: "settings.history.count"),
+                                history.limit
+                            ))
+                            .font(.callout.weight(.medium))
+                            .monospacedDigit()
+                        }
+                        .fixedSize()
+                        Spacer()
+                        Button("settings.history.open") { DiagramHistoryCoordinator.shared.show() }
+                            .controlSize(.small)
+                    }
                 }
             }
 
@@ -518,6 +527,16 @@ struct SettingsView: View {
 
     /// Writes straight through to the store, which is what applies the new maximum to the list it
     /// already holds. There is no local copy to fall out of step with it.
+    /// On restores the number the app started with rather than the one that was set before it was
+    /// switched off: the old number is gone with the file it described, and inventing a memory of it
+    /// would be claiming to have kept something.
+    private var historyEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { history.limit > DiagramHistory.off },
+            set: { history.limit = $0 ? DiagramHistory.defaultLimit : DiagramHistory.off }
+        )
+    }
+
     private var historyLimitBinding: Binding<Int> {
         Binding(
             get: { history.limit },

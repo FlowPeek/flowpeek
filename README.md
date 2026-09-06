@@ -31,6 +31,8 @@ Editors work too. In VS Code the outline follows the caret, because an editor ca
 - **Take it with you** — copy the diagram as an image, or save it as PNG, PDF or SVG.
 - **Put it on the glass or on its own canvas**, whichever reads better against what is behind it.
 - **Keep the size** you dragged it to; the next diagram opens the same way.
+- **Come back to one** — FlowPeek remembers the diagrams it drew, up to a number you set, and the
+  menu bar offers the recent ones by name.
 
 ## Install
 
@@ -49,7 +51,10 @@ Releases are built, signed and notarized by `.github/workflows/release.yml` on e
 
 ## Privacy
 
-- The text you point at is read into memory and never written to disk or logged.
+- The text you point at is read into memory and never logged.
+- The diagrams FlowPeek actually draws are saved on your Mac, in Application Support, so the history
+  can offer them back. Nothing else is: a selection that was never previewed is never written down.
+  Clearing the history deletes that file.
 - Nothing is sent anywhere unless you use the AI experiment, which is off until you switch it on and
   sends only when you press Generate.
 - Mermaid is bundled, so drawing a diagram makes no network request at all.

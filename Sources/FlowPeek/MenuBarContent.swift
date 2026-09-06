@@ -23,17 +23,21 @@ struct MenuBarContent: View {
 
         // The diagrams the user made, at the top, because coming back to one is the commonest
         // reason to open this menu at all. The store reads its file once per launch, on the first
-        // touch, and is in memory afterwards.
-        Menu("menu.recent") {
-            ForEach(recent) { entry in
-                Button(entry.title) { open(entry) }
+        // touch, and is in memory afterwards. Absent rather than empty when the user switched
+        // remembering off: a permanently empty list, with a window behind it, reads as a feature
+        // that is broken instead of one that is off.
+        if history.isRemembering {
+            Menu("menu.recent") {
+                ForEach(recent) { entry in
+                    Button(entry.title) { open(entry) }
+                }
+                if recent.isEmpty {
+                    Text("menu.recent.empty")
+                } else {
+                    Divider()
+                }
+                Button("menu.recent.all") { DiagramHistoryCoordinator.shared.show() }
             }
-            if recent.isEmpty {
-                Text("menu.recent.empty")
-            } else {
-                Divider()
-            }
-            Button("menu.recent.all") { DiagramHistoryCoordinator.shared.show() }
         }
         // The only mouse-reachable door to the clipboard route once the badge has faded, and the
         // one place the chord is legible without opening Settings.

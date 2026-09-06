@@ -371,6 +371,6 @@
 "history.origin.ambient" = "Pointed at";
 "history.origin.unknown" = "Kept";
 "settings.history" = "Remembered Diagrams";
-"settings.history.description" = "How many of the diagrams you make to keep. Lowering this forgets the oldest ones straight away. They are kept in a file of your own, never sent anywhere.";
+"settings.history.description" = "Keep the diagrams you make, so you can come back to one after the window that made it is gone. They are kept in a file on this Mac and never sent anywhere; switching this off deletes it.";
 "settings.history.count" = "Keep %lld";
 "settings.history.open" = "Open History…";

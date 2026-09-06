@@ -50,7 +50,9 @@ final class DiagramHistoryTests: XCTestCase {
     func testTheMaximumIsHeldInsideItsRange() {
         var history = DiagramHistory(limit: 9_000)
         XCTAssertEqual(history.limit, DiagramHistory.limitRange.upperBound)
-        history.setLimit(0)
+        // A positive number below the range, not 0: zero is the off switch, which
+        // `testZeroIsOffRatherThanTheSmallestHistory` covers.
+        history.setLimit(2)
         XCTAssertEqual(history.limit, DiagramHistory.limitRange.lowerBound)
     }
 
@@ -338,5 +340,53 @@ final class DiagramHistoryTests: XCTestCase {
     func testTheKeywordIsReadOffTheFirstSignificantLine() {
         XCTAssertEqual(DiagramHistoryEntry(title: "", source: "\n\n  erDiagram\n  A ||--o{ B : has", origin: .ai).keyword, "erDiagram")
         XCTAssertNil(DiagramHistoryEntry(title: "", source: "  --> nothing", origin: .ai).keyword)
+    }
+}
+
+// MARK: - Switched off
+
+extension DiagramHistoryTests {
+    func testZeroIsOffRatherThanTheSmallestHistory() {
+        XCTAssertEqual(DiagramHistory.clamp(0), DiagramHistory.off)
+        XCTAssertEqual(DiagramHistory.clamp(-4), DiagramHistory.off)
+        // No gap for a stored value to fall into between off and the smallest real history.
+        XCTAssertEqual(DiagramHistory.clamp(1), DiagramHistory.limitRange.lowerBound)
+    }
+
+    func testSwitchedOffRemembersNothing() {
+        var history = DiagramHistory(limit: DiagramHistory.off)
+        XCTAssertFalse(history.isRemembering)
+        XCTAssertNil(history.record(title: "A", source: "flowchart LR\n  A --> B", origin: .clipboard))
+        XCTAssertTrue(history.entries.isEmpty)
+    }
+
+    func testSwitchingOffForgetsWhatWasAlreadyThere() {
+        var history = DiagramHistory(limit: 20)
+        history.record(title: "A", source: "flowchart LR\n  A --> B", origin: .clipboard)
+        history.record(title: "B", source: "flowchart LR\n  C --> D", origin: .clipboard)
+        XCTAssertEqual(history.entries.count, 2)
+        history.setLimit(DiagramHistory.off)
+        XCTAssertTrue(history.entries.isEmpty)
+    }
+
+    func testSwitchingBackOnStartsEmpty() {
+        var history = DiagramHistory(limit: 20)
+        history.record(title: "A", source: "flowchart LR\n  A --> B", origin: .clipboard)
+        history.setLimit(DiagramHistory.off)
+        history.setLimit(DiagramHistory.defaultLimit)
+        XCTAssertTrue(history.entries.isEmpty)
+        XCTAssertNotNil(history.record(title: "C", source: "flowchart LR\n  E --> F", origin: .clipboard))
+    }
+
+    func testAFileFromBeforeItWasSwitchedOffIsNotLoaded() {
+        let kept = DiagramHistoryEntry(
+            id: UUID(),
+            title: "A",
+            source: "flowchart LR\n  A --> B",
+            recordedAt: Date(),
+            origin: .clipboard
+        )
+        let history = DiagramHistory(entries: [kept], limit: DiagramHistory.off)
+        XCTAssertTrue(history.entries.isEmpty)
     }
 }

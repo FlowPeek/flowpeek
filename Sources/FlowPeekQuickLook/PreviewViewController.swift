@@ -63,6 +63,9 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
             web.topAnchor.constraint(equalTo: view.topAnchor),
             web.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        // Laid out before anything is drawn into it: the page measures the stage while it renders,
+        // and a web view whose constraints have not been resolved yet measures nothing.
+        view.layoutSubtreeIfNeeded()
         try await QuickLookRenderer.draw(request, in: web)
     }
 

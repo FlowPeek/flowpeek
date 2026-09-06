@@ -23,6 +23,15 @@ end
 
 require "xcodeproj"
 
+module DeterministicUUIDs
+  def generate_uuid
+    @deterministic_uuid_counter = (@deterministic_uuid_counter || 0) + 1
+    format("%024X", @deterministic_uuid_counter)
+  end
+end
+Xcodeproj::Project.prepend(DeterministicUUIDs)
+
+
 DEPLOYMENT_TARGET = "14.0"
 SWIFT_VERSION = "6.0"
 DEVELOPMENT_TEAM = "F7WUT95TT6"
@@ -106,9 +115,20 @@ relative_files(resources_root, "*").each do |relative|
 
   reference = group_for(resources_group, resources_cache, File.dirname(relative)).new_file(File.basename(relative))
   app.resources_build_phase.add_file_reference(reference)
-  # The engine and the glue again, in the extension: `Bundle.main` inside an app extension is the
-  # extension, so a preview that reached for the app's copy would find nothing.
-  quicklook.resources_build_phase.add_file_reference(reference) if QUICKLOOK_RESOURCES.include?(File.basename(relative))
+end
+
+# The engine and the glue again, in the extension: `Bundle.main` inside an app extension is the
+# extension, so a preview that reached for the app's copy would find nothing.
+#
+# References of its own, through a group of its own, rather than the app's. Two build files that
+# point at one file reference are structurally identical objects, and `predictabilize_uuids` hashes
+# an object from its structure -- identical objects collide, the collision is broken by whatever
+# random identifier each happened to start with, and the generated project then differs on every
+# run. Reached by a path relative to this group, so the file reference differs too.
+quicklook_resources = quicklook_group.new_group("Resources", nil)
+QUICKLOOK_RESOURCES.each do |name|
+  reference = quicklook_resources.new_file("../FlowPeek/Resources/#{name}")
+  quicklook.resources_build_phase.add_file_reference(reference)
 end
 
 # The Icon Composer document. actool compiles `.icon` directly -- it is not an asset catalogue and
@@ -255,11 +275,19 @@ project.root_object.attributes["TargetAttributes"] = {
   renderer_tests.uuid => { "TestTargetID" => app.uuid },
 }
 
-# MD5-of-object-graph UUIDs: without this every run rewrites project.pbxproj with fresh
-# random ids and the "regenerate and diff" CI check can never pass. Twice, because a
-# PBXTargetDependency hashes its remoteGlobalIDString, which is still a random UUID
-# during the first pass and only becomes stable once that pass has rewritten it.
+# MD5-of-object-graph UUIDs, so the identifiers follow the graph and a diff is readable.
+#
+# `predictabilize_uuids` derives an identifier from an object's structure, which means two objects
+# that are structurally identical -- the same static library linked by three targets, the same
+# script resource copied into two bundles -- collide, and the collision is broken by whatever
+# identifier each happened to start with. Those start as `SecureRandom` hex, so the file differed on
+# every run and the release workflow's "regenerate and byte-compare" check could not pass.
+#
+# So the randomness is removed at the source: identifiers are handed out from a counter instead.
+# Same graph, same identifiers, every time, collisions included.
+
 2.times { project.predictabilize_uuids }
+
 project.save
 
 scheme = Xcodeproj::XCScheme.new

@@ -23,6 +23,16 @@ enum QuickLookRenderer {
         // Decoded rather than trusted: a failure carries the line the user has to look at, and
         // throwing it here is what makes Quick Look say so instead of showing an empty page.
         _ = try MermaidGlueDecoder.result(from: json, sourceUTF16Count: request.source.utf16.count)
+        // Fitted afterwards, against the stage as it actually is. The page fits itself once as part
+        // of rendering, and at that moment the web view has only just been given its constraints --
+        // a three-hundred node diagram came out scaled to the size it was measured at and showed as
+        // an empty panel.
+        _ = try? await web.callAsyncJavaScript(
+            MermaidEnginePage.fitInvocation,
+            arguments: [:],
+            in: nil,
+            contentWorld: WKContentWorld.world(name: MermaidEnginePage.contentWorldName)
+        )
     }
 
     private static func load(_ web: WKWebView) async throws {

@@ -132,7 +132,7 @@ public struct DiagramHistoryEntry: Identifiable, Equatable, Sendable, Codable {
 /// The remembered diagrams: an ordered list, newest first, capped at a maximum the user sets.
 ///
 /// Pure on purpose. The ordering, the cap and the rule that decides whether a recording is a new
-/// diagram or another go at the last one are the parts that are easy to get subtly wrong and
+/// diagram or another go at one already here are the parts that are easy to get subtly wrong and
 /// impossible to see going wrong, so none of them needs a window, a disk or a clock to be checked.
 public struct DiagramHistory: Equatable, Sendable {
     /// Enough to cover the last week or two of work without becoming a list nobody scrolls to the
@@ -145,18 +145,6 @@ public struct DiagramHistory: Equatable, Sendable {
     /// press a button fifteen times to get there.
     public static let limitStep = 5
 
-    /// How long the newest entry stays "the diagram being worked on". Long enough to cover an
-    /// editing session with pauses in it, short enough that picking the work back up tomorrow
-    /// starts a new row rather than overwriting yesterday's.
-    public static let revisionWindow: TimeInterval = 30 * 60
-    /// How alike two sources have to be, line for line, to count as revisions of each other.
-    /// A rewritten node or three lands far above this; two different diagrams of the same type
-    /// share only their declaration line and land far below it.
-    public static let revisionSimilarity = 0.5
-    /// Lines read when measuring that likeness. Recording happens on the main actor, and the size
-    /// limit alone would allow five thousand of them per comparison.
-    static let comparedLines = 200
-
     public private(set) var entries: [DiagramHistoryEntry]
     public private(set) var limit: Int
 
@@ -165,11 +153,16 @@ public struct DiagramHistory: Equatable, Sendable {
         // What comes in may be a hand-edited file: out of order, with the same diagram in it twice.
         // Sorted and folded here so everything downstream can assume newest-first and one row per
         // diagram.
-        var seen = Set<String>()
+        var seenSources = Set<String>()
+        var seenIDs = Set<DiagramHistoryEntry.ID>()
         self.entries = entries
             .filter(\.isUsable)
             .sorted { $0.recordedAt > $1.recordedAt }
-            .filter { seen.insert($0.source).inserted }
+            // Identifiers are folded as well as diagrams. A list is drawn keyed on the identifier
+            // and a row is removed by it, so two rows carrying the same one are a pair the app
+            // cannot tell apart -- removing the one that was clicked would take the other. The
+            // newer of each pair is the one kept.
+            .filter { seenSources.insert($0.source).inserted && seenIDs.insert($0.id).inserted }
         trim()
     }
 
@@ -187,15 +180,24 @@ public struct DiagramHistory: Equatable, Sendable {
 
     /// Remembers a diagram, or folds it into the row it is another go at.
     ///
-    /// Two entries are the same thing when either:
+    /// Two recordings are the same diagram when one of exactly two things is true:
     ///  * the Mermaid is identical, wherever in the list it already sits -- opening the same
     ///    diagram again is not a second diagram, it is the same one, freshly used; or
-    ///  * it is a revision of the newest row: same origin, inside `revisionWindow`, and either the
-    ///    same title or a source that is still mostly the same lines. This is what stops a diagram
-    ///    edited five times from filling the list with five near-identical rows.
+    ///  * the caller named the row this one replaces. A window that is working on one diagram picks
+    ///    an identifier once and hands it back with every recording, which is what stops five goes
+    ///    at a diagram from leaving five near-identical rows.
     ///
-    /// Only the newest row is treated as revisable, because only one diagram is being worked on at
-    /// a time; anything older is something the user came back to on purpose.
+    /// Nothing else folds, and in particular nothing folds because two diagrams *look* alike. Two
+    /// recordings sharing a title, or most of their lines, are still two recordings: every answer an
+    /// assistant writes carries a title the model chose and models repeat themselves, and a small
+    /// diagram shares its declaration line with every other diagram of its kind. Being wrong in that
+    /// direction costs the user a diagram they cannot get back -- there is no undo behind this list
+    /// -- while being wrong the other way costs them a row they can delete.
+    ///
+    /// `revising` answers both halves of "which row is this": an identifier already in the list
+    /// names the row this replaces, and one that is not becomes the identifier of the new row. So a
+    /// caller can choose an identity at the start of an editing session and keep passing it, without
+    /// having to know whether the first recording has happened yet.
     ///
     /// Returns the entry as it now stands, or nil when there was nothing to remember.
     @discardableResult
@@ -204,35 +206,40 @@ public struct DiagramHistory: Equatable, Sendable {
         source: String,
         origin: DiagramOrigin,
         at date: Date = .now,
-        id: UUID = UUID()
+        revising identity: DiagramHistoryEntry.ID? = nil
     ) -> DiagramHistoryEntry? {
         let text = Self.normalize(source)
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let candidate = DiagramHistoryEntry(id: id, title: name, source: text, recordedAt: date, origin: origin)
+        let candidate = DiagramHistoryEntry(
+            id: identity ?? UUID(),
+            title: name,
+            source: text,
+            recordedAt: date,
+            origin: origin
+        )
         guard candidate.isUsable else { return nil }
 
-        if let index = entries.firstIndex(where: { $0.source == text }) {
-            var existing = entries.remove(at: index)
-            // The identifier survives, so a preview opened from this row and a later removal of it
-            // are still talking about the same diagram.
-            if !name.isEmpty { existing.title = name }
-            existing.recordedAt = date
-            existing.origin = origin
-            entries.insert(existing, at: 0)
-            return existing
+        // The row the caller named first, and only then the row that already holds this exact text:
+        // being told which diagram this is outranks recognising it, and an identifier that names
+        // nothing yet falls through to become a new row rather than landing on someone else's.
+        let match = identity.flatMap { id in entries.firstIndex { $0.id == id } }
+            ?? entries.firstIndex { $0.source == text }
+
+        guard let match else {
+            insert(candidate)
+            trim()
+            return candidate
         }
 
-        if var newest = entries.first, isRevision(of: newest, title: name, source: text, origin: origin, at: date) {
-            if !name.isEmpty { newest.title = name }
-            newest.source = text
-            newest.recordedAt = date
-            entries[0] = newest
-            return newest
-        }
-
-        entries.insert(candidate, at: 0)
-        trim()
-        return candidate
+        var existing = entries.remove(at: match)
+        // The identifier survives, so a preview opened from this row and a later removal of it are
+        // still talking about the same diagram.
+        if !name.isEmpty { existing.title = name }
+        existing.source = text
+        existing.recordedAt = date
+        existing.origin = origin
+        insert(existing)
+        return existing
     }
 
     @discardableResult
@@ -244,44 +251,6 @@ public struct DiagramHistory: Equatable, Sendable {
 
     public mutating func removeAll() {
         entries.removeAll()
-    }
-
-    // MARK: - Sameness
-
-    private func isRevision(
-        of entry: DiagramHistoryEntry,
-        title: String,
-        source: String,
-        origin: DiagramOrigin,
-        at date: Date
-    ) -> Bool {
-        guard entry.origin == origin else { return false }
-        // Absolute, so a clock that went backwards between two recordings cannot turn a revision
-        // into a second row.
-        guard abs(date.timeIntervalSince(entry.recordedAt)) <= Self.revisionWindow else { return false }
-        if !title.isEmpty, title.compare(entry.title, options: [.caseInsensitive]) == .orderedSame { return true }
-        return Self.similarity(entry.source, source) >= Self.revisionSimilarity
-    }
-
-    /// How much of two diagrams is the same lines: shared lines over all distinct lines. Blind to
-    /// order and to where an edit happened, which is what an edit usually is.
-    static func similarity(_ lhs: String, _ rhs: String) -> Double {
-        let left = significantLines(lhs)
-        let right = significantLines(rhs)
-        guard !left.isEmpty, !right.isEmpty else { return 0 }
-        let shared = left.intersection(right).count
-        let total = left.union(right).count
-        guard total > 0 else { return 0 }
-        return Double(shared) / Double(total)
-    }
-
-    private static func significantLines(_ source: String) -> Set<String> {
-        var lines = Set<String>()
-        for line in source.split(separator: "\n", omittingEmptySubsequences: true).prefix(comparedLines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if !trimmed.isEmpty { lines.insert(trimmed) }
-        }
-        return lines
     }
 
     /// Trailing blank lines and trailing spaces are the difference between "the same diagram" and
@@ -306,6 +275,16 @@ public struct DiagramHistory: Equatable, Sendable {
             end = previous
         }
         return line[line.startIndex..<end]
+    }
+
+    /// Placed by date rather than pushed onto the top. `record` remembers a diagram at whatever
+    /// moment it is handed, and `Date.now` is not monotonic -- a clock correction, or a caller
+    /// re-recording something from yesterday, would otherwise leave the list reading oldest-first
+    /// until the next launch sorted it out. Ties keep the newer recording above, because a diagram
+    /// recorded twice in the same instant is the second one.
+    private mutating func insert(_ entry: DiagramHistoryEntry) {
+        let index = entries.firstIndex { $0.recordedAt <= entry.recordedAt } ?? entries.count
+        entries.insert(entry, at: index)
     }
 
     private mutating func trim() {

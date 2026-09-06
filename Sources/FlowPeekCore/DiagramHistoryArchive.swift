@@ -99,6 +99,10 @@ public struct DiagramHistoryArchive: Sendable {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        // Create-time attributes only reach a directory that is being created. One that is already
+        // there -- made by an earlier version of the app, or put back by a restore -- keeps whatever
+        // mode it came with, so the mode is set again here rather than hoped for.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         guard (try? data.write(to: url, options: [.atomic])) != nil else { return }
         // An atomic write is a fresh file with the process umask on it, so the mode has to be put
         // back after every save rather than once when the file is made.

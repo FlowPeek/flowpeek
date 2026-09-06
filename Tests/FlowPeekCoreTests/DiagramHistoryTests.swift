@@ -15,7 +15,7 @@ final class DiagramHistoryTests: XCTestCase {
     func testTheNewestRecordingIsFirst() {
         var history = DiagramHistory()
         history.record(title: "One", source: flowchart(["A --> B"]), origin: .ai, at: start)
-        history.record(title: "Two", source: flowchart(["C --> D"]), origin: .ai, at: start.addingTimeInterval(-9_000))
+        history.record(title: "Two", source: flowchart(["C --> D"]), origin: .ai, at: start.addingTimeInterval(9_000))
         XCTAssertEqual(history.entries.map(\.title), ["Two", "One"])
     }
 
@@ -86,75 +86,159 @@ final class DiagramHistoryTests: XCTestCase {
         XCTAssertEqual(history.entries.count, 1)
     }
 
-    func testAnEditKeepsOneRowWhileTheTitleHolds() {
+    /// The title a diagram carries is a label, never an identity. Every answer an assistant writes
+    /// comes with a title the model chose, and "Mermaid Diagram" is what the app itself falls back
+    /// to, so two unrelated diagrams sharing one is the ordinary case rather than a strange one.
+    func testTwoDiagramsUnderTheSameTitleAreTwoDiagrams() {
         var history = DiagramHistory()
-        history.record(title: "Checkout", source: flowchart(["A --> B"]), origin: .ai, at: start)
+        let first = flowchart(["A --> B", "B --> C"])
+        let second = "sequenceDiagram\n  Alice ->> Bob: hello\n  Bob -->> Alice: hi"
+        history.record(title: "Mermaid Diagram", source: first, origin: .ai, at: start)
+        history.record(title: "Mermaid Diagram", source: second, origin: .ai, at: start.addingTimeInterval(300))
+
+        XCTAssertEqual(history.entries.count, 2)
+        // Both still readable: neither recording overwrote the other's source.
+        XCTAssertEqual(Set(history.entries.map(\.source)), [first, second])
+    }
+
+    /// Two small diagrams of the same kind share their declaration line and, sooner or later, a
+    /// line of their own. Looking alike is not being the same.
+    func testTwoSmallDiagramsThatShareMostOfTheirLinesAreStillTwoRows() {
+        var history = DiagramHistory()
+        history.record(title: "First", source: flowchart(["A --> B", "C --> D"]), origin: .ai, at: start)
+        history.record(title: "Second", source: flowchart(["A --> B", "E --> F"]), origin: .ai, at: start.addingTimeInterval(60))
+
+        XCTAssertEqual(history.entries.map(\.title), ["Second", "First"])
+        XCTAssertTrue(history.entries.contains { $0.source.contains("C --> D") })
+    }
+
+    func testAnEditRecordedWithoutSayingWhatItRevisesIsItsOwnRow() {
+        var history = DiagramHistory()
+        let original = flowchart((1...10).map { "N\($0) --> N\($0 + 1)" })
+        history.record(title: "Draft", source: original, origin: .ai, at: start)
+        history.record(title: "Draft", source: original + "\n  N11 --> N12", origin: .ai, at: start.addingTimeInterval(60))
+        XCTAssertEqual(history.entries.count, 2)
+    }
+
+    // MARK: - Being told which diagram this is
+
+    func testFiveGoesAtOneDiagramLeaveOneRow() throws {
+        var history = DiagramHistory()
+        var identity = try XCTUnwrap(
+            history.record(title: "Checkout", source: flowchart(["A --> B"]), origin: .ai, at: start)
+        ).id
         for step in 1...4 {
-            history.record(
-                title: "Checkout",
-                source: flowchart(["A --> B"] + (1...step).map { "S\($0) --> T\($0)" }),
-                origin: .ai,
-                at: start.addingTimeInterval(Double(step) * 60)
-            )
+            identity = try XCTUnwrap(
+                history.record(
+                    title: "Checkout",
+                    source: flowchart(["A --> B"] + (1...step).map { "S\($0) --> T\($0)" }),
+                    origin: .ai,
+                    at: start.addingTimeInterval(Double(step) * 60),
+                    revising: identity
+                )
+            ).id
         }
         XCTAssertEqual(history.entries.count, 1)
         XCTAssertTrue(history.entries[0].source.contains("S4 --> T4"))
     }
 
-    func testARenamedEditStillCountsAsTheSameDiagram() {
+    /// An identifier that names nothing yet becomes the new row's own, so a window can choose one
+    /// before it has anything to record and keep passing the same one afterwards.
+    func testAnIdentifierChosenBeforeTheFirstRecordingNamesTheRowItMakes() {
         var history = DiagramHistory()
-        let original = flowchart((1...10).map { "N\($0) --> N\($0 + 1)" })
-        history.record(title: "Draft", source: original, origin: .ai, at: start)
+        let identity = UUID()
+        history.record(title: "Draft", source: flowchart(["A --> B"]), origin: .ai, at: start, revising: identity)
         history.record(
-            title: "Order pipeline",
-            source: original + "\n  N11 --> N12",
+            title: "Draft",
+            source: flowchart(["A --> B", "B --> C"]),
             origin: .ai,
-            at: start.addingTimeInterval(120)
+            at: start.addingTimeInterval(60),
+            revising: identity
         )
-        XCTAssertEqual(history.entries.count, 1)
-        XCTAssertEqual(history.entries[0].title, "Order pipeline")
+        XCTAssertEqual(history.entries.map(\.id), [identity])
+        XCTAssertTrue(history.entries[0].source.contains("B --> C"))
     }
 
-    func testADifferentDiagramWithADifferentTitleIsItsOwnRow() {
+    /// Replacing a row is the one thing here that can destroy a diagram, so it has to reach exactly
+    /// the row it was pointed at and nothing beside it.
+    func testARevisionReplacesTheRowItNamesAndNoOther() throws {
         var history = DiagramHistory()
-        history.record(title: "Checkout", source: flowchart((1...8).map { "A\($0) --> B\($0)" }), origin: .ai, at: start)
-        history.record(title: "Deploy", source: flowchart((1...8).map { "P\($0) --> Q\($0)" }), origin: .ai, at: start.addingTimeInterval(60))
-        XCTAssertEqual(history.entries.count, 2)
-    }
+        let target = try XCTUnwrap(
+            history.record(title: "Checkout", source: flowchart(["A --> B"]), origin: .ai, at: start)
+        ).id
+        let bystander = flowchart(["P --> Q"])
+        history.record(title: "Deploy", source: bystander, origin: .ai, at: start.addingTimeInterval(60))
 
-    func testComingBackTomorrowStartsANewRow() {
-        var history = DiagramHistory()
-        history.record(title: "Checkout", source: flowchart(["A --> B"]), origin: .ai, at: start)
         history.record(
             title: "Checkout",
             source: flowchart(["A --> B", "B --> C"]),
             origin: .ai,
-            at: start.addingTimeInterval(DiagramHistory.revisionWindow + 60)
+            at: start.addingTimeInterval(120),
+            revising: target
         )
-        XCTAssertEqual(history.entries.count, 2)
+
+        XCTAssertEqual(history.entries.map(\.title), ["Checkout", "Deploy"])
+        XCTAssertEqual(history.entries[0].id, target)
+        XCTAssertTrue(history.entries[0].source.contains("B --> C"))
+        // The row that was not named still reads exactly as it was recorded.
+        XCTAssertEqual(history.entries[1].source, bystander)
     }
 
-    func testARevisionOnlyFoldsIntoTheDiagramBeingWorkedOn() {
+    func testARevisionCanRenameTheRowItReplaces() throws {
         var history = DiagramHistory()
-        history.record(title: "Checkout", source: flowchart(["A --> B"]), origin: .ai, at: start)
-        history.record(title: "Deploy", source: flowchart((1...8).map { "P\($0) --> Q\($0)" }), origin: .ai, at: start.addingTimeInterval(60))
-        // Same title as the row underneath, but that row is not the one being worked on any more.
-        history.record(title: "Checkout", source: flowchart(["A --> B", "B --> C"]), origin: .ai, at: start.addingTimeInterval(120))
-        XCTAssertEqual(history.entries.count, 3)
+        let identity = try XCTUnwrap(
+            history.record(title: "Draft", source: flowchart(["A --> B"]), origin: .ai, at: start)
+        ).id
+        history.record(
+            title: "Order pipeline",
+            source: flowchart(["A --> B", "B --> C"]),
+            origin: .ai,
+            at: start.addingTimeInterval(120),
+            revising: identity
+        )
+        XCTAssertEqual(history.entries.map(\.title), ["Order pipeline"])
     }
 
-    func testTheSameTitleFromADifferentRouteIsItsOwnRow() {
+    /// A stale identifier -- a row the user deleted while the window that made it was still open --
+    /// starts a row rather than landing on whatever happens to be at the top.
+    func testAnIdentifierNoRowCarriesAddsARowRatherThanReplacingOne() {
         var history = DiagramHistory()
-        history.record(title: "Checkout", source: flowchart(["A --> B"]), origin: .ai, at: start)
-        history.record(title: "Checkout", source: flowchart(["C --> D"]), origin: .clipboard, at: start.addingTimeInterval(60))
-        XCTAssertEqual(history.entries.count, 2)
+        let kept = flowchart(["A --> B"])
+        history.record(title: "Checkout", source: kept, origin: .ai, at: start)
+        history.record(
+            title: "Elsewhere",
+            source: flowchart(["X --> Y"]),
+            origin: .ai,
+            at: start.addingTimeInterval(60),
+            revising: UUID()
+        )
+        XCTAssertEqual(history.entries.map(\.title), ["Elsewhere", "Checkout"])
+        XCTAssertEqual(history.entries[1].source, kept)
     }
 
-    func testAClockThatWentBackwardsStillFolds() {
+    // MARK: - Order
+
+    /// `record` takes the date it is handed, and a clock that stepped backwards hands it an older
+    /// one. The list still has to read newest first, now rather than after the next launch.
+    func testARecordingCarryingAnOlderDateLandsWhereItsDatePutsIt() throws {
         var history = DiagramHistory()
-        history.record(title: "Checkout", source: flowchart(["A --> B"]), origin: .ai, at: start)
-        history.record(title: "Checkout", source: flowchart(["A --> B", "B --> C"]), origin: .ai, at: start.addingTimeInterval(-60))
-        XCTAssertEqual(history.entries.count, 1)
+        let identity = try XCTUnwrap(
+            history.record(title: "One", source: flowchart(["A --> B"]), origin: .ai, at: start)
+        ).id
+        history.record(title: "Two", source: flowchart(["C --> D"]), origin: .ai, at: start.addingTimeInterval(86_400))
+        history.record(
+            title: "One",
+            source: flowchart(["A --> B", "B --> C"]),
+            origin: .ai,
+            at: start.addingTimeInterval(-86_400),
+            revising: identity
+        )
+
+        XCTAssertEqual(history.entries.map(\.title), ["Two", "One"])
+        XCTAssertEqual(
+            history.entries.map(\.recordedAt),
+            history.entries.map(\.recordedAt).sorted(by: >)
+        )
     }
 
     // MARK: - Nothing worth keeping
@@ -195,16 +279,46 @@ final class DiagramHistoryTests: XCTestCase {
 
     func testLoadingSortsFoldsAndTrims() {
         let shared = flowchart(["A --> B"])
+        // Six distinct diagrams against the smallest maximum there is, so the trim has something to
+        // do as well as the sort and the fold: a file written when the maximum was higher, or typed
+        // by hand, is exactly how a list arrives too long.
+        var entries: [DiagramHistoryEntry] = [
+            DiagramHistoryEntry(title: "Old", source: shared, recordedAt: start, origin: .ai),
+            DiagramHistoryEntry(title: "New", source: shared, recordedAt: start.addingTimeInterval(86_400), origin: .ai),
+            DiagramHistoryEntry(title: "Empty", source: "", recordedAt: .distantFuture, origin: .ai),
+        ]
+        for index in 0..<5 {
+            entries.append(
+                DiagramHistoryEntry(
+                    title: "D\(index)",
+                    source: flowchart(["N\(index) --> M\(index)"]),
+                    recordedAt: start.addingTimeInterval(Double(index) * 3_600),
+                    origin: .ai
+                )
+            )
+        }
+        let history = DiagramHistory(entries: entries, limit: DiagramHistory.limitRange.lowerBound)
+        // "New" is the folded pair, dated latest; "D0" is a diagram too many and is the one dropped.
+        XCTAssertEqual(history.entries.map(\.title), ["New", "D4", "D3", "D2", "D1"])
+    }
+
+    /// A list is drawn keyed on the identifier and a row is removed by it, so a file carrying the
+    /// same one twice would leave the app deleting a row nobody clicked.
+    func testTwoRowsSharingAnIdentifierDoNotBothLoad() {
+        let identity = UUID()
         let history = DiagramHistory(
             entries: [
-                DiagramHistoryEntry(title: "Old", source: shared, recordedAt: start, origin: .ai),
-                DiagramHistoryEntry(title: "New", source: shared, recordedAt: start.addingTimeInterval(86_400), origin: .ai),
-                DiagramHistoryEntry(title: "Other", source: flowchart(["C --> D"]), recordedAt: start.addingTimeInterval(43_200), origin: .ai),
-                DiagramHistoryEntry(title: "Empty", source: "", recordedAt: .distantFuture, origin: .ai),
-            ],
-            limit: 5
+                DiagramHistoryEntry(id: identity, title: "A", source: flowchart(["A --> B"]), recordedAt: start, origin: .ai),
+                DiagramHistoryEntry(
+                    id: identity,
+                    title: "B",
+                    source: flowchart(["C --> D"]),
+                    recordedAt: start.addingTimeInterval(60),
+                    origin: .ai
+                ),
+            ]
         )
-        XCTAssertEqual(history.entries.map(\.title), ["New", "Other"])
+        XCTAssertEqual(history.entries.map(\.title), ["B"])
     }
 
     // MARK: - Reopening one

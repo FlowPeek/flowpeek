@@ -56,6 +56,24 @@ final class DiagramHistoryArchiveTests: XCTestCase {
         XCTAssertEqual(mode.int16Value & 0o077, 0)
     }
 
+    /// The diagrams are the user's own work and the directory is ours alone. A directory that was
+    /// already there -- an earlier version's, or one a restore put back -- keeps the mode it came
+    /// with unless every save puts it right.
+    func testTheDirectoryIsReachableOnlyByItsOwner() throws {
+        let nested = directory.appendingPathComponent("store", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: nested,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+        let archive = DiagramHistoryArchive(url: nested.appendingPathComponent("diagram-history.json"))
+        archive.save([entry("One")])
+        let mode = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: nested.path)[.posixPermissions] as? NSNumber
+        )
+        XCTAssertEqual(mode.int16Value & 0o077, 0)
+    }
+
     func testClearingTakesTheFileWithIt() {
         let archive = makeArchive()
         archive.save([entry("One")])
@@ -68,10 +86,16 @@ final class DiagramHistoryArchiveTests: XCTestCase {
 
     func testATruncatedFileLosesTheHistoryAndNothingElse() throws {
         let archive = makeArchive()
-        archive.save([entry("One"), entry("Two", "C --> D")])
+        let written = [entry("One"), entry("Two", "C --> D")]
+        archive.save(written)
         let whole = try Data(contentsOf: archive.url)
         try whole.prefix(whole.count / 2).write(to: archive.url)
         XCTAssertEqual(archive.load(), [])
+        // The other half of "and nothing else": the archive is not poisoned by what it just read.
+        // Whole bytes still come back as diagrams, so an empty answer means an unreadable file
+        // rather than an archive that has given up.
+        try whole.write(to: archive.url)
+        XCTAssertEqual(archive.load(), written)
     }
 
     func testAnEmptyFileIsAnEmptyHistory() throws {
@@ -134,8 +158,19 @@ final class DiagramHistoryArchiveTests: XCTestCase {
         {"version": 1, "entries": [{"title": "Undated", "source": "flowchart TD\\n  A --> B", "origin": "ai"}]}
         """
         let loaded = DiagramHistoryArchive.decode(Data(json.utf8))
+        // The dated row is stamped years ago on purpose. A missing date that fell back to the moment
+        // of reading would beat any real date in the file, and the undated row would be at the top
+        // of the list on every launch -- which is the thing this is about, so it must not be able to
+        // pass just because the dated row happens to be built second.
         let history = DiagramHistory(
-            entries: loaded + [DiagramHistoryEntry(title: "Dated", source: "flowchart TD\n  C --> D", origin: .ai)]
+            entries: loaded + [
+                DiagramHistoryEntry(
+                    title: "Dated",
+                    source: "flowchart TD\n  C --> D",
+                    recordedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    origin: .ai
+                )
+            ]
         )
         XCTAssertEqual(history.entries.map(\.title), ["Dated", "Undated"])
     }
@@ -166,7 +201,7 @@ final class DiagramHistoryArchiveTests: XCTestCase {
     // MARK: - The store on top of it
 
     @MainActor
-    func testTheStoreReloadsWhatItRecorded() async throws {
+    func testTheStoreReloadsWhatItRecorded() throws {
         let suite = "flowpeek.history.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -176,22 +211,21 @@ final class DiagramHistoryArchiveTests: XCTestCase {
         store.record(title: "Checkout", source: "flowchart TD\n  A --> B", origin: .ai)
         XCTAssertEqual(store.entries.count, 1)
 
-        // The save is handed to a background task on purpose, so the file appears a moment after
-        // the recording rather than during it.
-        var written: [DiagramHistoryEntry] = []
-        for _ in 0..<200 where written.isEmpty {
-            written = archive.load()
-            if written.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
-        }
-        XCTAssertEqual(written.map(\.title), ["Checkout"])
+        // The save is not done on the main actor, so this is the same wait the app makes on its way
+        // out. Waiting for it rather than polling is what makes "recorded, then quit" a promise.
+        store.flush()
+        XCTAssertEqual(archive.load().map(\.title), ["Checkout"])
 
         let reopened = DiagramHistoryStore(archive: archive, defaults: defaults)
         XCTAssertEqual(reopened.entries.map(\.title), ["Checkout"])
         XCTAssertEqual(reopened.limit, DiagramHistory.defaultLimit)
     }
 
+    /// Quitting straight after clearing is the ordinary way this is done: the history window is
+    /// open, Clear History is confirmed, and Quit is two rows down the same menu. The file has to be
+    /// gone by the time the process is.
     @MainActor
-    func testClearingTheStoreTakesTheFileWithIt() async throws {
+    func testClearingTheStoreTakesTheFileWithItBeforeAQuitCanLand() throws {
         let suite = "flowpeek.history.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -199,17 +233,31 @@ final class DiagramHistoryArchiveTests: XCTestCase {
         let archive = DiagramHistoryArchive(url: directory.appendingPathComponent("cleared.json"))
         let store = DiagramHistoryStore(archive: archive, defaults: defaults)
         store.record(title: "Checkout", source: "flowchart TD\n  A --> B", origin: .ai)
-        for _ in 0..<200 where archive.load().isEmpty {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        store.flush()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archive.url.path))
 
         store.removeAll()
         XCTAssertTrue(store.entries.isEmpty)
-        for _ in 0..<200 where FileManager.default.fileExists(atPath: archive.url.path) {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        store.flush()
         // Cleared means gone, not "rewritten as an empty list next to the one that still reads".
         XCTAssertFalse(FileManager.default.fileExists(atPath: archive.url.path))
+        XCTAssertEqual(DiagramHistoryStore(archive: archive, defaults: defaults).entries, [])
+    }
+
+    /// Two recordings a moment apart go to the same queue in the order they were made, so the file
+    /// left behind is the later list rather than whichever write happened to finish last.
+    @MainActor
+    func testTheFileEndsUpHoldingTheLaterOfTwoQuickRecordings() throws {
+        let suite = "flowpeek.history.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let archive = DiagramHistoryArchive(url: directory.appendingPathComponent("ordered.json"))
+        let store = DiagramHistoryStore(archive: archive, defaults: defaults)
+        store.record(title: "First", source: "flowchart TD\n  A --> B", origin: .ai)
+        store.record(title: "Second", source: "flowchart TD\n  C --> D", origin: .ai)
+        store.flush()
+        XCTAssertEqual(archive.load().map(\.title), ["Second", "First"])
     }
 
     @MainActor

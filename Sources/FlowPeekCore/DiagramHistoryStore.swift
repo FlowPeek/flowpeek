@@ -7,12 +7,20 @@ import Foundation
 /// Main-actor isolated so anything that makes or changes a diagram can call `record` where it
 /// already is, without an `await` and without wondering whether the list it just wrote is the one
 /// the menu is about to draw. The one thing that is not done here is writing the file: encoding a
-/// hundred diagrams is not work the main actor should be doing, so every save is handed to a
-/// background task, and each one waits for the previous save so two of them cannot land out of
-/// order and leave the older list on disk.
+/// hundred diagrams is not work the main actor should be doing, so every save goes to a serial
+/// queue of its own -- serial so two saves a moment apart cannot land out of order and leave the
+/// older list on disk, and so `flush` can wait for the queue to drain when the app is going away.
 @MainActor
 public final class DiagramHistoryStore: ObservableObject {
-    public static let shared = DiagramHistoryStore()
+    public static let shared: DiagramHistoryStore = {
+        let store = DiagramHistoryStore()
+        hasOpenedShared = true
+        return store
+    }()
+
+    /// Whether anything has asked for `shared` yet. Quitting is not a reason to open the file for
+    /// the first time, so `flushSharedIfOpened` asks this before touching it.
+    private static var hasOpenedShared = false
 
     /// The maximum lives in the preferences domain because it is a number about diagrams, not a
     /// diagram. Nothing the user wrote is ever written here.
@@ -24,7 +32,9 @@ public final class DiagramHistoryStore: ObservableObject {
     private var history: DiagramHistory
     private let archive: DiagramHistoryArchive?
     private let defaults: UserDefaults
-    private var pendingSave: Task<Void, Never>?
+    /// One queue, so writes happen in the order they were asked for and `flush` can wait on all of
+    /// them by putting one more behind them.
+    private let writes = DispatchQueue(label: "com.selenehyun.FlowPeek.diagram-history", qos: .utility)
 
     /// - Parameters:
     ///   - archive: where the list is kept. Nil is a working store with no file behind it, which is
@@ -69,19 +79,40 @@ public final class DiagramHistoryStore: ObservableObject {
         }
     }
 
-    /// Remembers a diagram that was just created or changed.
+    /// Remembers a diagram that was just created or changed, and answers with the row it landed in.
     ///
-    /// Safe to call from the main actor, repeatedly, while a diagram is being worked on: a revision
-    /// of the diagram at the top of the list replaces it rather than adding a row. See
-    /// `DiagramHistory.record` for what counts as a revision.
-    public func record(title: String, source: String, origin: DiagramOrigin) {
-        guard history.record(title: title, source: source, origin: origin) != nil else { return }
+    /// Safe to call from the main actor as often as a diagram changes -- but a caller that keeps
+    /// working on one diagram has to say so, by holding the identifier it got back and passing it as
+    /// `revising` on the next recording. That is what folds an editing session into one row. A
+    /// caller that does not is telling us it has a diagram, not a revision, and gets a row for each
+    /// one; that way round a mistake costs a row rather than somebody's work. See
+    /// `DiagramHistory.record`.
+    @discardableResult
+    public func record(
+        title: String,
+        source: String,
+        origin: DiagramOrigin,
+        revising identity: DiagramHistoryEntry.ID? = nil
+    ) -> DiagramHistoryEntry.ID? {
+        guard let entry = history.record(
+            title: title,
+            source: source,
+            origin: origin,
+            revising: identity
+        ) else { return nil }
         publish()
+        return entry.id
     }
 
     /// The same thing for a caller that already has a validated diagram in its hands.
-    public func record(title: String, source: MermaidSource, origin: DiagramOrigin) {
-        record(title: title, source: source.text, origin: origin)
+    @discardableResult
+    public func record(
+        title: String,
+        source: MermaidSource,
+        origin: DiagramOrigin,
+        revising identity: DiagramHistoryEntry.ID? = nil
+    ) -> DiagramHistoryEntry.ID? {
+        record(title: title, source: source.text, origin: origin, revising: identity)
     }
 
     public func remove(_ id: DiagramHistoryEntry.ID) {
@@ -95,12 +126,29 @@ public final class DiagramHistoryStore: ObservableObject {
         entries = []
         // The file goes rather than being rewritten empty: a history the user cleared that is still
         // readable on disk is not cleared.
-        let archive = archive
-        let previous = pendingSave
-        pendingSave = Task.detached(priority: .utility) {
-            await previous?.value
-            archive?.removeFile()
-        }
+        guard let archive else { return }
+        writes.async { archive.removeFile() }
+    }
+
+    /// Waits for the file to catch up with the list. Called when the app is going away: confirming
+    /// Clear History and then quitting from the menu bar two rows below it is one gesture as far as
+    /// the user is concerned, and a deletion still sitting in a queue when the process exits is a
+    /// history that comes back on the next launch. The same wait is what keeps the diagram recorded
+    /// a moment before a quit.
+    ///
+    /// Bounded, and it has to be: this blocks while the app is being torn down, so a write that is
+    /// somehow not finishing must not be able to hold the quit open.
+    public func flush(timeout: TimeInterval = 2) {
+        guard archive != nil else { return }
+        let drained = DispatchSemaphore(value: 0)
+        writes.async { drained.signal() }
+        _ = drained.wait(timeout: .now() + timeout)
+    }
+
+    /// The same wait, for the one caller that has no reason to have opened the store yet.
+    public static func flushSharedIfOpened() {
+        guard hasOpenedShared else { return }
+        shared.flush()
     }
 
     private func publish() {
@@ -112,12 +160,6 @@ public final class DiagramHistoryStore: ObservableObject {
     private func save() {
         guard let archive else { return }
         let snapshot = history.entries
-        // Chained rather than fired independently: two recordings a moment apart would otherwise
-        // race, and the loser writing second would put the older list back on disk.
-        let previous = pendingSave
-        pendingSave = Task.detached(priority: .utility) {
-            await previous?.value
-            archive.save(snapshot)
-        }
+        writes.async { archive.save(snapshot) }
     }
 }

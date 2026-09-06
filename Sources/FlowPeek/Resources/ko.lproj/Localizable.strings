@@ -14,6 +14,7 @@
 "menu.shortcuts.unavailable" = "단축키가 FlowPeek에 전달되지 않음 — 다른 앱이 사용 중";
 "menu.shortcuts.fix" = "단축키 변경…";
 "menu.preview-clipboard" = "복사한 다이어그램 미리보기";
+"menu.history" = "다이어그램 기록…";
 "menu.update" = "업데이트 확인…";
 "menu.about" = "FlowPeek 정보";
 "menu.quit" = "FlowPeek 종료";
@@ -297,3 +298,27 @@
 "preview.background.make-solid" = "다이어그램을 자체 배경 위에 놓기";
 "preview.background.state.on" = "투명";
 "preview.background.state.off" = "불투명";
+
+/* 다이어그램 기록 */
+"history.window.title" = "다이어그램 기록";
+"history.subtitle" = "최신순";
+"history.count" = "%2$lld개 중 %1$lld개 보관 중";
+"history.open.help" = "이 다이어그램을 미리보기 창으로 열기";
+"history.remove" = "이 다이어그램 지우기";
+"history.clear" = "기록 모두 지우기";
+"history.clear.title" = "보관 중인 다이어그램을 모두 지울까요?";
+"history.clear.message" = "%lld개를 목록에서 지우고 저장 파일도 삭제합니다. 되돌릴 수 없습니다.";
+"history.clear.action" = "모두 지우기";
+"history.empty.title" = "아직 보관된 다이어그램이 없습니다";
+"history.empty.message" = "새로 만들거나 고친 다이어그램이 여기에 남아, 만들었던 창을 닫은 뒤에도 다시 열어볼 수 있습니다.";
+"history.unreadable.title" = "이 다이어그램을 열 수 없습니다";
+"history.unreadable.message" = "이 항목에 보관된 내용을 더 이상 다이어그램으로 읽을 수 없습니다. FlowPeek 밖에서 파일이 변경되었을 수 있습니다.";
+"history.origin.ai" = "AI로 만듦";
+"history.origin.selection" = "선택에서";
+"history.origin.clipboard" = "클립보드에서";
+"history.origin.ambient" = "포인터로 집어서";
+"history.origin.unknown" = "보관됨";
+"settings.history" = "보관하는 다이어그램";
+"settings.history.description" = "만든 다이어그램을 몇 개까지 보관할지 정합니다. 숫자를 줄이면 오래된 것부터 바로 지워집니다. 전용 파일에 보관되며 어디로도 전송되지 않습니다.";
+"settings.history.count" = "%lld개 보관";
+"settings.history.open" = "기록 열기…";

@@ -31,6 +31,9 @@ struct SettingsView: View {
     /// The centre is its own observable object, so reading it through `app` would never redraw: the
     /// dimmed rows and the AI card's shortcut would keep naming the previous state.
     @ObservedObject private var shortcuts = AppState.shared.shortcuts
+    /// Observed for the same reason: the maximum lives in the history store, and the row showing it
+    /// has to redraw when the stepper moves it.
+    @ObservedObject private var history = DiagramHistoryStore.shared
     @State private var selection: SettingsSection
     @State private var relaunchPrompt: RelaunchPrompt?
     let close: () -> Void
@@ -334,6 +337,41 @@ struct SettingsView: View {
             }
             .togglesOnTap(launchAtLoginBinding)
 
+            settingsCard {
+                HStack(alignment: .top, spacing: 14) {
+                    settingIcon("clock.arrow.circlepath", color: .orange)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("settings.history").font(.headline)
+                        Text("settings.history.description")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 14)
+                    // A stepper rather than a slider: the number itself is the setting, and the
+                    // step is five because a person choosing "about twenty" should not have to
+                    // press a button fifteen times to get there.
+                    Stepper(
+                        value: historyLimitBinding,
+                        in: DiagramHistory.limitRange,
+                        step: DiagramHistory.limitStep
+                    ) {
+                        Text(verbatim: String(
+                            format: String(localized: "settings.history.count"),
+                            history.limit
+                        ))
+                        .font(.callout.weight(.medium))
+                        .monospacedDigit()
+                    }
+                    .fixedSize()
+                }
+                HStack {
+                    Spacer()
+                    Button("settings.history.open") { DiagramHistoryCoordinator.shared.show() }
+                        .controlSize(.small)
+                }
+            }
+
             Label("settings.privacy", systemImage: "lock.shield")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -483,6 +521,15 @@ struct SettingsView: View {
                 // the user already missed, so the moment of choice asks the question outright.
                 relaunchPrompt = RelaunchPrompt(language: chosen)
             }
+        )
+    }
+
+    /// Writes straight through to the store, which is what applies the new maximum to the list it
+    /// already holds. There is no local copy to fall out of step with it.
+    private var historyLimitBinding: Binding<Int> {
+        Binding(
+            get: { history.limit },
+            set: { history.limit = $0 }
         )
     }
 

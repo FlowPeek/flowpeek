@@ -14,6 +14,7 @@
 "menu.shortcuts.unavailable" = "A shortcut is not reaching FlowPeek — another app has it";
 "menu.shortcuts.fix" = "Change Shortcuts…";
 "menu.preview-clipboard" = "Preview Copied Diagram";
+"menu.history" = "Diagram History…";
 "menu.update" = "Check for Updates…";
 "menu.about" = "About FlowPeek";
 "menu.quit" = "Quit FlowPeek";
@@ -297,3 +298,27 @@
 "preview.background.make-solid" = "Put the Diagram on Its Own Canvas";
 "preview.background.state.on" = "Transparent";
 "preview.background.state.off" = "Solid";
+
+/* Diagram history */
+"history.window.title" = "Diagram History";
+"history.subtitle" = "Newest first";
+"history.count" = "%1$lld of %2$lld kept";
+"history.open.help" = "Open this diagram in a preview window";
+"history.remove" = "Forget This Diagram";
+"history.clear" = "Clear History";
+"history.clear.title" = "Forget every remembered diagram?";
+"history.clear.message" = "This removes all %lld of them from the list and deletes the file they are kept in. It cannot be undone.";
+"history.clear.action" = "Forget Them";
+"history.empty.title" = "Nothing Remembered Yet";
+"history.empty.message" = "Diagrams you create or edit are kept here, so you can come back to one after the window that made it is gone.";
+"history.unreadable.title" = "Cannot Open This Diagram";
+"history.unreadable.message" = "What was kept for this row is no longer readable as a diagram. Its file may have been edited outside FlowPeek.";
+"history.origin.ai" = "Made with AI";
+"history.origin.selection" = "From a selection";
+"history.origin.clipboard" = "From the clipboard";
+"history.origin.ambient" = "Pointed at";
+"history.origin.unknown" = "Kept";
+"settings.history" = "Remembered Diagrams";
+"settings.history.description" = "How many of the diagrams you make to keep. Lowering this forgets the oldest ones straight away. They are kept in a file of your own, never sent anywhere.";
+"settings.history.count" = "Keep %lld";
+"settings.history.open" = "Open History…";

@@ -57,6 +57,19 @@ final class LocalizationCatalogTests: XCTestCase {
         }
     }
 
+    /// The label under a remembered diagram is chosen in `FlowPeekCore` from the origin stored with
+    /// it, so a missing translation there would ship as the raw key under every row in the list.
+    func testTheDiagramOriginKeysAreDefinedInEveryLanguage() throws {
+        for language in Self.languages {
+            let keys = Set(try Self.keys(of: language))
+            XCTAssertEqual(
+                DiagramOrigin.localizationKeys.filter { !keys.contains($0) },
+                [],
+                "\(language).lproj is missing these"
+            )
+        }
+    }
+
     private static func keys(of language: String) throws -> [String] {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // FlowPeekCoreTests

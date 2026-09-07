@@ -8,6 +8,8 @@ public enum DiagramOrigin: String, Codable, Sendable, CaseIterable {
     case selection
     case clipboard
     case ambient
+    /// Opened from a file — double-clicked in Finder, or handed over by another app.
+    case file
     /// An origin a later version of FlowPeek wrote and this one has no name for. Kept as a case
     /// rather than as a decoding failure: the diagram is still the user's work, and losing the row
     /// because we cannot label it is the worse of the two outcomes.
@@ -19,6 +21,7 @@ public enum DiagramOrigin: String, Codable, Sendable, CaseIterable {
         case .selection: "history.origin.selection"
         case .clipboard: "history.origin.clipboard"
         case .ambient: "history.origin.ambient"
+        case .file: "history.origin.file"
         case .unknown: "history.origin.unknown"
         }
     }
@@ -31,6 +34,7 @@ public enum DiagramOrigin: String, Codable, Sendable, CaseIterable {
         case .selection: "hand.draw"
         case .clipboard: "doc.on.clipboard"
         case .ambient: "viewfinder"
+        case .file: "doc.text"
         case .unknown: "clock"
         }
     }

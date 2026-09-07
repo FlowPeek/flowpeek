@@ -47,7 +47,9 @@ Editors work too. In VS Code the outline follows the caret, because an editor ca
 ## In Finder
 
 FlowPeek installs a Quick Look extension, so a `.mmd` or `.mermaid` file is a diagram when you press
-the space bar — no app to open, no window to switch to.
+the space bar — no app to open, no window to switch to. **Double-click one** and it opens in a
+preview window rather than a text editor; FlowPeek is a viewer for these and never writes to them,
+and if you would rather edit, Get Info → Open with is one change away.
 
 <p align="center">
   <img src="docs/images/quicklook.gif" width="620" alt="A .mmd file selected in Finder; pressing space draws the diagram in the Quick Look panel">

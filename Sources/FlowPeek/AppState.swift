@@ -730,6 +730,59 @@ final class AppState: ObservableObject {
         return String(format: String(localized: "clipboard.empty.message"), chord)
     }
 
+    /// Draws files handed over by Finder, one window each.
+    ///
+    /// Bounded: selecting a folder of eighty diagrams and pressing Return should not open eighty
+    /// windows, and the ones past the limit are still on disk. Each is filed in the history like any
+    /// other diagram FlowPeek draws -- the promise the history makes is about what was drawn, not
+    /// about where it came from.
+    func openFiles(_ urls: [URL]) {
+        // A title and messages of its own: nothing here was selected, and telling someone who
+        // double-clicked a file that "the selection does not look like Mermaid syntax" sends them
+        // looking for a selection they never made.
+        let title = String(localized: "file.error.title")
+        for url in urls.prefix(Self.maximumFilesAtOnce) {
+            do {
+                let text = try DiagramFile.read(contentsOf: url)
+                let source = try MermaidSource(rawValue: text)
+                let name = DiagramFile.title(for: url, fallback: String(localized: "diagram.default-title"))
+                pending = Pending(origin: .file, source: source.text, title: name)
+                previews.openWindow(document: DiagramDocument(title: name, source: source))
+            } catch let error as MermaidSource.ValidationError {
+                previews.showMessage(title: title, message: Self.message(for: error, url: url))
+            } catch let error as DiagramFile.Failure {
+                previews.showMessage(title: title, message: Self.message(for: error, url: url))
+            } catch {
+                previews.showMessage(title: title, message: error.localizedDescription)
+            }
+        }
+    }
+
+    /// Enough for "select these four and hit Return", short of "select the folder".
+    private static let maximumFilesAtOnce = 8
+
+    /// The two validation failures that speak about a selection are said differently for a file;
+    /// the other three are about sizes and read the same either way.
+    private static func message(for error: MermaidSource.ValidationError, url: URL) -> String {
+        switch error {
+        case .empty:
+            String(format: String(localized: "file.error.empty"), url.lastPathComponent)
+        case .unsupportedSyntax:
+            String(format: String(localized: "file.error.unsupported"), url.lastPathComponent)
+        default:
+            localizedUserMessage(error)
+        }
+    }
+
+    private static func message(for failure: DiagramFile.Failure, url: URL) -> String {
+        switch failure {
+        case .tooLarge:
+            String(format: String(localized: "file.error.too-large"), url.lastPathComponent)
+        case .notText:
+            String(format: String(localized: "file.error.not-text"), url.lastPathComponent)
+        }
+    }
+
     private func showCopied(_ source: MermaidSource) {
         noteDiagramOpened(.clipboard, source: source)
         previews.showQuick(
@@ -777,11 +830,12 @@ final class AppState: ObservableObject {
         self.pending = nil
         let origin = pending.origin
         let identity = DiagramHistoryStore.shared.record(
-            // The diagram's own words, not the route's. What the selection, clipboard and pointer
-            // routes hand over is the name of the route -- "Copied Diagram" on every row -- which
-            // makes a list of five of them unreadable. The AI route is left alone: it files itself,
-            // under the title it asked the model for.
-            title: DiagramLabel.describe(diagram.source) ?? diagram.title,
+            // The diagram's own words, unless the route brought a name worth keeping. What the
+            // selection, clipboard and pointer routes hand over is the name of the route --
+            // "Copied Diagram" on every row -- which makes a list of five of them unreadable. A
+            // file brings its own name. The AI route is left alone: it files itself, under the
+            // title it asked the model for.
+            title: pending.title ?? DiagramLabel.describe(diagram.source) ?? diagram.title,
             source: diagram.source,
             origin: origin
         )
@@ -815,6 +869,17 @@ final class AppState: ObservableObject {
     private struct Pending {
         let origin: DiagramOrigin
         let source: String
+        /// A name the route already knows is worth keeping. The selection, clipboard and pointer
+        /// routes have none -- what they carry is the name of the route -- so the history derives
+        /// one from the diagram. A file has the name its owner gave it, which beats anything that
+        /// could be derived.
+        let title: String?
+
+        init(origin: DiagramOrigin, source: String, title: String? = nil) {
+            self.origin = origin
+            self.source = source
+            self.title = title
+        }
     }
 
     private var pending: Pending?

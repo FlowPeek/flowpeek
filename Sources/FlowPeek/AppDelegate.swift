@@ -16,6 +16,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppState.shared.start()
     }
 
+    /// Finder handed us files: a double-click, an Open With, or a drop on the app.
+    ///
+    /// The app is a menu-bar app with no windows of its own, so "opening" a diagram means drawing it
+    /// in the same preview window every other route ends in. Nothing is written back -- FlowPeek is
+    /// a viewer for these, which is what `CFBundleTypeRole` says.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard !isHostingTests else { return }
+        // Launch order: a double-click on a cold app delivers this after `didFinishLaunching`, so
+        // the monitors and the engine are already up. Asked for anyway, because an app that was
+        // asked to stand aside for another copy never started at all.
+        AppState.shared.openFiles(urls)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         AppState.shared.stop()
         // The remembered diagrams are written off the main actor. Quitting a moment after a

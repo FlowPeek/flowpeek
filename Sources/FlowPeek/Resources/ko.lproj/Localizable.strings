@@ -108,6 +108,11 @@
 "clipboard.empty.message.no-shortcut" = "지금 클립보드에는 Mermaid 다이어그램이 없습니다. 하나를 복사한 뒤 ‘%@’를 다시 선택하거나, FlowPeek의 샘플로 시작해 보세요.";
 "clipboard.empty.copy-sample" = "샘플 다이어그램 복사";
 "clipboard.error.title" = "복사한 다이어그램을 미리 볼 수 없습니다";
+"file.error.too-large" = "“%@”은(는) 너무 커서 미리 볼 수 없습니다. FlowPeek이 다룰 수 있는 다이어그램 크기를 넘습니다.";
+"file.error.not-text" = "“%@”을(를) 텍스트로 읽을 수 없습니다. FlowPeek은 UTF-8로 작성된 Mermaid 다이어그램을 기대합니다.";
+"file.error.title" = "이 파일을 미리 볼 수 없습니다";
+"file.error.empty" = "“%@”이(가) 비어 있습니다.";
+"file.error.unsupported" = "“%@”은(는) Mermaid 다이어그램처럼 보이지 않습니다.";
 "settings.shortcuts" = "단축키";
 "settings.shortcuts.description" = "어디서든 FlowPeek에 닿는 키를 직접 지정합니다.";
 "settings.shortcuts.note" = "전역 단축키에는 Command·Option·Control 중 하나 이상이 필요하며, 작업 중인 앱보다 우선합니다.";
@@ -384,6 +389,7 @@
 "history.origin.selection" = "선택에서";
 "history.origin.clipboard" = "클립보드에서";
 "history.origin.ambient" = "포인터로 집어서";
+"history.origin.file" = "파일에서 열기";
 "history.origin.unknown" = "보관됨";
 "settings.history" = "보관하는 다이어그램";
 "settings.history.description" = "만든 다이어그램을 기억해 두어, 창을 닫은 뒤에도 다시 열어볼 수 있습니다. 다이어그램과 작은 미리보기 이미지가 이 Mac에만 저장되며 어디로도 전송되지 않습니다. 끄면 둘 다 삭제합니다.";

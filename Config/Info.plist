@@ -63,5 +63,24 @@
             </dict>
         </dict>
     </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <!-- Double-clicking a Mermaid file opens the preview rather than a text editor. Role
+                 Viewer, because FlowPeek does not edit: it draws what the file says and leaves the
+                 file alone. Owner rank because FlowPeek is the app that declares this type; anyone
+                 who would rather edit can say so once in Get Info. -->
+            <key>CFBundleTypeName</key>
+            <string>Mermaid Diagram</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.selenehyun.flowpeek.mermaid</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

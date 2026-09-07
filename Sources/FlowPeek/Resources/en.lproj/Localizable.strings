@@ -108,6 +108,11 @@
 "clipboard.empty.message.no-shortcut" = "There is no Mermaid diagram on the clipboard right now. Copy one and choose “%@” again — or start with FlowPeek's own sample.";
 "clipboard.empty.copy-sample" = "Copy a Sample Diagram";
 "clipboard.error.title" = "Cannot Preview the Copied Diagram";
+"file.error.too-large" = "“%@” is too large to preview. FlowPeek draws diagrams, and this file is bigger than any diagram it can hold.";
+"file.error.not-text" = "“%@” could not be read as text. FlowPeek expects a Mermaid diagram written in UTF-8.";
+"file.error.title" = "Cannot Preview This File";
+"file.error.empty" = "“%@” is empty.";
+"file.error.unsupported" = "“%@” does not look like a Mermaid diagram.";
 "settings.shortcuts" = "Shortcuts";
 "settings.shortcuts.description" = "Assign the keys that reach FlowPeek from anywhere.";
 "settings.shortcuts.note" = "Global shortcuts need at least one of Command, Option, or Control, and win over the app you are working in.";
@@ -384,6 +389,7 @@
 "history.origin.selection" = "From a selection";
 "history.origin.clipboard" = "From the clipboard";
 "history.origin.ambient" = "Pointed at";
+"history.origin.file" = "Opened from a file";
 "history.origin.unknown" = "Kept";
 "settings.history" = "Remembered Diagrams";
 "settings.history.description" = "Keep the diagrams you make, so you can come back to one after the window that made it is gone. Kept on this Mac -- the diagram and a small picture of it -- and never sent anywhere; switching this off deletes both.";

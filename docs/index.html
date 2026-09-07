@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlowPeek — see the Mermaid diagram you are looking at</title>
+<meta name="description" content="A macOS menu-bar app that draws the Mermaid diagram already on your screen: a selection, the clipboard, the block under the pointer, or a file. Free, open source, and nothing leaves your Mac.">
+<link rel="icon" href="images/flowpeek-avatar.png">
+<meta property="og:title" content="FlowPeek">
+<meta property="og:description" content="You are reading a Mermaid diagram as source code. Stop doing that.">
+<meta property="og:image" content="https://flowpeek.github.io/flowpeek/images/flowpeek-avatar.png">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #e6edf3; --dim: #9aa4b2; --faint: #6b7482;
+    --ground: #0d1117; --card: #12161d; --edge: #22262d; --accent: #0a84ff;
+  }
+  * { box-sizing: border-box }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent) }
+  main { max-width: 860px; margin: 0 auto; padding: 0 24px 96px }
+  header { text-align: center; padding: 76px 0 44px }
+  header img.mark { width: 96px; height: 96px; border-radius: 22px }
+  h1 { font-size: 44px; line-height: 1.1; margin: 22px 0 12px; letter-spacing: -.022em }
+  .lede { font-size: 20px; color: var(--dim); margin: 0 auto 8px; max-width: 34em }
+  .sub { color: var(--faint); font-size: 15px; margin: 12px auto 0; max-width: 34em }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 30px 0 10px }
+  .btn {
+    display: inline-block; padding: 11px 20px; border-radius: 10px; text-decoration: none;
+    font-weight: 600; font-size: 15px; border: 1px solid var(--edge);
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff }
+  .btn.ghost { color: var(--ink) }
+  code.brew {
+    display: inline-block; margin-top: 18px; padding: 9px 14px; border-radius: 8px;
+    background: var(--card); border: 1px solid var(--edge); color: #adbac7;
+    font: 13px/1.5 "SF Mono", ui-monospace, Menlo, monospace; user-select: all;
+  }
+  figure { margin: 0 0 12px }
+  figure img { width: 100%; border-radius: 12px; border: 1px solid var(--edge); display: block }
+  figcaption { color: var(--faint); font-size: 13.5px; margin-top: 9px }
+  h2 { font-size: 15px; letter-spacing: .07em; text-transform: uppercase; color: var(--faint);
+       margin: 64px 0 20px; font-weight: 600 }
+  .route { margin: 0 0 40px }
+  .route h3 { font-size: 20px; margin: 0 0 6px; letter-spacing: -.01em }
+  .route p { color: var(--dim); margin: 0 0 14px }
+  ul.plain { list-style: none; padding: 0; margin: 0 }
+  ul.plain li { padding: 13px 0; border-top: 1px solid var(--edge); color: var(--dim) }
+  ul.plain li b { color: var(--ink); font-weight: 600 }
+  footer { border-top: 1px solid var(--edge); margin-top: 72px; padding-top: 26px;
+           color: var(--faint); font-size: 14px; display: flex; gap: 18px; flex-wrap: wrap }
+  @media (max-width: 640px) { h1 { font-size: 33px } .lede { font-size: 18px } header { padding-top: 52px } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img class="mark" src="images/flowpeek-avatar.png" alt="">
+    <h1>You are reading a Mermaid diagram<br>as source code.</h1>
+    <p class="lede">FlowPeek draws it where you already are — a docs page, a pull request, your editor.</p>
+    <p class="sub">A macOS menu-bar app. Free, open source, and nothing leaves your Mac.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/FlowPeek/flowpeek/releases/latest">Download for macOS</a>
+      <a class="btn ghost" href="https://github.com/FlowPeek/flowpeek">Source on GitHub</a>
+    </div>
+    <code class="brew">brew install --cask flowpeek/tap/flowpeek</code>
+  </header>
+
+  <figure>
+    <img src="images/selection.gif" alt="Mermaid source dragged over on a documentation page; a FlowPeek button appears at the end of the selection and opens the diagram">
+    <figcaption>Drag over the source in any app. A small button appears beside the selection.</figcaption>
+  </figure>
+
+  <h2>Two more ways in</h2>
+
+  <div class="route">
+    <h3>Point at it</h3>
+    <p>Hold Option and move the pointer. The block is outlined where it sits; Space draws it.</p>
+    <figure>
+      <img src="images/hold-to-peek.gif" alt="Option held over a Mermaid code block on a documentation page: the block is outlined, and pressing Space draws the diagram" loading="lazy">
+    </figure>
+  </div>
+
+  <div class="route">
+    <h3>Copy it</h3>
+    <p>A badge appears near the menu bar and names the key that opens it.</p>
+    <figure>
+      <img src="images/clipboard-badge.gif" alt="A badge sliding in below the menu bar reading Mermaid, sequenceDiagram, Press to preview" loading="lazy">
+    </figure>
+  </div>
+
+  <h2>Editors, too</h2>
+  <figure>
+    <img src="images/vscode.gif" alt="A fenced mermaid block in VS Code outlined by FlowPeek, then drawn in the preview" loading="lazy">
+    <figcaption>In VS Code the outline follows the caret, because an editor can say where the caret is but not where the pointer is.</figcaption>
+  </figure>
+
+  <h2>In Finder</h2>
+  <figure>
+    <img src="images/quicklook.gif" alt="A .mmd file selected in Finder; pressing space draws the diagram in the Quick Look panel" loading="lazy">
+    <figcaption>Press space on a <code>.mmd</code> file, or double-click it to open a preview window.</figcaption>
+  </figure>
+
+  <h2>Come back to one</h2>
+  <figure>
+    <img src="images/shelf.gif" alt="A shelf of remembered diagrams rising from the bottom of the screen, filtered by typing, then walked through with the arrow keys" loading="lazy">
+    <figcaption>Every diagram FlowPeek draws is kept, as a picture. ⌥⇧⌘H raises the shelf with the search field ready; the arrows, Return, ⌘C and Delete do the rest.</figcaption>
+  </figure>
+
+  <h2>What it does not do</h2>
+  <ul class="plain">
+    <li><b>No network.</b> Mermaid is bundled, so drawing a diagram makes no request at all.</li>
+    <li><b>No logging.</b> The text you point at is read into memory and never written down. The
+        diagrams it actually draws are kept on your Mac so the shelf can offer them back — capped by
+        count, by age, or switched off entirely.</li>
+    <li><b>One permission.</b> Accessibility, because reading the text you are pointing at is the
+        whole feature. Say no and copying still works; the app says so instead of pretending to be
+        broken.</li>
+    <li><b>No account, no telemetry, no upsell.</b> MIT licensed.</li>
+  </ul>
+
+  <footer>
+    <a href="https://github.com/FlowPeek/flowpeek">GitHub</a>
+    <a href="https://github.com/FlowPeek/flowpeek/releases">Releases</a>
+    <a href="https://github.com/FlowPeek/flowpeek/blob/main/LICENSE">MIT License</a>
+    <span>Requires macOS 14 or later.</span>
+  </footer>
+</main>
+</body>
+</html>

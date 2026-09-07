@@ -19,7 +19,23 @@ final class OnboardingCoordinator {
     /// window is key.
     var isPresenting: Bool { window != nil }
 
-    func show(entry: OnboardingEntry = .setup) {
+    /// Takes the card down when it was put up by the launch rather than asked for.
+    ///
+    /// For the one case where FlowPeek was started to open a diagram: the welcome card had already
+    /// gone up by the time the file arrived, and it must not sit in front of the thing the user
+    /// double-clicked. Nothing is recorded as answered -- `closeWindow` would write a completion,
+    /// and nobody answered anything -- so onboarding is offered again at the next ordinary launch.
+    func dismissIfAutomatic() {
+        guard automatic, window != nil else { return }
+        tearDownWindow()
+    }
+
+    /// Whether the card on screen went up by itself. A window the user asked for from the menu is
+    /// theirs and is never taken away behind their back.
+    private var automatic = false
+
+    func show(entry: OnboardingEntry = .setup, automatic: Bool = false) {
+        self.automatic = automatic
         switch session.opening(entry) {
         case .front:
             // The menu offers two doors and they are different destinations: fronting the wizard

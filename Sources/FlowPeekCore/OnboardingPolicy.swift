@@ -5,13 +5,21 @@ public enum OnboardingPolicy {
     /// looks broken. A *declined* grant does not: the user answered, and re-asking every launch is
     /// a nag they cannot switch off. Granting later clears the decline, so an accidental revoke
     /// still gets the window back.
+    /// - Parameter isOpeningFiles: this launch was asked to open a diagram. Onboarding waits: the
+    ///   user double-clicked a file and asked for that diagram, and a welcome card in front of it is
+    ///   the app answering a question nobody asked. It is offered again at the next launch that is
+    ///   not carrying a file, and the file route needs no permission for onboarding to explain.
+    ///   `forceOnboarding` still wins, because that is somebody asking for the window by name.
     public static func shouldShow(
         accessibilityGranted: Bool,
         onboardingCompleted: Bool,
         permissionDeclined: Bool,
-        forceOnboarding: Bool
+        forceOnboarding: Bool,
+        isOpeningFiles: Bool = false
     ) -> Bool {
-        forceOnboarding || (!accessibilityGranted && !permissionDeclined) || !onboardingCompleted
+        if forceOnboarding { return true }
+        guard !isOpeningFiles else { return false }
+        return (!accessibilityGranted && !permissionDeclined) || !onboardingCompleted
     }
 
     /// What the completion flag reads after the wizard goes away, whichever way it went: Escape,

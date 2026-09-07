@@ -436,3 +436,41 @@ final class OnboardingWindowSessionTests: XCTestCase {
         XCTAssertEqual(records, 2)
     }
 }
+
+// MARK: - A launch that was asked to open a diagram
+
+extension OnboardingPolicyTests {
+    /// The user double-clicked a file. They asked for that diagram, not for a welcome card, and a
+    /// first launch is exactly when the card would otherwise land on top of it.
+    func testOnboardingStandsAsideForAFileLaunch() {
+        XCTAssertFalse(OnboardingPolicy.shouldShow(
+            accessibilityGranted: false,
+            onboardingCompleted: false,
+            permissionDeclined: false,
+            forceOnboarding: false,
+            isOpeningFiles: true
+        ))
+    }
+
+    /// Asking for the window by name still works, file or no file.
+    func testForcingOnboardingBeatsAFileLaunch() {
+        XCTAssertTrue(OnboardingPolicy.shouldShow(
+            accessibilityGranted: false,
+            onboardingCompleted: false,
+            permissionDeclined: false,
+            forceOnboarding: true,
+            isOpeningFiles: true
+        ))
+    }
+
+    /// And the next launch that carries no file is offered it again: standing aside is not the same
+    /// as being answered.
+    func testTheNextOrdinaryLaunchIsStillOffered() {
+        XCTAssertTrue(OnboardingPolicy.shouldShow(
+            accessibilityGranted: false,
+            onboardingCompleted: false,
+            permissionDeclined: false,
+            forceOnboarding: false
+        ))
+    }
+}

@@ -331,10 +331,11 @@ final class AppState: ObservableObject {
             accessibilityGranted: accessibilityGranted,
             onboardingCompleted: onboardingComplete,
             permissionDeclined: permissionDeclined,
-            forceOnboarding: forceOnboarding
+            forceOnboarding: forceOnboarding,
+            isOpeningFiles: isOpeningFiles
         ) {
             if !accessibilityGranted && !permissionDeclined { onboardingComplete = false }
-            OnboardingCoordinator.shared.show()
+            OnboardingCoordinator.shared.show(automatic: true)
         }
     }
 
@@ -736,7 +737,19 @@ final class AppState: ObservableObject {
     /// windows, and the ones past the limit are still on disk. Each is filed in the history like any
     /// other diagram FlowPeek draws -- the promise the history makes is about what was drawn, not
     /// about where it came from.
+    /// Whether this launch was started to open a diagram, which onboarding stands aside for.
+    ///
+    /// Set from `openFiles` and read by `start`, and the two arrive in either order: macOS delivers
+    /// the open event after `applicationDidFinishLaunching` for a cold launch and before it in other
+    /// cases, so the flag is checked on the way in and the window is put away on the way out.
+    private var isOpeningFiles = false
+
     func openFiles(_ urls: [URL]) {
+        isOpeningFiles = true
+        // Already up, because this launch had finished starting before the files arrived: the
+        // diagram is what was asked for, so the welcome card goes away rather than sitting on top
+        // of it. Not marked complete -- nothing was answered, so it is offered again next launch.
+        if !onboardingComplete { OnboardingCoordinator.shared.dismissIfAutomatic() }
         // A title and messages of its own: nothing here was selected, and telling someone who
         // double-clicked a file that "the selection does not look like Mermaid syntax" sends them
         // looking for a selection they never made.

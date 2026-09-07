@@ -40,6 +40,8 @@ brew install --cask flowpeek/tap/flowpeek
 
 **Select it.** A small button appears beside the selection.
 
+<img src="docs/images/selection.gif" width="600" alt="Mermaid source dragged over on a documentation page; a small FlowPeek button appears at the end of the selection, and pressing it draws the diagram">
+
 Editors work too. In VS Code the outline follows the caret, because an editor can say where the caret is but not where the pointer is:
 
 <img src="docs/images/vscode.gif" width="680" alt="A fenced mermaid block in VS Code outlined by FlowPeek with a hint reading flowchart at the cursor, Option-Space, then drawn in the preview">

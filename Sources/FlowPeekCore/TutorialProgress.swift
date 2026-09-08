@@ -43,10 +43,16 @@ public struct TutorialProgress: Equatable, Sendable {
         public var namesPeekShortcut: Bool { self == .ambient }
 
         /// The lesson's instructions, with the chord as it is bound right now written into them.
-        public func detail(peekShortcut: String) -> String {
+        ///
+        /// - Parameter switches: what the app is listening for. Whether pressing Option twice opens the copied
+        ///   diagram. The copy lesson mentions it when it is on and says nothing when it is off,
+        ///   for the same reason the peek chord is interpolated rather than spelled out: a tutorial
+        ///   that teaches a gesture the app is not listening for teaches somebody to distrust it.
+        public func detail(peekShortcut: String, switches: Switches = Switches()) -> String {
             let text = String(localized: detailKey)
-            guard namesPeekShortcut else { return text }
-            return String(format: text, peekShortcut)
+            if namesPeekShortcut { return String(format: text, peekShortcut) }
+            guard self == .clipboard, switches.doubleTapEnabled, switches.detectionEnabled else { return text }
+            return text + " " + String(localized: "tutorial.clipboard.double-tap")
         }
 
         /// Which switch, if any, stops this gesture from firing right now. A row waiting forever for
@@ -106,15 +112,21 @@ public struct TutorialProgress: Equatable, Sendable {
         public var detectionEnabled: Bool
         public var clipboardWatchEnabled: Bool
         public var ambientPeekEnabled: Bool
+        /// Not a fourth route, so it blocks nothing: pressing Option twice is a second way to do
+        /// the copy lesson. It is read all the same, because the lesson only mentions it while the
+        /// app is actually listening for it.
+        public var doubleTapEnabled: Bool
 
         public init(
             detectionEnabled: Bool = true,
             clipboardWatchEnabled: Bool = true,
-            ambientPeekEnabled: Bool = true
+            ambientPeekEnabled: Bool = true,
+            doubleTapEnabled: Bool = false
         ) {
             self.detectionEnabled = detectionEnabled
             self.clipboardWatchEnabled = clipboardWatchEnabled
             self.ambientPeekEnabled = ambientPeekEnabled
+            self.doubleTapEnabled = doubleTapEnabled
         }
     }
 

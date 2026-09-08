@@ -87,7 +87,7 @@ enum TutorialPractice {
                 if shared == nil, let blocker = blockers[lesson] {
                     return "<li class=\"locked\">\(escape(blocker.detail))</li>"
                 }
-                let instruction = escape(lesson.detail(peekShortcut: peekShortcut))
+                let instruction = escape(lesson.detail(peekShortcut: peekShortcut, switches: switches))
                 guard blockers[lesson] != nil else { return "<li>\(instruction)</li>" }
                 return "<li class=\"locked\">\(instruction)</li>"
             }

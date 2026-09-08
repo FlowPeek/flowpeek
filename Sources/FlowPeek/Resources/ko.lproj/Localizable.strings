@@ -38,6 +38,7 @@
 "tutorial.selection.detail" = "아래 다이어그램을 드래그하세요. 옆에 작은 버튼이 나타나면 그것을 누릅니다.";
 "tutorial.clipboard.title" = "복사";
 "tutorial.clipboard.detail" = "다이어그램을 선택하고 Command-C를 누르세요. 메뉴 막대 근처에 배지가 뜨면 누르거나 표시된 단축키를 씁니다.";
+"tutorial.clipboard.double-tap" = "더 빠른 방법도 있습니다. Option을 두 번 누르세요.";
 "tutorial.ambient.title" = "가리키기";
 "tutorial.ambient.detail" = "Option을 누른 채 포인터를 다이어그램 위로 옮기세요. 테두리가 생기면 계속 누른 상태로 %@를 누릅니다.";
 "tutorial.ambient.enable" = "홀드해서 엿보기 켜기";
@@ -116,6 +117,10 @@
 "settings.shortcuts" = "단축키";
 "settings.shortcuts.description" = "어디서든 FlowPeek에 닿는 키를 직접 지정합니다.";
 "settings.shortcuts.note" = "전역 단축키에는 Command·Option·Control 중 하나 이상이 필요하며, 작업 중인 앱보다 우선합니다.";
+"settings.double-tap" = "Option 두 번 누르기";
+"settings.double-tap.description" = "Option을 빠르게 두 번 누르면 클립보드의 다이어그램이 열립니다. 어떤 키도 점유하지 않습니다. Option 단독으로는 원래 아무 일도 하지 않기 때문에 쓰던 앱에서 빼앗는 것이 없습니다. 누른 채로 있으면 홀드해서 엿보기 제스처이며 탭으로 세지 않습니다.";
+"settings.double-tap.interval" = "간격";
+"settings.double-tap.milliseconds" = "%lld ms";
 "shortcut.preview-clipboard" = "복사한 다이어그램 미리보기";
 "shortcut.preview-clipboard.detail" = "클립보드를 읽어 거기 있는 다이어그램을 엽니다. FlowPeek을 실행하기 전에 복사한 것도 포함됩니다. 복사할 때 뜨는 배지에도 이 키가 표시됩니다.";
 "shortcut.ai-prompt" = "AI로 생성";

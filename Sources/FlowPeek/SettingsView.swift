@@ -436,6 +436,44 @@ struct SettingsView: View {
                 .opacity(isActive ? 1 : 0.55)
             }
 
+            // Not one of the recorded combinations, so it sits below them rather than among them:
+            // it registers no hot key and takes nothing from any other app. Option on its own
+            // already does nothing, which is what makes watching for it safe.
+            settingsCard {
+                HStack(alignment: .top, spacing: 14) {
+                    settingIcon("hand.tap", color: .teal)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("settings.double-tap").font(.headline)
+                        Text("settings.double-tap.description")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 14)
+                    Toggle("settings.double-tap", isOn: $app.doubleTapEnabled)
+                        .labelsHidden()
+                        .accessibilityHint(Text("settings.double-tap.description"))
+                }
+                if app.doubleTapEnabled {
+                    Divider().opacity(0.5)
+                    HStack(spacing: 12) {
+                        Text("settings.double-tap.interval").font(.callout)
+                        Slider(
+                            value: $app.doubleTapInterval,
+                            in: ModifierDoubleTap.intervalRange,
+                            step: 0.05
+                        )
+                        .frame(maxWidth: 220)
+                        .accessibilityValue(Text(verbatim: intervalLabel))
+                        Text(verbatim: intervalLabel)
+                            .font(.callout.weight(.medium))
+                            .monospacedDigit()
+                            .frame(width: 62, alignment: .trailing)
+                    }
+                }
+            }
+            .togglesOnTap($app.doubleTapEnabled)
+
             Label("settings.shortcuts.note", systemImage: "info.circle")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -445,6 +483,12 @@ struct SettingsView: View {
         // that owns the combination can be installed or started long after this one launched. This
         // pane is where that line is read, so opening it is the moment to ask again.
         .onAppear { shortcuts.refreshAvailability() }
+    }
+
+    /// Milliseconds, because that is the unit a person setting a double-press thinks in, and the
+    /// number is the setting rather than a decoration on a slider.
+    private var intervalLabel: String {
+        String(format: String(localized: "settings.double-tap.milliseconds"), Int(app.doubleTapInterval * 1000))
     }
 
     private var aiSettings: some View {

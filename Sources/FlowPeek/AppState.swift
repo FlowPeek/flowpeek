@@ -41,6 +41,27 @@ final class AppState: ObservableObject {
     @Published var ambientPeekEnabled = Defaults.bool(.ambientEnabled, default: false) {
         didSet { Defaults.set(ambientPeekEnabled, .ambientEnabled) }
     }
+    /// Press Option twice to open the copied diagram. On by default, unlike hold to peek: this
+    /// registers no hot key and takes nothing from any other app, because Option on its own already
+    /// does nothing. It only watches.
+    @Published var doubleTapEnabled = Defaults.bool(.doubleTapEnabled, default: true) {
+        didSet {
+            Defaults.set(doubleTapEnabled, .doubleTapEnabled)
+            applyEnabledState()
+        }
+    }
+    /// How long the two presses may be apart. See `ModifierDoubleTap` for why the range is what it
+    /// is.
+    @Published var doubleTapInterval = ModifierDoubleTap.clamp(
+        Defaults.double(.doubleTapInterval) ?? ModifierDoubleTap.defaultInterval
+    ) {
+        didSet {
+            let clamped = ModifierDoubleTap.clamp(doubleTapInterval)
+            if clamped != doubleTapInterval { doubleTapInterval = clamped; return }
+            Defaults.set(doubleTapInterval, .doubleTapInterval)
+            doubleTap.setInterval(doubleTapInterval)
+        }
+    }
     @Published var aiEnabled = Defaults.bool(.aiEnabled, default: false) {
         didSet { Defaults.set(aiEnabled, .aiEnabled) }
     }
@@ -105,6 +126,7 @@ final class AppState: ObservableObject {
     let previews = PreviewCoordinator()
     let clipboard = ClipboardMonitor()
     let ambient = AmbientPeekMonitor()
+    let doubleTap = DoubleTapMonitor()
     let highlight = AmbientHighlightCoordinator()
     let indicator = ClipboardIndicatorCoordinator()
     let starNotice = StarNudgeNoticeCoordinator()
@@ -187,6 +209,12 @@ final class AppState: ObservableObject {
         if clipboard != clipboardWatchEnabled { clipboardWatchEnabled = clipboard }
         let ambient = Defaults.bool(.ambientEnabled, default: false)
         if ambient != ambientPeekEnabled { ambientPeekEnabled = ambient }
+        let tap = Defaults.bool(.doubleTapEnabled, default: true)
+        if tap != doubleTapEnabled { doubleTapEnabled = tap }
+        let tapInterval = ModifierDoubleTap.clamp(
+            Defaults.double(.doubleTapInterval) ?? ModifierDoubleTap.defaultInterval
+        )
+        if tapInterval != doubleTapInterval { doubleTapInterval = tapInterval }
         let ai = Defaults.bool(.aiEnabled, default: false)
         if ai != aiEnabled { aiEnabled = ai }
         let provider = Defaults.string(.aiProvider, default: AIProviderKind.openAI.rawValue)
@@ -207,6 +235,8 @@ final class AppState: ObservableObject {
             case permissionDeclined = "flowpeek.permission.declined"
             case clipboardEnabled = "flowpeek.clipboard.enabled"
             case ambientEnabled = "flowpeek.ambient.enabled"
+            case doubleTapEnabled = "flowpeek.doubleTap.enabled"
+            case doubleTapInterval = "flowpeek.doubleTap.interval"
             case aiEnabled = "flowpeek.ai.enabled"
             case aiProvider = "flowpeek.ai.provider"
             case starDiagramsOpened = "flowpeek.star.diagramsOpened"
@@ -227,6 +257,15 @@ final class AppState: ObservableObject {
         }
 
         static func set(_ value: String, _ key: Key) {
+            UserDefaults.standard.set(value, forKey: key.rawValue)
+        }
+
+        /// Absent rather than zero, because zero is a number a caller could mistake for a setting.
+        static func double(_ key: Key) -> Double? {
+            UserDefaults.standard.object(forKey: key.rawValue) as? Double
+        }
+
+        static func set(_ value: Double, _ key: Key) {
             UserDefaults.standard.set(value, forKey: key.rawValue)
         }
 
@@ -313,6 +352,9 @@ final class AppState: ObservableObject {
             .ambientPeek: { [weak self] in self?.ambient.activate() },
             .history: { DiagramHistoryCoordinator.shared.show() },
         ]
+        // The gesture is a second door to the clipboard route, not a different feature: it opens
+        // exactly what the chord opens, apology and all.
+        doubleTap.onDoubleTap = { [weak self] in self?.previewCopied() }
         startEngine()
         // Registers the hot keys as well, and only the ones whose feature is on — which is why there
         // is no `registerAll()` here: it would claim ⌥⌘M for a moment even with AI switched off.
@@ -345,6 +387,7 @@ final class AppState: ObservableObject {
         selectionMonitor.stop()
         clipboard.stop()
         ambient.stop()
+        doubleTap.stop()
         shortcuts.unregisterAll()
         indicator.hide()
         highlight.hide()
@@ -375,6 +418,14 @@ final class AppState: ObservableObject {
             clipboard.start()
         } else {
             clipboard.stop()
+        }
+        // Watching for the gesture needs the same grant every global monitor does, and stops with
+        // the app's own pause switch: a paused FlowPeek should do nothing at all.
+        if isEnabled && doubleTapEnabled && accessibilityGranted {
+            doubleTap.setInterval(doubleTapInterval)
+            doubleTap.start()
+        } else {
+            doubleTap.stop()
         }
         // Ambient peek reads the accessibility tree, so it needs the same grant the overlay does.
         let ambientRunning = isEnabled && ambientPeekEnabled && accessibilityGranted
@@ -1027,7 +1078,8 @@ final class AppState: ObservableObject {
         TutorialProgress.Switches(
             detectionEnabled: isEnabled,
             clipboardWatchEnabled: clipboardWatchEnabled,
-            ambientPeekEnabled: ambientPeekEnabled
+            ambientPeekEnabled: ambientPeekEnabled,
+            doubleTapEnabled: doubleTapEnabled
         )
     }
 

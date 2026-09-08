@@ -389,7 +389,10 @@ struct OnboardingView: View {
                             .font(.callout.weight(.semibold))
                             // Already the badge's label; without this the lesson name is read twice.
                             .accessibilityHidden(true)
-                        Text(lesson.detail(peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display))
+                        Text(lesson.detail(
+                            peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display,
+                            switches: app.tutorialSwitches
+                        ))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

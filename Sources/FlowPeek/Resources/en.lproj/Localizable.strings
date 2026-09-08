@@ -38,6 +38,7 @@
 "tutorial.selection.detail" = "Drag across the diagram below. A small button appears beside it — click that.";
 "tutorial.clipboard.title" = "Copy it";
 "tutorial.clipboard.detail" = "Select the diagram and press Command-C. A badge appears near the menu bar; click it or press its shortcut.";
+"tutorial.clipboard.double-tap" = "Quicker still: press Option twice.";
 "tutorial.ambient.title" = "Point at it";
 "tutorial.ambient.detail" = "Hold Option and move the pointer over the diagram. It gets outlined; press %@ while still holding.";
 "tutorial.ambient.enable" = "Turn On Hold to Peek";
@@ -116,6 +117,10 @@
 "settings.shortcuts" = "Shortcuts";
 "settings.shortcuts.description" = "Assign the keys that reach FlowPeek from anywhere.";
 "settings.shortcuts.note" = "Global shortcuts need at least one of Command, Option, or Control, and win over the app you are working in.";
+"settings.double-tap" = "Press Option twice";
+"settings.double-tap.description" = "Tap Option twice, quickly, to open the diagram on the clipboard. It claims no key: Option on its own does nothing, so nothing is taken from the app you are in. A press held down is the hold-to-peek gesture and never counts as a tap.";
+"settings.double-tap.interval" = "How quickly";
+"settings.double-tap.milliseconds" = "%lld ms";
 "shortcut.preview-clipboard" = "Preview copied diagram";
 "shortcut.preview-clipboard.detail" = "Reads the clipboard and opens whatever diagram is on it, including one copied before FlowPeek was running. Also on the badge that appears when you copy one.";
 "shortcut.ai-prompt" = "Generate with AI";

@@ -128,6 +128,19 @@ final class TutorialProgressTests: XCTestCase {
         }
     }
 
+    /// The sentence the copy lesson gains when the gesture is on. It names Option, which is not
+    /// rebindable, so spelling it out is honest -- but both catalogues have to carry it or the
+    /// lesson grows a raw key.
+    func testTheGestureSentenceIsInBothCatalogs() throws {
+        for language in ["en", "ko"] {
+            let contents = try String(contentsOf: Self.catalog(language), encoding: .utf8)
+            XCTAssertTrue(
+                contents.contains("\"tutorial.clipboard.double-tap\" = "),
+                "\(language).lproj is missing tutorial.clipboard.double-tap"
+            )
+        }
+    }
+
     // MARK: - Progress that outlives the window
 
     /// The tutorial is quit halfway through, and a relaunch used to hand the returning user empty
@@ -604,5 +617,59 @@ final class TutorialProgressTests: XCTestCase {
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // repository root
             .appendingPathComponent("Sources/FlowPeek/Resources/\(language).lproj/Localizable.strings")
+    }
+}
+
+// MARK: - Teaching the double-tap gesture
+
+extension TutorialProgressTests {
+    private func switches(doubleTap: Bool, detection: Bool = true) -> TutorialProgress.Switches {
+        TutorialProgress.Switches(detectionEnabled: detection, doubleTapEnabled: doubleTap)
+    }
+
+    /// Asserted on the composition, not on the words: the catalogue lives in the app bundle, so a
+    /// Core test sees the keys rather than the sentences. That the two keys are joined, in order,
+    /// is what this layer decides.
+    func testTheCopyLessonOffersTheGestureWhenItIsOn() {
+        let on = TutorialProgress.Lesson.clipboard.detail(peekShortcut: "⌥Space", switches: switches(doubleTap: true))
+        let off = TutorialProgress.Lesson.clipboard.detail(peekShortcut: "⌥Space", switches: switches(doubleTap: false))
+        XCTAssertTrue(on.hasPrefix(off), on)
+        XCTAssertGreaterThan(on.count, off.count)
+    }
+
+    /// A tutorial that teaches a gesture the app is not listening for teaches somebody to distrust
+    /// it, so the sentence is absent rather than hedged.
+    func testTheCopyLessonSaysNothingWhenTheGestureIsOff() {
+        XCTAssertEqual(
+            TutorialProgress.Lesson.clipboard.detail(peekShortcut: "⌥Space", switches: switches(doubleTap: false)),
+            String(localized: "tutorial.clipboard.detail")
+        )
+    }
+
+    /// Paused means nothing is being watched for, the gesture included.
+    func testAPausedAppDoesNotOfferTheGesture() {
+        XCTAssertEqual(
+            TutorialProgress.Lesson.clipboard.detail(
+                peekShortcut: "⌥Space",
+                switches: switches(doubleTap: true, detection: false)
+            ),
+            String(localized: "tutorial.clipboard.detail")
+        )
+    }
+
+    /// The gesture belongs to the copy lesson and to no other: dragging and pointing are unaffected.
+    func testTheOtherLessonsAreUntouched() {
+        for lesson in [TutorialProgress.Lesson.selection, .ambient] {
+            XCTAssertEqual(
+                lesson.detail(peekShortcut: "⌥Space", switches: switches(doubleTap: true)),
+                lesson.detail(peekShortcut: "⌥Space", switches: switches(doubleTap: false)),
+                "\(lesson)"
+            )
+        }
+    }
+
+    /// It is a second way to do the copy lesson, not a fourth thing to tick off.
+    func testTheGestureAddsNoLesson() {
+        XCTAssertEqual(TutorialProgress.Lesson.allCases.count, 3)
     }
 }

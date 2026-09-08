@@ -53,6 +53,14 @@ struct SettingsView: View {
         )
     }
 
+    /// The one line the card leads with. Names the same chord for the same reason.
+    private var ambientShort: String {
+        String(
+            format: String(localized: "settings.ambient.short"),
+            shortcuts.shortcuts[.ambientPeek].display
+        )
+    }
+
     var body: some View {
         ZStack {
             FlowPeekGlassBackground()
@@ -249,7 +257,7 @@ struct SettingsView: View {
                     settingIcon("doc.on.clipboard", color: .teal)
                     VStack(alignment: .leading, spacing: 5) {
                         Text("settings.clipboard").font(.headline)
-                        Text("settings.clipboard.description")
+                        Text("settings.clipboard.short")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -260,6 +268,7 @@ struct SettingsView: View {
                         .accessibilityHint(Text("settings.clipboard.description"))
                         .onChange(of: app.clipboardWatchEnabled) { _, _ in app.applyEnabledState() }
                 }
+                explanation(ClipboardWatchScene(), detail: "settings.clipboard.description")
             }
             .togglesOnTap($app.clipboardWatchEnabled)
 
@@ -272,7 +281,7 @@ struct SettingsView: View {
                             // Reads the accessibility tree, so without the grant it is a title for
                             // something that cannot happen yet.
                             .foregroundStyle(app.accessibilityGranted ? .primary : .secondary)
-                        Text(verbatim: ambientDescription)
+                        Text(verbatim: ambientShort)
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -283,6 +292,7 @@ struct SettingsView: View {
                         .accessibilityHint(Text(verbatim: ambientDescription))
                         .onChange(of: app.ambientPeekEnabled) { _, _ in app.applyEnabledState() }
                 }
+                explanation(HoldToPeekScene(), detail: Text(verbatim: ambientDescription))
                 // The preference stays writable while the grant is missing: `applyEnabledState()`
                 // starts the monitor the moment permission lands, and refusing the switch would
                 // leave the user nothing to turn on afterwards.
@@ -309,7 +319,7 @@ struct SettingsView: View {
                             // Reads the accessibility tree, so without the grant it is a title for
                             // something that cannot happen yet.
                             .foregroundStyle(app.accessibilityGranted ? .primary : .secondary)
-                        Text("settings.terminal.description")
+                        Text("settings.terminal.short")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -319,6 +329,7 @@ struct SettingsView: View {
                         .labelsHidden()
                         .accessibilityHint(Text("settings.terminal.description"))
                 }
+                explanation(TerminalWatchScene(), detail: "settings.terminal.description")
                 if !app.accessibilityGranted {
                     HStack(alignment: .top, spacing: 10) {
                         Label("settings.terminal.needs-permission", systemImage: "exclamationmark.triangle.fill")
@@ -477,7 +488,7 @@ struct SettingsView: View {
                     settingIcon("hand.tap", color: .teal)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("settings.double-tap").font(.headline)
-                        Text("settings.double-tap.description")
+                        Text("settings.double-tap.short")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -487,6 +498,7 @@ struct SettingsView: View {
                         .labelsHidden()
                         .accessibilityHint(Text("settings.double-tap.description"))
                 }
+                explanation(DoubleTapScene(), detail: "settings.double-tap.description")
                 if app.doubleTapEnabled {
                     Divider().opacity(0.5)
                     HStack(spacing: 12) {
@@ -675,6 +687,52 @@ struct SettingsView: View {
             else { return .main }
             return bundle
         }
+    }
+
+    /// A switch explained by a drawing, with the paragraph it replaced still one click away.
+    ///
+    /// The paragraphs were doing two jobs at once: saying what the switch does, and saying what it
+    /// costs and where it cannot reach. Only the first is worth a reader's time every time they
+    /// open Settings; the second matters once, when they are deciding. So the first is a line and a
+    /// drawing, and the second is behind `Details` -- moved, not deleted, because "a terminal that
+    /// paints its own text exposes nothing" is exactly what somebody will come back looking for.
+    private func explanation(_ scene: some View, detail: LocalizedStringKey) -> some View {
+        explanation(scene, detail: Text(detail))
+    }
+
+    /// Deliberately `Text` and not `String` for the second of these.
+    ///
+    /// A `String` overload beside a `LocalizedStringKey` one is a trap: both are expressible by a
+    /// string literal, `String` is the language's default literal type, so every call site written
+    /// as `detail: "settings.terminal.description"` quietly took the `String` path and rendered the
+    /// key itself. Two cards shipped in this state, printing "settings.terminal.description" under
+    /// Details. `Text` is not expressible by a literal, so a key can only land on the overload that
+    /// looks it up, and a sentence already composed has to be wrapped where the wrapping is visible.
+    private func explanation(_ scene: some View, detail: Text) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            scene
+            DisclosureGroup {
+                detail
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+            } label: {
+                Text("settings.detail")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        // Indented past the icon so the drawing lines up with the words it is explaining.
+        .padding(.leading, 48)
+        .contentShape(Rectangle())
+        // The card flips its switch on a tap anywhere inside it, and that must not include the
+        // drawing or the Details row. Aiming at Details and missing it by a few points switched
+        // the feature off instead of expanding anything, and a reader clicking the drawing to
+        // watch it again would do the same. An empty handler on the inner view is what claims the
+        // tap: SwiftUI resolves the innermost gesture first, so the card never sees it.
+        .onTapGesture {}
     }
 
     private func settingsCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {

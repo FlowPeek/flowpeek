@@ -118,6 +118,7 @@
 "settings.shortcuts.description" = "Assign the keys that reach FlowPeek from anywhere.";
 "settings.shortcuts.note" = "Global shortcuts need at least one of Command, Option, or Control, and win over the app you are working in.";
 "settings.double-tap" = "Press Option twice";
+"settings.double-tap.short" = "Tap Option twice, quickly, to open the diagram on the clipboard.";
 "settings.double-tap.description" = "Tap Option twice, quickly, to open the diagram on the clipboard. It claims no key: Option on its own does nothing, so nothing is taken from the app you are in. A press held down is the hold-to-peek gesture and never counts as a tap.";
 "settings.double-tap.interval" = "How quickly";
 "settings.double-tap.milliseconds" = "%lld ms";
@@ -152,9 +153,12 @@
 "settings.language.relaunch.action" = "Restart Now";
 "settings.language.relaunch.title" = "Restart FlowPeek to change language?";
 "settings.ambient" = "Hold to peek";
+"settings.ambient.short" = "Hold Option and point at a diagram: it gets outlined, and %@ opens it.";
 "settings.ambient.description" = "Hold Option and point at a diagram: FlowPeek outlines it and %@ opens it. Only reads while Option is down: what is under the pointer, and in an editor that exposes nothing there — VS Code and other Electron apps — the document it has open, anchored on the text cursor. Apps that draw their own text — a terminal rendering to a canvas, for one — expose nothing to read; copying still works there. It is a switch rather than always on: while it is on, that key belongs to FlowPeek instead of to whatever you are typing in.";
 "settings.ambient.needs-permission" = "Needs Accessibility permission before it can see anything.";
 "settings.terminal" = "Watch the terminal";
+"settings.terminal.short" = "A diagram printed in Terminal, iTerm2 or Ghostty gets a frame where it sits.";
+"settings.detail" = "Details";
 "settings.terminal.description" = "Print a diagram in Terminal, iTerm2 or Ghostty and FlowPeek draws a faint frame around it where it sits, one for each diagram on screen. Bring the pointer near and the frame brightens with a button that opens it; hold Option and the whole block opens on a click. Nothing to select, nothing to copy. It reads only while one of those three is in front, and the frame goes as soon as the block scrolls off screen. A terminal that draws its own text into a web view — Orca, VS Code’s built-in terminal, anything on xterm.js — exposes nothing to read; copying still works there.";
 "settings.terminal.needs-permission" = "Needs Accessibility permission before it can read a terminal.";
 "ambient.hint.generic" = "Mermaid";
@@ -164,6 +168,7 @@
 "terminal.hint.click" = "click";
 "terminal.hint.help" = "Hold Option and click the block to open this diagram";
 "settings.clipboard" = "Watch the clipboard";
+"settings.clipboard.short" = "Copy Mermaid anywhere and a badge appears with the key that opens it.";
 "settings.clipboard.description" = "When you copy Mermaid from an app FlowPeek cannot read a selection from — a terminal that draws its own text, for instance — a small badge appears with the shortcut that opens it. The clipboard is only read, never changed, and its contents are never stored or logged.";
 "preview.open-window" = "Open in Window";
 "preview.zoom-in" = "Zoom In";

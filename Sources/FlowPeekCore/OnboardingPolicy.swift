@@ -44,17 +44,16 @@ public enum OnboardingPolicy {
 /// card comes next is a rule about the user's answers, not about SwiftUI.
 public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
     case welcome, permission, launch, tutorial
+    /// Where the app is, once the user has been shown what it does.
+    ///
+    /// Last rather than first, and a card of its own rather than a line on the tutorial's. A
+    /// menu-bar app has no window to come back to, so "where is it now" is the question every
+    /// other card leaves unanswered -- and answering it before the app has done anything is
+    /// housekeeping about a thing the user has no reason to care about yet. It is also the one
+    /// card everybody sees: the tutorial can be finished or skipped, and both roads lead here.
+    case menuBar
 
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
-
-    public var symbol: String {
-        switch self {
-        case .welcome: "point.3.connected.trianglepath.dotted"
-        case .permission: "hand.point.up.left.and.text"
-        case .launch: "power"
-        case .tutorial: "graduationcap"
-        }
-    }
 
     public var titleKey: String.LocalizationValue {
         switch self {
@@ -62,6 +61,7 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
         case .permission: "onboarding.permission.title"
         case .launch: "onboarding.launch.title"
         case .tutorial: "tutorial.title"
+        case .menuBar: "onboarding.menu-bar.title"
         }
     }
 
@@ -71,6 +71,7 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
         case .permission: "onboarding.permission.message"
         case .launch: "onboarding.launch.message"
         case .tutorial: "tutorial.message"
+        case .menuBar: "onboarding.menu-bar.message"
         }
     }
 
@@ -100,6 +101,7 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
     /// straight forward again.
     public func previous(accessibilityGranted: Bool) -> Self {
         switch self {
+        case .menuBar: .tutorial
         case .tutorial: .launch
         case .launch: accessibilityGranted ? .welcome : .permission
         case .permission, .welcome: .welcome

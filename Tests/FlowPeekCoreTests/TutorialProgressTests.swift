@@ -673,3 +673,65 @@ extension TutorialProgressTests {
         XCTAssertEqual(TutorialProgress.Lesson.allCases.count, 3)
     }
 }
+
+/// Which lesson the checklist shows in full. One at a time, because a drawing under each of three
+/// rows is a card taller than the window and three sets of instructions is three things to do.
+final class TutorialFocusTests: XCTestCase {
+    private let all = TutorialProgress.Lesson.allCases
+
+    func testTheFirstUnfinishedLessonIsTheOneShown() {
+        let progress = TutorialProgress()
+        XCTAssertEqual(progress.focus(among: all, switches: .init()), .selection)
+    }
+
+    func testAFinishedLessonHandsOverToTheNext() {
+        var progress = TutorialProgress()
+        progress.noteOpened(.selection)
+        XCTAssertEqual(progress.focus(among: all, switches: .init()), .clipboard)
+        progress.noteOpened(.clipboard)
+        XCTAssertEqual(progress.focus(among: all, switches: .init()), .ambient)
+    }
+
+    /// Noticed and missed are both still to be passed, and both are exactly when the instructions
+    /// are worth having on screen.
+    func testALessonInProgressKeepsTheFocus() {
+        var progress = TutorialProgress()
+        progress.noteDetected(.selection)
+        XCTAssertEqual(progress.focus(among: all, switches: .init()), .selection)
+        progress.noteMissed(.selection)
+        XCTAssertEqual(progress.focus(among: all, switches: .init()), .selection)
+    }
+
+    /// A row nothing is listening for cannot be practised however well it is explained, so the
+    /// card moves past it to one that can.
+    func testABlockedLessonIsSteppedOver() {
+        let progress = TutorialProgress()
+        let switches = TutorialProgress.Switches(clipboardWatchEnabled: false)
+        XCTAssertEqual(progress.focus(among: [.clipboard, .ambient], switches: switches), .ambient)
+    }
+
+    func testNothingIsShownWhenEveryLessonIsDone() {
+        var progress = TutorialProgress()
+        all.forEach { progress.noteOpened($0) }
+        XCTAssertNil(progress.focus(among: all, switches: .init()))
+    }
+
+    /// The pause blocks every route at once, so there is nothing to show and the card has to say
+    /// that instead of drawing a gesture that cannot fire.
+    func testNothingIsShownWhileDetectionIsPaused() {
+        let progress = TutorialProgress()
+        XCTAssertNil(progress.focus(among: all, switches: .init(detectionEnabled: false)))
+    }
+
+    /// Only the lessons on offer are candidates: without the grant the drag row is not among them,
+    /// and focusing it would draw a button that can never appear.
+    func testOnlyTheOfferedLessonsAreCandidates() {
+        let progress = TutorialProgress()
+        let offered = TutorialProgress.Lesson.available(accessibilityGranted: false)
+        XCTAssertEqual(progress.focus(among: offered, switches: .init()), .clipboard)
+    }
+
+    func testAnEmptyListShowsNothing() {
+        XCTAssertNil(TutorialProgress().focus(among: [], switches: .init()))
+    }
+}

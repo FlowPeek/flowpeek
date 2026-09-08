@@ -17,6 +17,15 @@ enum Skeleton {
     static let rowHeight: CGFloat = 5
     static let rowGap: CGFloat = 6
     static let corner: CGFloat = 3
+
+    /// Three sizes, because the same drawing has to work in three places. A settings card has a
+    /// column of text beside it, an onboarding step has the middle of a window, and a checklist row
+    /// has whatever is left after the badge and the instructions. The pieces are drawn at fixed
+    /// sizes rather than scaled, so a five-point row is five points everywhere and the drawings
+    /// stay recognisably the same object.
+    static let cardSize = CGSize(width: 168, height: 104)
+    static let stepSize = CGSize(width: 268, height: 150)
+    static let rowSize = CGSize(width: 196, height: 116)
 }
 
 /// Plays a script by moving one piece of state at each step, rather than by redrawing every frame.
@@ -266,6 +275,8 @@ struct TerminalWatchScene: View {
     private static let block = 2...4
     private static let rows: [Double] = [0.55, 0.34, 0.30, 0.62, 0.46, 0.40, 0.24]
 
+    var size: CGSize = Skeleton.cardSize
+
     var body: some View {
         SkeletonPlayer(Self.script, initial: .printing) { stage in
             SkeletonWindow {
@@ -279,7 +290,7 @@ struct TerminalWatchScene: View {
                     if stage == .opened { SkeletonDiagram() }
                 }
             }
-            .frame(width: 168, height: 104)
+            .frame(width: size.width, height: size.height)
         }
         .accessibilityHidden(true)
     }
@@ -354,6 +365,8 @@ struct ClipboardWatchScene: View {
     private static let rows: [Double] = [0.5, 0.66, 0.42, 0.58, 0.30]
     private static let selected = 1...3
 
+    var size: CGSize = Skeleton.cardSize
+
     var body: some View {
         SkeletonPlayer(Self.script, initial: .idle) { stage in
             SkeletonWindow {
@@ -386,7 +399,7 @@ struct ClipboardWatchScene: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                 }
             }
-            .frame(width: 168, height: 104)
+            .frame(width: size.width, height: size.height)
         }
         .accessibilityHidden(true)
     }
@@ -424,6 +437,8 @@ struct HoldToPeekScene: View {
     private static let rows: [Double] = [0.46, 0.62, 0.34, 0.28, 0.52, 0.38]
     private static let block = 2...3
 
+    var size: CGSize = Skeleton.cardSize
+
     var body: some View {
         SkeletonPlayer(Self.script, initial: .idle) { stage in
             SkeletonWindow {
@@ -451,7 +466,7 @@ struct HoldToPeekScene: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                 }
             }
-            .frame(width: 168, height: 104)
+            .frame(width: size.width, height: size.height)
         }
         .accessibilityHidden(true)
     }
@@ -500,6 +515,8 @@ struct DoubleTapScene: View {
         resting: .opened
     )
 
+    var size: CGSize = Skeleton.cardSize
+
     var body: some View {
         SkeletonPlayer(Self.script, initial: .idle) { stage in
             SkeletonWindow(titleBar: false) {
@@ -521,7 +538,7 @@ struct DoubleTapScene: View {
                     if stage == .opened { SkeletonDiagram() }
                 }
             }
-            .frame(width: 168, height: 104)
+            .frame(width: size.width, height: size.height)
         }
         .accessibilityHidden(true)
     }
@@ -532,5 +549,472 @@ struct DoubleTapScene: View {
         case .first, .between: 1
         case .second, .opened: 2
         }
+    }
+}
+
+// MARK: - Select it
+
+/// What the drag route does: text is selected, a small button appears at the end of the selection,
+/// and pressing it draws.
+enum SelectionStage: Equatable, Sendable {
+    case idle
+    case dragging
+    case offered
+    case opened
+}
+
+struct SelectionScene: View {
+    static let script = SkeletonScript<SelectionStage>(
+        [
+            .init(.idle, 0.7),
+            .init(.dragging, 0.9),
+            .init(.offered, 1.5),
+            .init(.opened, 1.6),
+        ],
+        resting: .offered
+    )
+
+    private static let rows: [Double] = [0.44, 0.60, 0.36, 0.30, 0.50]
+    private static let block = 1...3
+
+    var size: CGSize = Skeleton.cardSize
+
+    var body: some View {
+        SkeletonPlayer(Self.script, initial: .idle) { stage in
+            SkeletonWindow {
+                ZStack(alignment: .topLeading) {
+                    Group {
+                        VStack(alignment: .leading, spacing: Skeleton.rowGap) {
+                            ForEach(Self.rows.indices, id: \.self) { index in
+                                SkeletonRow(
+                                    width: Self.rows[index],
+                                    level: selected(stage, index) ? 0.44 : 0.18
+                                )
+                                .background(alignment: .leading) {
+                                    if selected(stage, index) {
+                                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                            .fill(Skeleton.accent.opacity(0.22))
+                                            .frame(width: 110, height: 9)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if stage != .idle {
+                            // At the end of the selection, which is where the real button goes.
+                            button(offered: stage != .dragging)
+                                .offset(x: 104, y: CGFloat(Self.block.upperBound) * pitch - 4)
+                        }
+                    }
+                    .opacity(stage == .opened ? SkeletonDiagram.backdropOpacity : 1)
+                    if stage == .opened { SkeletonDiagram() }
+                }
+            }
+            .frame(width: size.width, height: size.height)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var pitch: CGFloat { Skeleton.rowHeight + Skeleton.rowGap }
+
+    private func selected(_ stage: SelectionStage, _ index: Int) -> Bool {
+        stage != .idle && Self.block.contains(index)
+    }
+
+    /// The pointer holds the drag; the button arrives beside it a beat later.
+    private func button(offered: Bool) -> some View {
+        HStack(spacing: 3) {
+            SkeletonPointer()
+            if offered {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Skeleton.accent)
+                    .frame(width: 16, height: 13)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+    }
+}
+
+// MARK: - The permission
+
+/// What the permission step asks for, and where. The list is System Settings; the tick is the one
+/// the user has to make; the frame afterwards is FlowPeek able to do its job.
+enum PermissionStage: Equatable, Sendable {
+    case listed
+    case ticked
+    case working
+}
+
+struct PermissionScene: View {
+    static let script = SkeletonScript<PermissionStage>(
+        [
+            .init(.listed, 1.1),
+            .init(.ticked, 1.4),
+            .init(.working, 1.7),
+        ],
+        resting: .working
+    )
+
+    var size: CGSize = Skeleton.cardSize
+
+    var body: some View {
+        SkeletonPlayer(Self.script, initial: .listed) { stage in
+            SkeletonWindow {
+                if stage == .working {
+                    working
+                } else {
+                    list(ticked: stage == .ticked)
+                }
+            }
+            .frame(width: size.width, height: size.height)
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Three rows with a switch each, the middle one FlowPeek's. Nothing names it, because a
+    /// skeleton that spelled out "FlowPeek" would be a screenshot with the pixels removed.
+    private func list(ticked: Bool) -> some View {
+        VStack(spacing: Skeleton.rowGap + 2) {
+            ForEach(0..<3, id: \.self) { index in
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Skeleton.line(index == 1 ? 0.34 : 0.16))
+                        .frame(width: index == 1 ? 46 : 34, height: Skeleton.rowHeight)
+                    Spacer(minLength: 0)
+                    toggle(on: index == 1 && ticked)
+                }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            SkeletonPointer().offset(x: 4, y: 8)
+        }
+    }
+
+    private func toggle(on: Bool) -> some View {
+        Capsule()
+            .fill(on ? Skeleton.accent : Skeleton.line(0.16))
+            .frame(width: 18, height: 10)
+            .overlay(alignment: on ? .trailing : .leading) {
+                Circle()
+                    .fill(.white.opacity(on ? 0.95 : 0.6))
+                    .frame(width: 8, height: 8)
+                    .padding(1)
+            }
+    }
+
+    /// The grant having landed: a block of text with FlowPeek's frame around it.
+    private var working: some View {
+        VStack(alignment: .leading, spacing: Skeleton.rowGap) {
+            ForEach(0..<4, id: \.self) { index in
+                SkeletonRow(width: [0.5, 0.34, 0.28, 0.44][index], level: index == 1 || index == 2 ? 0.3 : 0.18)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(Skeleton.accent.opacity(0.9), lineWidth: 1.5)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Skeleton.accent.opacity(0.10))
+                )
+                .frame(height: 2 * Skeleton.rowHeight + Skeleton.rowGap + 6)
+                .overlay(alignment: .topTrailing) { SkeletonLabel().padding(2) }
+                .offset(y: CGFloat(Skeleton.rowHeight + Skeleton.rowGap) - 3)
+                .transition(.opacity)
+        }
+    }
+}
+
+// MARK: - Launch at login
+
+/// What the login switch buys: the menu bar already has FlowPeek in it when the Mac comes back.
+enum LaunchStage: Equatable, Sendable {
+    case bare
+    case arriving
+    case ready
+}
+
+struct LaunchScene: View {
+    static let script = SkeletonScript<LaunchStage>(
+        [
+            .init(.bare, 1.0),
+            .init(.arriving, 0.6),
+            .init(.ready, 1.8),
+        ],
+        resting: .ready
+    )
+
+    var size: CGSize = Skeleton.cardSize
+
+    var body: some View {
+        SkeletonPlayer(Self.script, initial: .bare) { stage in
+            VStack(spacing: 0) {
+                menuBar(stage)
+                // A screen under the bar, so the bar reads as the top of one. Without it the strip
+                // floated over a hundred and thirty points of nothing, which said "empty" where
+                // the card is saying "already there".
+                desktop(stage)
+            }
+            .frame(width: size.width, height: size.height)
+            .background(Skeleton.line(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Skeleton.line(0.14), lineWidth: 1)
+            )
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Two windows the user was already working in. Dim, and dimmer before the mark arrives: the
+    /// beat this card is about is the Mac coming back, and nothing else on screen is the subject.
+    private func desktop(_ stage: LaunchStage) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            window(rows: [0.7, 0.5, 0.6, 0.4])
+            window(rows: [0.5, 0.65, 0.45])
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .opacity(stage == .bare ? 0.5 : 1)
+    }
+
+    private func window(rows: [Double]) -> some View {
+        VStack(alignment: .leading, spacing: Skeleton.rowGap) {
+            ForEach(rows.indices, id: \.self) { index in
+                SkeletonRow(width: rows[index], level: 0.13)
+            }
+        }
+        .padding(7)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Skeleton.line(0.05), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(Skeleton.line(0.1), lineWidth: 1)
+        )
+    }
+
+    /// The bar is drawn as the real one is read: the app's own mark at the right-hand end, among
+    /// the other status items.
+    private func menuBar(_ stage: LaunchStage) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(Skeleton.line(0.2))
+                .frame(width: 8, height: 4)
+            Spacer(minLength: 0)
+            ForEach(0..<2, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Skeleton.line(0.16))
+                    .frame(width: 7, height: 4)
+            }
+            if stage != .bare {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Skeleton.accent)
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal, 7)
+        .frame(height: 15)
+        .background(Skeleton.line(0.08))
+    }
+}
+
+// MARK: - Welcome
+
+/// The three ways in, one after another over the same block: a selection with its button, a copy
+/// with its badge, and the pointer with its frame. The welcome card promises three, so it shows
+/// three rather than picking a favourite.
+enum WelcomeStage: Equatable, Sendable {
+    case select
+    case copy
+    case point
+}
+
+struct WelcomeScene: View {
+    static let script = SkeletonScript<WelcomeStage>(
+        [
+            .init(.select, 1.5),
+            .init(.copy, 1.5),
+            .init(.point, 1.5),
+        ],
+        resting: .point
+    )
+
+    private static let rows: [Double] = [0.46, 0.62, 0.34, 0.28, 0.50, 0.38]
+    private static let block = 1...3
+    private static let selectionWidth: CGFloat = 110
+
+    var size: CGSize = Skeleton.cardSize
+
+    var body: some View {
+        SkeletonPlayer(Self.script, initial: .select) { stage in
+            SkeletonWindow {
+                ZStack(alignment: .topTrailing) {
+                    VStack(alignment: .leading, spacing: Skeleton.rowGap) {
+                        ForEach(Self.rows.indices, id: \.self) { index in
+                            SkeletonRow(
+                                width: Self.rows[index],
+                                level: Self.block.contains(index) ? 0.34 : 0.18
+                            )
+                            .background(alignment: .leading) {
+                                if stage == .select, Self.block.contains(index) {
+                                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                        .fill(Skeleton.accent.opacity(0.22))
+                                        .frame(width: 110, height: 9)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    switch stage {
+                    case .select:
+                        // At the end of the selection, which is where the real button appears --
+                        // the highlight behind the rows is a fixed width, so this is the same
+                        // number rather than a guess about it.
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Skeleton.accent)
+                            .frame(width: 16, height: 13)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .offset(x: Self.selectionWidth + 4, y: CGFloat(Self.block.upperBound) * pitch)
+                    case .copy:
+                        SkeletonBadge()
+                    case .point:
+                        frame
+                    }
+                }
+            }
+            .frame(width: size.width, height: size.height)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var pitch: CGFloat { Skeleton.rowHeight + Skeleton.rowGap }
+
+    private var frame: some View {
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .strokeBorder(Skeleton.accent.opacity(0.9), lineWidth: 1.5)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Skeleton.accent.opacity(0.10))
+            )
+            .frame(height: CGFloat(Self.block.count) * Skeleton.rowHeight
+                + CGFloat(Self.block.count - 1) * Skeleton.rowGap + 6)
+            .overlay(alignment: .topLeading) {
+                SkeletonPointer().offset(x: 40, y: 12)
+            }
+            .offset(y: CGFloat(Self.block.lowerBound) * pitch - 3)
+            .transition(.opacity)
+    }
+}
+
+
+// MARK: - Where the app lives
+
+/// The last card's drawing: the mark in the menu bar, and the menu it opens.
+///
+/// A menu-bar app has no window to come back to, so the answer to "where did it go" is a place on
+/// screen rather than a sentence. The drawing points at that place and then opens what is there,
+/// because the menu is not only how the app is found -- it is where everything about it is changed.
+enum MenuBarStage: Equatable, Sendable {
+    case mark
+    case opened
+    case configuring
+}
+
+struct MenuBarScene: View {
+    static let script = SkeletonScript<MenuBarStage>(
+        [
+            .init(.mark, 1.2),
+            .init(.opened, 1.3),
+            .init(.configuring, 1.7),
+        ],
+        resting: .opened
+    )
+
+    var size: CGSize = Skeleton.cardSize
+
+    var body: some View {
+        SkeletonPlayer(Self.script, initial: .mark) { stage in
+            VStack(spacing: 0) {
+                menuBar(highlighted: stage != .mark)
+                if stage != .mark {
+                    menu(configuring: stage == .configuring)
+                        .padding(.trailing, 10)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: size.width, height: size.height)
+            .background(Skeleton.line(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Skeleton.line(0.14), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func menuBar(highlighted: Bool) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(Skeleton.line(0.2))
+                .frame(width: 8, height: 4)
+            Spacer(minLength: 0)
+            ForEach(0..<2, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Skeleton.line(0.16))
+                    .frame(width: 7, height: 4)
+            }
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Skeleton.accent)
+                .padding(.horizontal, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Skeleton.accent.opacity(highlighted ? 0.22 : 0))
+                )
+        }
+        .padding(.horizontal, 7)
+        .frame(height: 16)
+        .background(Skeleton.line(0.08))
+    }
+
+    /// The menu itself: a few rows and a switch, because what the card is saying is not "here is an
+    /// icon" but "everything is set from here". The switch moving is the whole claim.
+    private func menu(configuring: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(0..<4, id: \.self) { index in
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Skeleton.line(index == 1 && configuring ? 0.4 : 0.2))
+                        .frame(width: [34, 42, 28, 38][index], height: Skeleton.rowHeight)
+                    Spacer(minLength: 0)
+                    if index == 1 {
+                        // Outlined even when off. Unoutlined at nine points the capsule was the
+                        // same grey as the row behind it and all that read was the knob, which
+                        // looks like a bullet rather than a switch.
+                        Capsule()
+                            .fill(configuring ? Skeleton.accent : Skeleton.line(0.14))
+                            .frame(width: 18, height: 10)
+                            .overlay(Capsule().strokeBorder(Skeleton.line(0.22), lineWidth: 0.5))
+                            .overlay(alignment: configuring ? .trailing : .leading) {
+                                Circle()
+                                    .fill(.white.opacity(configuring ? 0.95 : 0.7))
+                                    .frame(width: 8, height: 8)
+                                    .padding(1)
+                            }
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .frame(width: 104)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Skeleton.line(0.18), lineWidth: 1)
+        )
     }
 }

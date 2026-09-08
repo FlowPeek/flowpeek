@@ -41,7 +41,7 @@
 "tutorial.clipboard.double-tap" = "Quicker still: press Option twice.";
 "tutorial.ambient.title" = "Point at it";
 "tutorial.ambient.detail" = "Hold Option and move the pointer over the diagram. It gets outlined; press %@ while still holding.";
-"tutorial.ambient.enable" = "Turn On Hold to Peek";
+"tutorial.ambient.enable" = "Turn On Hold-to-peek";
 "tutorial.restart" = "Start Over";
 "tutorial.page.intro.blocked" = "This is a real page in your own browser. The gestures below behave exactly as they will from now on — except the ones marked as switched off.";
 "tutorial.page.hint" = "Click the block once — or focus it and press Return — to select all of it. If you drag instead, start from its first line: a selection that starts lower down has lost the line FlowPeek reads first.";
@@ -62,6 +62,9 @@
 "tutorial.clipboard.blocked" = "Clipboard watching is switched off — turn on “%@” in Settings, under General, then open this page again.";
 "onboarding.launch.title" = "Ready When You Are";
 "onboarding.launch.message" = "FlowPeek lives in the menu bar and does nothing until you select or copy a diagram. Start it at login so it is already there.";
+"onboarding.menu-bar.title" = "FlowPeek lives up here";
+"onboarding.menu-bar.message" = "Its mark sits in the menu bar. Click it to pause detection, open Settings, rebind the shortcuts, or look back through the diagrams you have opened.";
+"onboarding.menu-bar.settings" = "Open Settings";
 "onboarding.launch.toggle" = "Open at login";
 "onboarding.launch.detail" = "Adds FlowPeek to your login items. You can change this any time in Settings.";
 "permission.granted" = "Permission granted";
@@ -119,7 +122,7 @@
 "settings.shortcuts.note" = "Global shortcuts need at least one of Command, Option, or Control, and win over the app you are working in.";
 "settings.double-tap" = "Press Option twice";
 "settings.double-tap.short" = "Tap Option twice, quickly, to open the diagram on the clipboard.";
-"settings.double-tap.description" = "Tap Option twice, quickly, to open the diagram on the clipboard. It claims no key: Option on its own does nothing, so nothing is taken from the app you are in. A press held down is the hold-to-peek gesture and never counts as a tap.";
+"settings.double-tap.description" = "Tap Option twice, quickly, to open the diagram on the clipboard. It claims no key: Option on its own does nothing, so nothing is taken from the app you are in. A press held down is the Hold-to-peek gesture and never counts as a tap.";
 "settings.double-tap.interval" = "How quickly";
 "settings.double-tap.milliseconds" = "%lld ms";
 "shortcut.preview-clipboard" = "Preview copied diagram";
@@ -127,10 +130,10 @@
 "shortcut.ai-prompt" = "Generate with AI";
 "shortcut.ai-prompt.detail" = "Sends the current selection to your provider as context. Only active while the AI experiment is on.";
 "shortcut.ambient-peek" = "Open the outlined diagram";
-"shortcut.ambient-peek.detail" = "Opens whatever the outline is around while you hold Option. Only taken from other apps while hold to peek is switched on.";
+"shortcut.ambient-peek.detail" = "Opens whatever the outline is around while you hold Option. Only taken from other apps while Hold-to-peek is switched on.";
 "shortcut.inactive.clipboard" = "Turn on “Watch the clipboard” in General to use this.";
 "shortcut.inactive.ai" = "Turn on AI Diagram Generation in the AI tab to use this.";
-"shortcut.inactive.ambient" = "Turn on “Hold to Peek” in General, and allow Accessibility, to use this.";
+"shortcut.inactive.ambient" = "Turn on “Hold-to-peek” in General, and allow Accessibility, to use this.";
 "shortcut.inactive.paused" = "Detection is paused. Turn it back on from the FlowPeek menu to use this.";
 "shortcut.history" = "Open the diagram shelf";
 "shortcut.history.detail" = "Raises the shelf of diagrams you have made, with the search field ready. Everything on it can be reached from the keyboard.";
@@ -152,7 +155,7 @@
 "settings.language.relaunch" = "FlowPeek needs to restart to change language.";
 "settings.language.relaunch.action" = "Restart Now";
 "settings.language.relaunch.title" = "Restart FlowPeek to change language?";
-"settings.ambient" = "Hold to peek";
+"settings.ambient" = "Hold-to-peek";
 "settings.ambient.short" = "Hold Option and point at a diagram: it gets outlined, and %@ opens it.";
 "settings.ambient.description" = "Hold Option and point at a diagram: FlowPeek outlines it and %@ opens it. Only reads while Option is down: what is under the pointer, and in an editor that exposes nothing there — VS Code and other Electron apps — the document it has open, anchored on the text cursor. Apps that draw their own text — a terminal rendering to a canvas, for one — expose nothing to read; copying still works there. It is a switch rather than always on: while it is on, that key belongs to FlowPeek instead of to whatever you are typing in.";
 "settings.ambient.needs-permission" = "Needs Accessibility permission before it can see anything.";

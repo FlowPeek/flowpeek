@@ -160,6 +160,9 @@ struct OnboardingView: View {
     @State private var step: Step
     @State private var permissionFlow = AccessibilityPermissionFlow(isGranted: false)
     @State private var nudge = false
+    /// A row the reader opened by hand, which wins over the checklist's own choice until the
+    /// lessons on offer change under it.
+    @State private var opened: TutorialProgress.Lesson?
     private let entry: OnboardingEntry
     let completion: () -> Void
     let close: () -> Void
@@ -198,14 +201,7 @@ struct OnboardingView: View {
             VStack(spacing: 0) {
                 header
                 VStack(spacing: 20) {
-                    ZStack {
-                        Circle().fill(Color.accentColor.opacity(0.13)).frame(width: 104, height: 104)
-                        Circle().stroke(Color.white.opacity(0.28), lineWidth: 1).frame(width: 104, height: 104)
-                        Image(systemName: step.symbol)
-                            .font(.system(size: 44, weight: .medium))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.tint)
-                    }
+                    stepScene
                     Text(String(localized: step.titleKey(allLessonsAvailable: allLessonsAvailable)))
                         .font(.system(size: 31, weight: .bold, design: .rounded))
                         .multilineTextAlignment(.center)
@@ -217,7 +213,9 @@ struct OnboardingView: View {
                     case .permission: permissionCard
                     case .launch: launchCard
                     case .tutorial: tutorialCard
-                    case .welcome: EmptyView()
+                    // Both of these say everything they have to say in the drawing above and the
+                    // two lines beside it; a card under them would be a box around nothing.
+                    case .welcome, .menuBar: EmptyView()
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -251,6 +249,39 @@ struct OnboardingView: View {
             }
             if app.accessibilityGranted { advancePastPermission() }
         }
+    }
+
+    /// The drawing above the card, which performs what the step is asking for rather than standing
+    /// for it. A glyph in a circle said "this step is about permission"; the drawing says which
+    /// switch, in which list, and what changes once it is on.
+    ///
+    /// The tutorial step has none: its checklist carries a drawing per lesson, and a second one
+    /// above them would be a fourth gesture nobody is being taught.
+    @ViewBuilder
+    private var stepScene: some View {
+        switch step {
+        case .welcome: WelcomeScene(size: Skeleton.stepSize)
+        case .permission: PermissionScene(size: Skeleton.stepSize)
+        case .launch: LaunchScene(size: Skeleton.stepSize)
+        case .menuBar: MenuBarScene(size: Skeleton.stepSize)
+        case .tutorial: EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func scene(for lesson: TutorialProgress.Lesson) -> some View {
+        switch lesson {
+        case .selection: SelectionScene(size: Skeleton.rowSize)
+        case .clipboard: ClipboardWatchScene(size: Skeleton.rowSize)
+        case .ambient: HoldToPeekScene(size: Skeleton.rowSize)
+        }
+    }
+
+    /// Which lesson is open. The checklist's own answer unless the reader has picked another row,
+    /// which they are allowed to do: looking ahead at what is coming is not a mistake to prevent.
+    private var shownLesson: TutorialProgress.Lesson? {
+        if let opened, availableLessons.contains(opened) { return opened }
+        return app.tutorial.focus(among: availableLessons, switches: app.tutorialSwitches)
     }
 
     private var header: some View {
@@ -370,74 +401,7 @@ struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(availableLessons) { lesson in
-                let state = app.tutorial[lesson]
-                let blocker = lesson.blocker(app.tutorialSwitches)
-                // Progress outlives the switch: somebody who passed this lesson and later turned
-                // turning hold to peek back off has still passed it, and hiding the tick behind an "off"
-                // badge would tell them otherwise.
-                let blocked = blocker != nil && state != .done
-                HStack(alignment: .top, spacing: 12) {
-                    // The badge carries the row's state for VoiceOver, which cannot see a stroke
-                    // colour: the lesson is its label and waiting/noticed/missed/done its value.
-                    stateBadge(state, blocked: blocked)
-                        .accessibilityElement()
-                        .accessibilityLabel(Text(String(localized: lesson.titleKey)))
-                        .accessibilityValue(Text(String(localized: blocked ? "tutorial.state.off" : state.titleKey)))
-                        .accessibilityAddTraits(state == .done ? [.isSelected] : [])
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(String(localized: lesson.titleKey))
-                            .font(.callout.weight(.semibold))
-                            // Already the badge's label; without this the lesson name is read twice.
-                            .accessibilityHidden(true)
-                        Text(lesson.detail(
-                            peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display,
-                            switches: app.tutorialSwitches
-                        ))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        // On the tick's own terms: a finished lesson keeps its checkmark, so it
-                        // must not also carry a line saying nothing is watching for it. Nor does a
-                        // row repeat the sentence already standing above the whole list.
-                        if blocked, let blocker, blocker != sharedBlocker {
-                            Text(blocker.reason)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        // The gesture happened and the text was refused. Says which part to change,
-                        // because the drag itself looked fine to the person who made it.
-                        if state == .missed, let missed = lesson.missedKey {
-                            Label(String(localized: missed), systemImage: "exclamationmark.circle")
-                                .font(.footnote)
-                                .foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        if nudge, blocker == nil, state == .waiting {
-                            Label(String(localized: lesson.nudgeKey), systemImage: "questionmark.circle")
-                                .font(.footnote)
-                                .foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        if blocked, blocker == .ambientPeekOff {
-                            // Prominent because it is not an aside: nothing in this row can happen
-                            // until it is pressed. Offered only where the reason line above it
-                            // appears — hold to peek is the switch actually in the way, and the
-                            // row still has something left to do. With detection paused, turning
-                            // it on changes nothing the user can see.
-                            Button(String(localized: TutorialProgress.Blocker.enableButtonTitleKey)) {
-                                app.enableAmbientPeek()
-                                // The page already in the browser still carries the sentence saying
-                                // this route is off, and that sentence is now wrong.
-                                if app.tutorialPracticeOpen { openPracticePage() }
-                            }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .padding(.top, 2)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
+                lessonRow(lesson)
                 if lesson != availableLessons.last || !app.accessibilityGranted {
                     Divider().opacity(0.4)
                 }
@@ -491,6 +455,114 @@ struct OnboardingView: View {
             nudge = true
         }
         .onChange(of: app.tutorial) { previous, current in announce(previous, current) }
+        // A row opened by hand is a choice about the list as it was. Granting permission adds two
+        // lessons and pausing detection takes them all away, and either way the checklist's own
+        // answer is the better one again.
+        .onChange(of: availableLessons) { _, _ in opened = nil }
+        .onChange(of: app.tutorialSwitches) { _, _ in opened = nil }
+    }
+
+    /// One checklist row.
+    ///
+    /// Its own function because the type checker gave up on the card as a single expression once
+    /// the drawing and the open-or-closed branch went into it.
+    @ViewBuilder
+    private func lessonRow(_ lesson: TutorialProgress.Lesson) -> some View {
+            let state = app.tutorial[lesson]
+            let blocker = lesson.blocker(app.tutorialSwitches)
+            // Progress outlives the switch: somebody who passed this lesson and later turned
+            // turning hold to peek back off has still passed it, and hiding the tick behind an "off"
+            // badge would tell them otherwise.
+            let blocked = blocker != nil && state != .done
+            // What the row shows depends on whether it is the one being worked on. Its name, its
+            // state, anything wrong with it and any switch it needs are always there -- those are
+            // the row's own facts, and hiding them behind a disclosure would put the one button
+            // that unblocks a route out of reach. The instructions and the drawing belong to the
+            // lesson at hand: three sets of instructions at once is three things to do, and three
+            // drawings is a card taller than the window.
+            let open = lesson == shownLesson
+            HStack(alignment: .top, spacing: 12) {
+                // The badge carries the row's state for VoiceOver, which cannot see a stroke
+                // colour: the lesson is its label and waiting/noticed/missed/done its value.
+                stateBadge(state, blocked: blocked)
+                    .accessibilityElement()
+                    .accessibilityLabel(Text(String(localized: lesson.titleKey)))
+                    .accessibilityValue(Text(String(localized: blocked ? "tutorial.state.off" : state.titleKey)))
+                    .accessibilityAddTraits(state == .done ? [.isSelected] : [])
+                lessonBody(lesson, state: state, blocker: blocker, blocked: blocked, open: open)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            // Looking ahead is not a mistake to prevent. A closed row opens on a tap; the open
+            // one closing again would leave the checklist with nothing to do next, so it stays.
+            .onTapGesture { if !open { opened = lesson } }
+    }
+
+    @ViewBuilder
+    private func lessonBody(
+        _ lesson: TutorialProgress.Lesson,
+        state: TutorialProgress.State,
+        blocker: TutorialProgress.Blocker?,
+        blocked: Bool,
+        open: Bool
+    ) -> some View {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(String(localized: lesson.titleKey))
+                        .font(.callout.weight(.semibold))
+                        // Already the badge's label; without this the lesson name is read twice.
+                        .accessibilityHidden(true)
+                    if open {
+                        Text(lesson.detail(
+                            peekShortcut: app.shortcuts.shortcuts[.ambientPeek].display,
+                            switches: app.tutorialSwitches
+                        ))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    // On the tick's own terms: a finished lesson keeps its checkmark, so it
+                    // must not also carry a line saying nothing is watching for it. Nor does a
+                    // row repeat the sentence already standing above the whole list.
+                    if blocked, let blocker, blocker != sharedBlocker {
+                        Text(blocker.reason)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    // The gesture happened and the text was refused. Says which part to change,
+                    // because the drag itself looked fine to the person who made it.
+                    if state == .missed, let missed = lesson.missedKey {
+                        Label(String(localized: missed), systemImage: "exclamationmark.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    // Only on the row being worked on. A prompt on a row further down the list
+                    // is about a gesture the reader has not got to yet.
+                    if nudge, open, blocker == nil, state == .waiting {
+                        Label(String(localized: lesson.nudgeKey), systemImage: "questionmark.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if open { scene(for: lesson).padding(.top, 5) }
+                    if blocked, blocker == .ambientPeekOff {
+                        // Prominent because it is not an aside: nothing in this row can happen
+                        // until it is pressed. Offered only where the reason line above it
+                        // appears — hold to peek is the switch actually in the way, and the
+                        // row still has something left to do. With detection paused, turning
+                        // it on changes nothing the user can see.
+                        Button(String(localized: TutorialProgress.Blocker.enableButtonTitleKey)) {
+                            app.enableAmbientPeek()
+                            // The page already in the browser still carries the sentence saying
+                            // this route is off, and that sentence is now wrong.
+                            if app.tutorialPracticeOpen { openPracticePage() }
+                        }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .padding(.top, 2)
+                    }
+                }
     }
 
     /// Waiting, noticed, missed, opened — plus the row that cannot report anything because its
@@ -628,10 +700,27 @@ struct OnboardingView: View {
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
                         } else {
-                            Button(app.tutorial.isComplete(among: availableLessons) ? "common.start" : "tutorial.skip") { completion() }
+                            // Forward rather than finished. Whether the lessons were worked
+                            // through or skipped, the window has still never said where the app
+                            // itself is -- and a menu-bar app that does not is one the user cannot
+                            // find again.
+                            Button(app.tutorial.isComplete(among: availableLessons) ? "common.continue" : "tutorial.skip") {
+                                step = .menuBar
+                            }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
                         }
+                    }
+                case .menuBar:
+                    HStack(spacing: 10) {
+                        // Offered, not insisted on: the card's whole point is that this is reachable
+                        // from the menu bar from now on, and a user who wants to look now should not
+                        // have to find it twice.
+                        Button("onboarding.menu-bar.settings") { SettingsWindowCoordinator.shared.show() }
+                            .controlSize(.large)
+                        Button("common.start") { completion() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
                     }
                 }
             }

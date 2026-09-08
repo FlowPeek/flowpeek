@@ -322,6 +322,22 @@ public struct TutorialProgress: Equatable, Sendable {
     public mutating func reset() {
         states.removeAll()
     }
+
+    /// Which lesson the checklist should be showing in full — its drawing and its instructions —
+    /// and nil when there is nothing left to be shown.
+    ///
+    /// One at a time. The checklist used to print all three sets of instructions at once, which is
+    /// three things to do at a moment when the answer is "do this one"; and with a drawing under
+    /// each of them it would be a card taller than the window. A sequence is what the tutorial
+    /// already is, so the card can say so.
+    ///
+    /// The first lesson still to pass that something is actually listening for: a blocked row
+    /// cannot be practised however much it is explained, and a finished one has nothing left to
+    /// say. Nil when every lesson is done or every one left is blocked, which is what lets the card
+    /// show its finished state rather than a drawing of something that cannot happen.
+    public func focus(among lessons: [Lesson], switches: Switches) -> Lesson? {
+        lessons.first { self[$0] != .done && $0.canFire(switches) }
+    }
 }
 
 /// Codable in terms of the same flat dictionary the tutorial stores, so a progress value carried

@@ -188,7 +188,7 @@ final class OnboardingStepTests: XCTestCase {
     func testTheHeaderCountsEveryStepWhilePermissionIsStillOpen() {
         XCTAssertEqual(
             OnboardingStep.visible(accessibilityGranted: false, current: .welcome),
-            [.welcome, .permission, .launch, .tutorial]
+            [.welcome, .permission, .launch, .tutorial, .menuBar]
         )
     }
 
@@ -196,14 +196,14 @@ final class OnboardingStepTests: XCTestCase {
     func testTheHeaderDropsTheStepItIsGoingToSkip() {
         XCTAssertEqual(
             OnboardingStep.visible(accessibilityGranted: true, current: .tutorial),
-            [.welcome, .launch, .tutorial]
+            [.welcome, .launch, .tutorial, .menuBar]
         )
     }
 
     func testTheSkippedStepGetsItsDotBackWhileTheUserStandsOnIt() {
         XCTAssertEqual(
             OnboardingStep.visible(accessibilityGranted: true, current: .permission),
-            [.welcome, .permission, .launch, .tutorial]
+            [.welcome, .permission, .launch, .tutorial, .menuBar]
         )
     }
 
@@ -213,7 +213,7 @@ final class OnboardingStepTests: XCTestCase {
     func testTheRefusedPermissionQuestionKeepsItsDotBecauseBackStillReachesIt() {
         XCTAssertEqual(
             OnboardingStep.visible(accessibilityGranted: false, current: .launch),
-            [.welcome, .permission, .launch, .tutorial]
+            [.welcome, .permission, .launch, .tutorial, .menuBar]
         )
     }
 
@@ -230,6 +230,14 @@ final class OnboardingStepTests: XCTestCase {
                 )
             }
         }
+    }
+
+    /// The last card is the one everybody reaches: the tutorial can be finished or skipped, and a
+    /// menu-bar app that never says where it went is an app the user cannot find again.
+    func testTheMenuBarCardComesAfterTheTutorialAndBackReachesIt() {
+        XCTAssertEqual(OnboardingStep.allCases.last, .menuBar)
+        XCTAssertEqual(OnboardingStep.menuBar.previous(accessibilityGranted: true), .tutorial)
+        XCTAssertEqual(OnboardingStep.menuBar.previous(accessibilityGranted: false), .tutorial)
     }
 
     /// "Try All Three" above a single clipboard row is copy the card itself contradicts.

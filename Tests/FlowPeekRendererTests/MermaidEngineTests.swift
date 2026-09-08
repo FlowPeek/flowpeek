@@ -275,8 +275,16 @@ final class MermaidEngineTests: XCTestCase {
         XCTAssertEqual(failures, [], "adversarial corpus breach:\n" + failures.joined(separator: "\n"))
     }
 
-    /// The `secure` list at flowpeek-glue.js:9 is the only thing standing between an untrusted
-    /// `%%{init:…}%%` and re-enabled foreignObject labels, so assert the key set itself, not a substring.
+    /// The `secure` list in flowpeek-glue.js is the only thing standing between an untrusted
+    /// `%%{init:…}%%` and re-enabled foreignObject labels, so assert the key set itself, not a
+    /// substring.
+    ///
+    /// Two keys are deliberately *not* on it, and that is asserted here too. Choosing a palette is
+    /// the whole point of Mermaid's theming, and locking `theme` and `themeVariables` made every
+    /// `%%{init: {"theme": …}}%%` and every front-matter `config: theme:` silently do nothing.
+    /// They are values rather than code, and the values are scrubbed on the way into the kept
+    /// `<style>` element -- `themeCSS`, which is raw CSS, stays locked. Asserting the absence is
+    /// what stops somebody "tightening" the list back up and quietly breaking theming again.
     func testUntrustedDirectivesCannotReopenTheSecuredConfigurationKeys() async throws {
         let engine = try Self.pool.checkOut()
         defer { Self.pool.checkIn(engine) }
@@ -294,6 +302,7 @@ final class MermaidEngineTests: XCTestCase {
               securityLevel: cfg.securityLevel,
               htmlLabels: cfg.htmlLabels,
               theme: cfg.theme,
+              themeCSS: cfg.themeCSS || "",
               fontFamily: cfg.fontFamily,
               look: cfg.look,
               layout: cfg.layout
@@ -303,12 +312,25 @@ final class MermaidEngineTests: XCTestCase {
         let audit = try XCTUnwrap(json.map { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: Any])
 
         let secure = try XCTUnwrap(audit["secure"] as? [String])
-        for key in ["htmlLabels", "theme", "themeVariables", "themeCSS", "fontFamily", "altFontFamily", "layout", "look"] {
+        for key in ["htmlLabels", "themeCSS", "fontFamily", "altFontFamily", "layout", "look"] {
             XCTAssertTrue(secure.contains(key), "`\(key)` fell out of the secure list: \(secure)")
+        }
+        for key in ["theme", "themeVariables"] {
+            XCTAssertFalse(
+                secure.contains(key),
+                "`\(key)` was locked again, which silently stops every theme directive: \(secure)"
+            )
         }
         XCTAssertEqual(audit["securityLevel"] as? String, "strict")
         XCTAssertEqual(audit["htmlLabels"] as? Bool, false)
-        XCTAssertEqual(audit["theme"] as? String, "base")
+        // The palette the directive asked for, because that is the behaviour the two open keys buy.
+        XCTAssertEqual(audit["theme"] as? String, "forest")
+        // And the raw CSS in the same directive, which is locked, got nowhere. Not empty: FlowPeek
+        // sets a stylesheet of its own here, which is exactly why the key stays locked -- a
+        // directive that could write it would be replacing the app's own rules with anything.
+        let themeCSS = try XCTUnwrap(audit["themeCSS"] as? String)
+        XCTAssertFalse(themeCSS.contains("display:none"), "the directive's raw CSS reached themeCSS")
+        XCTAssertTrue(themeCSS.contains("stroke-width"), "FlowPeek's own stylesheet went missing")
         XCTAssertEqual(audit["fontFamily"] as? String, MacMermaidTheme.systemFontStack)
         XCTAssertNotEqual(audit["look"] as? String, "handDrawn")
         XCTAssertNotEqual(audit["layout"] as? String, "elk")

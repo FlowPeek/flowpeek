@@ -34,6 +34,23 @@ final class PreviewLifecycleTests: XCTestCase {
         }
     }
 
+    /// Waits for the engine to actually draw.
+    ///
+    /// `showQuick` opens a panel and hands the source to a `WKWebView`; the drawing lands a render
+    /// later. `visibleSurface` deliberately refuses to call an undrawn panel a diagram -- an engine
+    /// can turn down a source that passed validation, and what stands in the panel then is an
+    /// apology -- so a test that wants the diagram has to wait for it exactly as the app does.
+    private func waitForDiagram(
+        _ coordinator: PreviewCoordinator,
+        within seconds: TimeInterval = 15
+    ) async throws {
+        let deadline = Date() + seconds
+        while coordinator.visibleSurface != .diagram {
+            guard Date() < deadline else { return XCTFail("the diagram never drew") }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     func testAQuickPreviewTakenWhileAWindowIsOpenStillReturnsItsEngine() throws {
         let scope = WindowScope()
         let pool = MermaidWebViewPool()
@@ -131,7 +148,7 @@ final class PreviewLifecycleTests: XCTestCase {
     /// heard the slot empty out would read FlowPeek's apology as a diagram the user finished with.
     /// The report says which of the two went away, because the only thing FlowPeek ever asks of a
     /// user has to follow the one and never the other.
-    func testTheReportSaysWhetherTheSlotHeldADiagramOrAFailure() throws {
+    func testTheReportSaysWhetherTheSlotHeldADiagramOrAFailure() async throws {
         let scope = WindowScope()
         let pool = MermaidWebViewPool()
         pool.warmUp()
@@ -140,6 +157,7 @@ final class PreviewLifecycleTests: XCTestCase {
         coordinator.onVisibleSurfaceChange = { reported.append($0) }
 
         coordinator.showQuick(document: try document("drawn"))
+        try await waitForDiagram(coordinator)
         XCTAssertEqual(coordinator.visibleSurface, .diagram)
         coordinator.closeQuick()
 
@@ -148,14 +166,17 @@ final class PreviewLifecycleTests: XCTestCase {
         XCTAssertTrue(coordinator.hasVisibleSurface, "the notice is still something the user is reading")
         coordinator.closeQuick()
 
-        XCTAssertEqual(reported, [.diagram, .none, .message, .none])
+        // The first entry is the panel before anything has drawn in it, which `resolve` calls a
+        // message on purpose: an engine can turn down a source that passed validation, and the
+        // only favour this app ever asks must not follow a preview that never drew.
+        XCTAssertEqual(reported, [.message, .diagram, .none, .message, .none])
         scope.previews.forEach { $0.close() }
     }
 
     /// Promoting empties the quick slot for an instant before the window arrives, so the report
     /// carries a diagram leaving that nobody closed. Anything acting on one has to survive the beat
     /// and hear the window land.
-    func testPromotingReportsTheGapAndThenTheWindow() throws {
+    func testPromotingReportsTheGapAndThenTheWindow() async throws {
         let scope = WindowScope()
         let pool = MermaidWebViewPool()
         pool.warmUp()
@@ -164,11 +185,15 @@ final class PreviewLifecycleTests: XCTestCase {
         coordinator.onVisibleSurfaceChange = { reported.append($0) }
 
         coordinator.showQuick(document: try document("promoted"))
+        try await waitForDiagram(coordinator)
         coordinator.promote()
-        XCTAssertEqual(reported, [.diagram, .none, .diagram])
         XCTAssertEqual(coordinator.visibleSurface, .diagram)
 
+        // `.diagram, .none, .diagram` in the middle is the gap this test exists for: the quick
+        // slot empties before the window arrives, so anything acting on a diagram leaving has to
+        // survive the beat and hear the window land.
+        XCTAssertEqual(reported, [.message, .diagram, .none, .diagram])
         try scope.preview(titled: "promoted").close()
-        XCTAssertEqual(reported, [.diagram, .none, .diagram, .none])
+        XCTAssertEqual(reported, [.message, .diagram, .none, .diagram, .none])
     }
 }

@@ -79,6 +79,21 @@ jobs:
           set -euo pipefail
           swift test
           node Scripts/conformance.mjs
+          # The app-hosted suite, which `swift test` cannot reach: its tests run inside
+          # FlowPeek.app because what they exercise only exists there -- the bundled mermaid, the
+          # localization catalogues that `String(localized:)` resolves against, a real WKWebView
+          # and real preview windows. It was outside the release path until now, and the golden
+          # SVGs went two glue changes stale without anything noticing.
+          #
+          # Signing is off because this step runs before the certificate is imported, and none of
+          # these tests needs an entitlement. Verified: a tampered golden exits 65.
+          xcodebuild test -quiet \
+            -project FlowPeek.xcodeproj \
+            -scheme FlowPeek \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -only-testing:FlowPeekRendererTests \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Assert the checked-in project matches the generator
         run: |

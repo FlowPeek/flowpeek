@@ -138,7 +138,7 @@ public enum DocumentCaretSlicer {
         var index = 0
         var sawFence = false
         while index < lines.count {
-            guard let open = fenceOpen(lines[index].text) else {
+            guard let open = MarkdownFence.open(lines[index].text) else {
                 index += 1
                 continue
             }
@@ -218,31 +218,7 @@ public enum DocumentCaretSlicer {
         )
     }
 
-    private struct FenceOpen {
-        let marker: Character
-        let mayHoldMermaid: Bool
-    }
-
-    /// Mirrors the detector's own fence parsing, on a single line at a time. Indentation is
-    /// tolerated: a fenced block inside a list item is indented and is still a fenced block.
-    private static func fenceOpen(_ line: String) -> FenceOpen? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard let marker = trimmed.first, marker == "`" || marker == "~" else { return nil }
-        let run = trimmed.prefix { $0 == marker }
-        guard run.count >= 3 else { return nil }
-        let info = trimmed.dropFirst(run.count)
-            .trimmingCharacters(in: .whitespaces)
-            .prefix { !$0.isWhitespace }
-            .lowercased()
-        // An untagged fence is worth reading -- a diagram pasted into a plain block is ordinary --
-        // and the detector's confidence gate is what turns down a block of shell script.
-        return FenceOpen(marker: marker, mayHoldMermaid: info.isEmpty || info == "mermaid" || info == "mmd")
-    }
-
     private static func closingFenceIndex(_ lines: [Line], after index: Int, marker: Character) -> Int? {
-        lines.indices.dropFirst(index + 1).first { position in
-            let line = lines[position].text.trimmingCharacters(in: .whitespaces)
-            return line.count >= 3 && line.allSatisfy { $0 == marker }
-        }
+        lines.indices.dropFirst(index + 1).first { MarkdownFence.closes(lines[$0].text, marker: marker) }
     }
 }

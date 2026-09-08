@@ -41,6 +41,15 @@ final class AppState: ObservableObject {
     @Published var ambientPeekEnabled = Defaults.bool(.ambientEnabled, default: false) {
         didSet { Defaults.set(ambientPeekEnabled, .ambientEnabled) }
     }
+    /// Outline a diagram the moment it appears in the terminal the user is reading. On by default,
+    /// unlike hold to peek: it claims no key from any other app and reads only the three terminals
+    /// that expose their buffer, and only while one of them is frontmost.
+    @Published var terminalPeekEnabled = Defaults.bool(.terminalEnabled, default: true) {
+        didSet {
+            Defaults.set(terminalPeekEnabled, .terminalEnabled)
+            applyEnabledState()
+        }
+    }
     /// Press Option twice to open the copied diagram. On by default, unlike hold to peek: this
     /// registers no hot key and takes nothing from any other app, because Option on its own already
     /// does nothing. It only watches.
@@ -126,8 +135,14 @@ final class AppState: ObservableObject {
     let previews = PreviewCoordinator()
     let clipboard = ClipboardMonitor()
     let ambient = AmbientPeekMonitor()
+    let terminalPeek = TerminalPeekMonitor()
     let doubleTap = DoubleTapMonitor()
     let highlight = AmbientHighlightCoordinator()
+    /// Its own panels rather than the one the pointer route uses: the two routes can be raised by
+    /// unrelated events milliseconds apart, and sharing a panel would mean one route's dismissal
+    /// taking down the other's frame. The terminal watch stands down while the pointer route is
+    /// engaged, so they are never both on screen.
+    let terminalHighlight = TerminalOutlineCoordinator()
     let indicator = ClipboardIndicatorCoordinator()
     let starNotice = StarNudgeNoticeCoordinator()
     let shortcuts = ShortcutCenter()
@@ -155,6 +170,8 @@ final class AppState: ObservableObject {
     private var copied: MermaidSource?
     /// The block the ambient outline is currently drawn around, in memory only.
     private var ambientCandidate: AmbientCandidate?
+    /// The blocks the terminal outlines are currently drawn around, in memory only.
+    private var terminalCandidates: [AmbientCandidate] = []
 
     private init() {
         // The status item is drawn from `menuBarStatus` the moment the scene is built, which is
@@ -172,6 +189,12 @@ final class AppState: ObservableObject {
         // so the app has demonstrably worked and the screen it was covering is theirs again.
         previews.onVisibleSurfaceChange = { [weak self] surface in
             self?.previewSurfaceDidChange(surface)
+        }
+        // Wired here rather than in `start()` for the same reason the two above are: a preview can
+        // open from the demo arguments and from the AI window without the monitors ever starting,
+        // and an outline left over a diagram would be drawn on top of it.
+        previews.onPanelPresenceChange = { [weak self] onScreen in
+            self?.terminalPeek.suppress(.preview, onScreen)
         }
         starNotice.onStar = { [weak self] in self?.openRepository() }
         // The question is spent when it has been in front of the user, not when it was ordered on
@@ -209,6 +232,8 @@ final class AppState: ObservableObject {
         if clipboard != clipboardWatchEnabled { clipboardWatchEnabled = clipboard }
         let ambient = Defaults.bool(.ambientEnabled, default: false)
         if ambient != ambientPeekEnabled { ambientPeekEnabled = ambient }
+        let terminal = Defaults.bool(.terminalEnabled, default: true)
+        if terminal != terminalPeekEnabled { terminalPeekEnabled = terminal }
         let tap = Defaults.bool(.doubleTapEnabled, default: true)
         if tap != doubleTapEnabled { doubleTapEnabled = tap }
         let tapInterval = ModifierDoubleTap.clamp(
@@ -235,6 +260,7 @@ final class AppState: ObservableObject {
             case permissionDeclined = "flowpeek.permission.declined"
             case clipboardEnabled = "flowpeek.clipboard.enabled"
             case ambientEnabled = "flowpeek.ambient.enabled"
+            case terminalEnabled = "flowpeek.terminal.enabled"
             case doubleTapEnabled = "flowpeek.doubleTap.enabled"
             case doubleTapInterval = "flowpeek.doubleTap.interval"
             case aiEnabled = "flowpeek.ai.enabled"
@@ -343,9 +369,20 @@ final class AppState: ObservableObject {
         ambient.onDismiss = { [weak self] in
             self?.highlight.hide()
             self?.ambientCandidate = nil
+            self?.terminalPeek.suppress(.pointerRoute, false)
         }
         ambient.onActivate = { [weak self] in self?.previewAmbient() }
+        ambient.defersToTerminalWatch = { [weak self] application in
+            guard let self, isEnabled, terminalPeekEnabled, accessibilityGranted else { return false }
+            return TerminalApp(bundleIdentifier: application.bundleIdentifier) != nil
+        }
         highlight.onActivate = { [weak self] in self?.previewAmbient() }
+        terminalPeek.onCandidates = { [weak self] candidates in self?.receiveTerminal(candidates) }
+        terminalPeek.onDismiss = { [weak self] in
+            self?.terminalHighlight.hide()
+            self?.terminalCandidates = []
+        }
+        terminalHighlight.onActivate = { [weak self] index in self?.previewTerminal(at: index) }
         shortcuts.handlers = [
             .aiPrompt: { [weak self] in self?.presentAIPrompt() },
             .previewClipboard: { [weak self] in self?.previewCopied() },
@@ -387,10 +424,12 @@ final class AppState: ObservableObject {
         selectionMonitor.stop()
         clipboard.stop()
         ambient.stop()
+        terminalPeek.stop()
         doubleTap.stop()
         shortcuts.unregisterAll()
         indicator.hide()
         highlight.hide()
+        terminalHighlight.hide()
         starCheck?.cancel()
         starCheck = nil
         starNotice.hide()
@@ -434,10 +473,18 @@ final class AppState: ObservableObject {
         } else {
             ambient.stop()
         }
+        // The terminal watch reads the accessibility tree too, and polls only while one of the
+        // terminals it can read is frontmost.
+        if isEnabled && terminalPeekEnabled && accessibilityGranted {
+            terminalPeek.start()
+        } else {
+            terminalPeek.stop()
+        }
         if !isEnabled {
             overlay.hide()
             indicator.hide()
             highlight.hide()
+            terminalHighlight.hide()
         }
         // Also the one place that claims and releases the global hot keys: a registered hot key is
         // taken from every other app, so a shortcut whose feature is switched off must not hold one.
@@ -848,7 +895,7 @@ final class AppState: ObservableObject {
     }
 
     private func showCopied(_ source: MermaidSource) {
-        noteDiagramOpened(.clipboard, source: source)
+        noteDiagramOpened(.clipboard, lesson: .clipboard, source: source)
         previews.showQuick(
             document: DiagramDocument(title: String(localized: "diagram.clipboard-title"), source: source)
         )
@@ -871,13 +918,15 @@ final class AppState: ObservableObject {
     /// here; how much use the app has had belongs to the drawing, which has not happened yet and may
     /// not happen at all -- a source that passes validation can still be refused by the engine, and
     /// what opens for it is an apology.
-    private func noteDiagramOpened(_ lesson: TutorialProgress.Lesson, source: MermaidSource) {
-        tutorial.noteOpened(lesson)
-        let origin: DiagramOrigin = switch lesson {
-        case .selection: .selection
-        case .clipboard: .clipboard
-        case .ambient: .ambient
-        }
+    /// `lesson` is nil for a route the tutorial does not teach. The terminal watch is one: it needs
+    /// nothing learned -- the outline appears on its own -- so there is no step to tick, while the
+    /// diagram it opened still belongs in the history under its own name.
+    private func noteDiagramOpened(
+        _ origin: DiagramOrigin,
+        lesson: TutorialProgress.Lesson?,
+        source: MermaidSource
+    ) {
+        if let lesson { tutorial.noteOpened(lesson) }
         pending = Pending(origin: origin, source: source.text)
     }
 
@@ -1031,9 +1080,12 @@ final class AppState: ObservableObject {
     /// An outline is only ever drawn; opening the diagram still takes a deliberate key or click.
     func receiveAmbient(_ candidate: AmbientCandidate) {
         guard isEnabled, ambientPeekEnabled else { return }
+        // The pointer route wins: the user is holding a key down for it. Suppressing rather than
+        // hiding also stops the terminal watch putting its frame straight back on the next poll.
+        terminalPeek.suppress(.pointerRoute, true)
         ambientCandidate = candidate
         tutorial.noteDetected(.ambient)
-        highlight.show(candidate, shortcut: shortcuts.shortcuts[.ambientPeek].display)
+        highlight.show(candidate, chip: shortcuts.shortcuts[.ambientPeek].display)
         logger.debug(
             """
             ambient candidate: \(candidate.detection.diagramKeyword ?? "unknown", privacy: .public) \
@@ -1041,6 +1093,45 @@ final class AppState: ObservableObject {
             box \(Int(candidate.bounds.width), privacy: .public)x\(Int(candidate.bounds.height), privacy: .public)
             """
         )
+    }
+
+    /// The terminal watch found diagrams on screen. Only outlines are drawn: opening one still
+    /// takes a deliberate click, exactly as the pointer route does.
+    func receiveTerminal(_ candidates: [AmbientCandidate]) {
+        guard isEnabled, terminalPeekEnabled, ambientCandidate == nil else { return }
+        // Trimmed here as well as in the coordinator, so the stored list and what is on screen
+        // agree: an activation arrives as an index into the frames that were drawn.
+        terminalCandidates = Array(candidates.prefix(TerminalOutlineCoordinator.maximumOutlines))
+        // The pill says what to do with the frame rather than naming a chord to press elsewhere.
+        // Nothing is registered for this route -- it raises the outline on its own, so there is no
+        // key already held down to press a second one with -- and the frame itself is the target:
+        // hold Option and click the block.
+        terminalHighlight.show(terminalCandidates, chip: AmbientHighlightCoordinator.armedChip)
+        logger.debug(
+            """
+            \(self.terminalCandidates.count, privacy: .public) terminal candidate(s) in \
+            \(candidates.first?.applicationName ?? "unknown", privacy: .public)
+            """
+        )
+    }
+
+    func previewTerminal(at index: Int) {
+        terminalHighlight.hide()
+        guard terminalCandidates.indices.contains(index) else { return }
+        let candidate = terminalCandidates[index]
+        terminalCandidates = []
+        let title = String(localized: "preview.error.title")
+        do {
+            let source = try MermaidSource(rawValue: candidate.detection.extractedSource)
+            noteDiagramOpened(.terminal, lesson: nil, source: source)
+            previews.showQuick(
+                document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source)
+            )
+        } catch let error as MermaidSource.ValidationError {
+            previews.showMessage(title: title, message: localizedUserMessage(error))
+        } catch {
+            previews.showMessage(title: title, message: error.localizedDescription)
+        }
     }
 
     /// The tutorial's third lesson needs the experiment on; offering it there is friendlier than
@@ -1090,7 +1181,7 @@ final class AppState: ObservableObject {
         let title = String(localized: "preview.error.title")
         do {
             let source = try MermaidSource(rawValue: candidate.detection.extractedSource)
-            noteDiagramOpened(.ambient, source: source)
+            noteDiagramOpened(.ambient, lesson: .ambient, source: source)
             previews.showQuick(
                 document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source)
             )
@@ -1112,7 +1203,7 @@ final class AppState: ObservableObject {
         let detection = cached ?? MermaidDetector.detect(snapshot.text)
         do {
             let source = try MermaidSource(rawValue: detection.extractedSource)
-            noteDiagramOpened(.selection, source: source)
+            noteDiagramOpened(.selection, lesson: .selection, source: source)
             previews.showQuick(document: DiagramDocument(title: String(localized: "diagram.default-title"), source: source))
         } catch let error as MermaidSource.ValidationError {
             previews.showMessage(title: title, message: localizedUserMessage(error))
@@ -1231,16 +1322,18 @@ final class AppState: ObservableObject {
         // the moment the grant arrives is exactly that case.
         refreshMenuBarStatus()
         guard changed else { return }
-        // Both AX monitors install global event monitors while trusted and keep them after the
+        // Every AX monitor installs global event monitors while trusted and keeps them after the
         // grant is gone, delivering nothing; and a monitor installed untrusted stays deaf even once
-        // the switch is on. Tearing both down and letting `applyEnabledState()` decide which to
+        // the switch is on. Tearing them all down and letting `applyEnabledState()` decide which to
         // start again is what makes a re-grant revive every route rather than only the selection
-        // one, and a revoke stop the outline as well as the button.
+        // one, and a revoke stop the outlines as well as the button.
         selectionMonitor.stop()
         ambient.stop()
+        terminalPeek.stop()
         if !granted {
             forgetSelection()
             highlight.hide()
+            terminalHighlight.hide()
         }
         applyEnabledState()
         // The two directions want different cadences, and this is where the direction changes.

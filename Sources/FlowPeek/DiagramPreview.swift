@@ -640,6 +640,17 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
 
     var hasVisibleSurface: Bool { visibleSurface != .none }
 
+    /// Fired when a preview panel appears or goes, drawn or not.
+    var onPanelPresenceChange: ((Bool) -> Void)?
+
+    /// Whether any preview panel is on screen at all.
+    ///
+    /// Deliberately not `hasVisibleSurface`, which waits for a diagram to have been drawn. An
+    /// overlay that has to get out of a panel's way -- the terminal watch's outline draws at
+    /// pop-up-menu level, above every ordinary window -- has to move when the panel appears, not
+    /// when its contents arrive, or it spends the render sitting on top of it.
+    var hasPanel: Bool { quickPanel != nil || !promoted.isEmpty }
+
     /// What is drawn right now, so a caller that wants to file it does not have to have kept a copy
     /// from the moment it asked for the preview.
     var shownDiagram: (title: String, source: String, picture: DiagramExporter.Request?)? {
@@ -666,8 +677,14 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     /// dismissed by hand also arrives again through `windowWillClose` — and a listener should hear
     /// about the answer changing, not about each write that leaves it where it was.
     private var reportedSurface: PreviewSurface = .none
+    private var reportedPanel = false
 
     private func reportVisibleSurface() {
+        let panel = hasPanel
+        if panel != reportedPanel {
+            reportedPanel = panel
+            onPanelPresenceChange?(panel)
+        }
         let surface = visibleSurface
         guard surface != reportedSurface else { return }
         reportedSurface = surface

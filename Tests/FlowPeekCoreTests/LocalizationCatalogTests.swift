@@ -36,7 +36,7 @@ final class LocalizationCatalogTests: XCTestCase {
     /// The ambient hint picks its keys in `FlowPeekCore`, where no catalogue is in reach and a
     /// missing translation would ship as the raw key over somebody else's window.
     func testTheAmbientHintsKeysAreDefinedInEveryLanguage() throws {
-        let needed = [AmbientCandidate.Anchor.pointer, .caret]
+        let needed = AmbientCandidate.Anchor.allCases
             .flatMap { [$0.hintHelpKey, $0.hintNoteKey].compactMap { $0 } }
         for language in Self.languages {
             let keys = Set(try Self.keys(of: language))

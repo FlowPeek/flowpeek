@@ -8,15 +8,18 @@ public struct AmbientCandidate: Equatable, Sendable {
     /// which line the pointer is over, so the diagram is taken from the caret instead and the
     /// rectangle is the caret's line or the pane around it. The hint has to say so rather than let
     /// the frame imply it is drawn around the diagram.
-    public enum Anchor: Equatable, Sendable {
+    public enum Anchor: Equatable, Sendable, CaseIterable {
         case pointer
         case caret
+        /// A block the terminal watch found on screen on its own, with nothing held down and
+        /// nothing pointed at. The frame is around the rows the diagram occupies.
+        case terminal
 
         /// The catalogue key for the note the hint carries beside the diagram's own keyword, or nil
         /// when the frame really is around the block and there is nothing to qualify.
         public var hintNoteKey: String? {
             switch self {
-            case .pointer: nil
+            case .pointer, .terminal: nil
             case .caret: "ambient.hint.caret"
             }
         }
@@ -30,6 +33,7 @@ public struct AmbientCandidate: Equatable, Sendable {
             switch self {
             case .pointer: "ambient.hint.help"
             case .caret: "ambient.hint.help.caret"
+            case .terminal: "terminal.hint.help"
             }
         }
     }

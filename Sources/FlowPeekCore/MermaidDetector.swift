@@ -409,7 +409,10 @@ public enum MermaidDetector {
     /// promote a match to `.certain`.
     private static let edgeTokens = ["-.->", "-->>", "-->", "->>", "==>", "<|--", "||--", "|>", "---"]
 
-    private static func hasEdgeToken(_ line: String) -> Bool {
+    /// Internal rather than private: the terminal scanner decides where an unfenced block printed
+    /// into a terminal stops, and an arrow is one of the things that says a line is still part of
+    /// the diagram. One table, so the two cannot disagree about what an edge looks like.
+    static func hasEdgeToken(_ line: String) -> Bool {
         edgeTokens.contains { line.contains($0) }
     }
 

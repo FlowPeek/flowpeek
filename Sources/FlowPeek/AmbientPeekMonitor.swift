@@ -18,6 +18,18 @@ final class AmbientPeekMonitor {
     var onDismiss: (() -> Void)?
     /// Fired when the peek key is pressed while an outline is showing.
     var onActivate: (() -> Void)?
+    /// Whether the terminal watch is already handling this application, in which case this route
+    /// stands down over it.
+    ///
+    /// The two collide badly, and the collision is only visible now that the terminal watch asks
+    /// the user to hold the same key. A terminal exposes its whole buffer as one focused text area,
+    /// so the caret fallback -- written for VS Code, where the focused document is the only thing
+    /// there is -- reads it, finds a diagram somewhere in the scrollback and frames the pane: a
+    /// rectangle around the entire terminal window. Measured in iTerm2. That frame is wrong twice
+    /// over. It marks the window rather than the block, and its panel covers the terminal watch's
+    /// own frame, so the Option-click the label asks for lands on a window whose contents take no
+    /// clicks and never reaches the block underneath.
+    var defersToTerminalWatch: ((NSRunningApplication) -> Bool)?
 
     /// Option alone. macOS itself uses a held Option to reveal alternatives, and Space is the one
     /// key already under the hand that is holding it. The chord itself belongs to
@@ -154,6 +166,13 @@ final class AmbientPeekMonitor {
         // hold responsible if it hangs.
         guard let application = NSWorkspace.shared.frontmostApplication,
               application.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            retire()
+            lastRead = Date()
+            return
+        }
+        // Before the read, not after: the point is to spend nothing at all over an application
+        // whose diagrams somebody else is already framing precisely.
+        guard defersToTerminalWatch?(application) != true else {
             retire()
             lastRead = Date()
             return
@@ -615,64 +634,47 @@ final class AmbientPeekMonitor {
         }
     }
 
+    // MARK: - Reads
+
+    // Thin forwarding onto `AccessibilityRead`, which the terminal watch reads through too. The
+    // wrappers stay because this file's call sites read better without a type name in front of
+    // every message, and because the deadline belongs to one read rather than to the monitor.
+
     private func parent(of element: AXUIElement, before deadline: Date) -> AXUIElement? {
-        self.element(element, kAXParentAttribute as String, before: deadline)
+        AccessibilityRead.element(element, kAXParentAttribute as String, before: deadline)
     }
 
     private func element(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> AXUIElement? {
-        guard let value = self.attribute(element, attribute, before: deadline),
-              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-        return unsafeDowncast(value, to: AXUIElement.self)
+        AccessibilityRead.element(element, attribute, before: deadline)
     }
 
-    /// The raw value, for the one attribute FlowPeek never looks inside: an `AXTextMarkerRange` is
-    /// opaque and is only ever handed straight back as the argument to `AXBoundsForTextMarkerRange`.
     private func attribute(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CFTypeRef? {
-        guard Date() < deadline else { return nil }
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
-        return value
+        AccessibilityRead.attribute(element, attribute, before: deadline)
     }
 
-    /// Every accessibility call is a synchronous message to another process, so the clock is checked
-    /// immediately before each one rather than once per node.
     private func string(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> String? {
-        guard Date() < deadline else { return nil }
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
-        if let text = value as? String { return text }
-        return (value as? NSAttributedString)?.string
+        AccessibilityRead.string(element, attribute, before: deadline)
     }
 
-    /// `AXNumberOfCharacters` arrives as a `CFNumber`, and is the one way to ask how big a
-    /// document is without asking for the document.
     private func number(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> Int? {
-        guard let value = self.attribute(element, attribute, before: deadline) else { return nil }
-        return (value as? NSNumber)?.intValue
+        AccessibilityRead.number(element, attribute, before: deadline)
     }
 
     private func rect(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CGRect? {
-        guard let value = self.attribute(element, attribute, before: deadline) else { return nil }
-        return Self.cgRect(value)
+        AccessibilityRead.rect(element, attribute, before: deadline)
     }
 
-    /// The parameterized twin of `attribute(_:_:before:)`, for the one range this file asks for by
-    /// line number rather than by marker.
+    private func range(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CFRange? {
+        AccessibilityRead.range(element, attribute, before: deadline)
+    }
+
     private func attribute(
         _ element: AXUIElement,
         parameterized attribute: String,
         argument: CFTypeRef,
         before deadline: Date
     ) -> CFTypeRef? {
-        guard Date() < deadline else { return nil }
-        var value: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(
-            element,
-            attribute as CFString,
-            argument,
-            &value
-        ) == .success else { return nil }
-        return value
+        AccessibilityRead.attribute(element, parameterized: attribute, argument: argument, before: deadline)
     }
 
     private func string(
@@ -681,11 +683,7 @@ final class AmbientPeekMonitor {
         argument: CFTypeRef,
         before deadline: Date
     ) -> String? {
-        guard let value = self.attribute(element, parameterized: attribute, argument: argument, before: deadline) else {
-            return nil
-        }
-        if let text = value as? String { return text }
-        return (value as? NSAttributedString)?.string
+        AccessibilityRead.string(element, parameterized: attribute, argument: argument, before: deadline)
     }
 
     private func rect(
@@ -694,39 +692,6 @@ final class AmbientPeekMonitor {
         argument: CFTypeRef,
         before deadline: Date
     ) -> CGRect? {
-        guard Date() < deadline else { return nil }
-        var value: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(
-            element,
-            attribute as CFString,
-            argument,
-            &value
-        ) == .success, let value else { return nil }
-        return Self.cgRect(value)
-    }
-
-    private static func cgRect(_ value: CFTypeRef) -> CGRect? {
-        guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-        let axValue = unsafeDowncast(value, to: AXValue.self)
-        guard AXValueGetType(axValue) == .cgRect else { return nil }
-        var rect = CGRect.zero
-        guard AXValueGetValue(axValue, .cgRect, &rect) else { return nil }
-        return rect
-    }
-
-    /// `AXSelectedTextRange` arrives as a `CFRange` whose location counts UTF-16 code units of the
-    /// element's own value -- measured loc=45 len=31 in VS Code -- which is the unit
-    /// `DocumentCaretSlicer` slices in.
-    private func range(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CFRange? {
-        guard let value = self.attribute(element, attribute, before: deadline),
-              CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-        let axValue = unsafeDowncast(value, to: AXValue.self)
-        guard AXValueGetType(axValue) == .cfRange else { return nil }
-        var range = CFRange()
-        guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
-        // A negative location is not a position in any document; a caret is clamped by the slicer,
-        // but this is nonsense rather than staleness.
-        guard range.location >= 0 else { return nil }
-        return range
+        AccessibilityRead.rect(element, parameterized: attribute, argument: argument, before: deadline)
     }
 }

@@ -8,6 +8,8 @@ public enum DiagramOrigin: String, Codable, Sendable, CaseIterable {
     case selection
     case clipboard
     case ambient
+    /// Spotted on screen in a terminal by the terminal watch.
+    case terminal
     /// Opened from a file — double-clicked in Finder, or handed over by another app.
     case file
     /// An origin a later version of FlowPeek wrote and this one has no name for. Kept as a case
@@ -21,6 +23,7 @@ public enum DiagramOrigin: String, Codable, Sendable, CaseIterable {
         case .selection: "history.origin.selection"
         case .clipboard: "history.origin.clipboard"
         case .ambient: "history.origin.ambient"
+        case .terminal: "history.origin.terminal"
         case .file: "history.origin.file"
         case .unknown: "history.origin.unknown"
         }
@@ -34,6 +37,7 @@ public enum DiagramOrigin: String, Codable, Sendable, CaseIterable {
         case .selection: "hand.draw"
         case .clipboard: "doc.on.clipboard"
         case .ambient: "viewfinder"
+        case .terminal: "apple.terminal"
         case .file: "doc.text"
         case .unknown: "clock"
         }

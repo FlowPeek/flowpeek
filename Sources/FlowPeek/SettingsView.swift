@@ -302,6 +302,39 @@ struct SettingsView: View {
 
             settingsCard {
                 HStack(alignment: .top, spacing: 14) {
+                    settingIcon("apple.terminal", color: .green)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("settings.terminal")
+                            .font(.headline)
+                            // Reads the accessibility tree, so without the grant it is a title for
+                            // something that cannot happen yet.
+                            .foregroundStyle(app.accessibilityGranted ? .primary : .secondary)
+                        Text("settings.terminal.description")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 14)
+                    Toggle("settings.terminal", isOn: $app.terminalPeekEnabled)
+                        .labelsHidden()
+                        .accessibilityHint(Text("settings.terminal.description"))
+                }
+                if !app.accessibilityGranted {
+                    HStack(alignment: .top, spacing: 10) {
+                        Label("settings.terminal.needs-permission", systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button("settings.permission.request") { app.openAccessibilitySettings() }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .togglesOnTap($app.terminalPeekEnabled)
+
+            settingsCard {
+                HStack(alignment: .top, spacing: 14) {
                     settingIcon("power", color: .blue)
                     VStack(alignment: .leading, spacing: 5) {
                         Text("settings.launch-at-login").font(.headline)

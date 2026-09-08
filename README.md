@@ -74,6 +74,10 @@ Everything on it works from the keyboard: `↑↓←→` to move, `⏎` to open,
 
 ## What else it does
 
+- **Watch the terminal** — print a diagram in Terminal, iTerm2 or Ghostty and a faint frame appears
+  around it where it sits, breathing slowly, one for each diagram on screen. Bring the pointer near
+  and that one brightens with a label; hold Option and the block opens on a click. A frame goes when
+  its block scrolls off screen.
 - **Zoom and pan** with the trackpad, or from the keyboard once the window has focus.
 - **Take it with you** — copy the diagram as an image, or save it as PNG, PDF or SVG.
 - **Put it on the glass or on its own canvas**, whichever reads better against what is behind it.
@@ -98,7 +102,8 @@ Releases are built, signed and notarized by `.github/workflows/release.yml` on e
 
 ## Privacy
 
-- The text you point at is read into memory and never logged.
+- The text you point at, and the terminal buffer around a diagram on screen, are read into memory
+  and never logged.
 - The diagrams FlowPeek actually draws are saved on your Mac, in Application Support — the source
   and a small picture of each — so the shelf can offer them back. Nothing else is: a selection that
   was never previewed is never written down. Switching the history off, or clearing it, deletes

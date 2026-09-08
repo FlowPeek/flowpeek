@@ -13,7 +13,7 @@
   </p>
   <p>
     <a href="#install"><b>Install</b></a> ·
-    <a href="#three-ways-to-see-a-diagram">Ways in</a> ·
+    <a href="#ways-to-see-a-diagram">Ways in</a> ·
     <a href="#the-shelf">The shelf</a> ·
     <a href="#privacy">Privacy</a>
   </p>
@@ -27,7 +27,7 @@
 brew install --cask flowpeek/tap/flowpeek
 ```
 
-## Three ways to see a diagram
+## Ways to see a diagram
 
 **Hold ⌥ and point at it.** The block is outlined where it sits. Press Space and it draws.
 
@@ -40,6 +40,13 @@ brew install --cask flowpeek/tap/flowpeek
 **Select it.** A small button appears beside the selection.
 
 <img src="docs/images/selection.gif" width="600" alt="Mermaid source dragged over on a documentation page; a small FlowPeek button appears at the end of the selection, and pressing it draws the diagram">
+
+**Print it in a terminal.** A diagram in Terminal, iTerm2 or Ghostty gets a faint frame where it
+sits, one for each on screen. Bring the pointer near and that one brightens; hold ⌥ and the block
+opens on a click. Nothing to select, nothing to copy — and the frame goes when the block scrolls
+off screen.
+
+<img src="docs/images/terminal-watch.gif" width="620" alt="A fenced mermaid block printed in Terminal gets a faint frame around it; the pointer arrives and the frame brightens with a label reading flowchart, Option-click, and the diagram opens in its place">
 
 Editors work too. In VS Code the outline follows the caret, because an editor can say where the caret is but not where the pointer is:
 
@@ -74,10 +81,6 @@ Everything on it works from the keyboard: `↑↓←→` to move, `⏎` to open,
 
 ## What else it does
 
-- **Watch the terminal** — print a diagram in Terminal, iTerm2 or Ghostty and a faint frame appears
-  around it where it sits, breathing slowly, one for each diagram on screen. Bring the pointer near
-  and that one brightens with a label; hold Option and the block opens on a click. A frame goes when
-  its block scrolls off screen.
 - **Zoom and pan** with the trackpad, or from the keyboard once the window has focus.
 - **Take it with you** — copy the diagram as an image, or save it as PNG, PDF or SVG.
 - **Put it on the glass or on its own canvas**, whichever reads better against what is behind it.

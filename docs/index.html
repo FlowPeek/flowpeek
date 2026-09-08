@@ -76,7 +76,7 @@
     <figcaption>Drag over the source in any app. A small button appears beside the selection.</figcaption>
   </figure>
 
-  <h2>Two more ways in</h2>
+  <h2>More ways in</h2>
 
   <div class="route">
     <h3>Point at it</h3>
@@ -91,6 +91,15 @@
     <p>A badge appears near the menu bar and names the key that opens it.</p>
     <figure>
       <img src="images/clipboard-badge.gif" alt="A badge sliding in below the menu bar reading Mermaid, sequenceDiagram, Press to preview" loading="lazy">
+    </figure>
+  </div>
+
+  <div class="route">
+    <h3>Print it in a terminal</h3>
+    <p>A diagram in Terminal, iTerm2 or Ghostty gets a faint frame where it sits. The pointer
+       brightens it; hold Option and the block opens on a click.</p>
+    <figure>
+      <img src="images/terminal-watch.gif" alt="A fenced mermaid block printed in Terminal gets a faint frame around it; the pointer arrives and the frame brightens with a label reading flowchart, Option-click, and the diagram opens in its place" loading="lazy">
     </figure>
   </div>
 
@@ -115,7 +124,8 @@
   <h2>What it does not do</h2>
   <ul class="plain">
     <li><b>No network.</b> Mermaid is bundled, so drawing a diagram makes no request at all.</li>
-    <li><b>No logging.</b> The text you point at is read into memory and never written down. The
+    <li><b>No logging.</b> The text you point at, and the terminal buffer around a diagram on
+        screen, are read into memory and never written down. The
         diagrams it actually draws are kept on your Mac so the shelf can offer them back — capped by
         count, by age, or switched off entirely.</li>
     <li><b>One permission.</b> Accessibility, because reading the text you are pointing at is the

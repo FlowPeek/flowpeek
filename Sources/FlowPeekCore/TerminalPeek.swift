@@ -17,25 +17,47 @@ import Foundation
 /// | Ghostty | whole buffer, useless | no | no |
 ///
 /// So Terminal.app and iTerm2 are read by character range and answer with the block's own
-/// rectangle, and Ghostty is read by grid arithmetic off its scroll area. A terminal that renders
-/// into a canvas inside a web view -- Orca, VS Code's integrated terminal, anything on xterm.js --
-/// exposes no text at all and cannot be on this list; the clipboard watch is what covers those.
+/// rectangle, and Ghostty is read by grid arithmetic off its scroll area.
+///
+/// Orca renders into a WebGL canvas, which exposes no text -- and was left off this list for that
+/// reason until it turned out xterm.js can be asked to publish the visible rows as a DOM list
+/// beside the canvas. When it is, Chromium exposes that list to accessibility clients and a third
+/// reading strategy applies: one element per row, each with its own measured frame, which is the
+/// most exact of the three. When it is not, the descent finds nothing and the poll costs a walk.
 public enum TerminalApp: String, Sendable, CaseIterable {
     case appleTerminal
     case iTerm2
     case ghostty
+    case orca
 
-    public var bundleIdentifier: String {
+    /// Every identifier the app ships under. More than one because a terminal can install
+    /// side by side with itself: Orca's development build carries its own identifier so it can run
+    /// beside a release install, and FlowPeek should read whichever one is in front.
+    public var bundleIdentifiers: [String] {
         switch self {
-        case .appleTerminal: "com.apple.Terminal"
-        case .iTerm2: "com.googlecode.iterm2"
-        case .ghostty: "com.mitchellh.ghostty"
+        case .appleTerminal: ["com.apple.Terminal"]
+        case .iTerm2: ["com.googlecode.iterm2"]
+        case .ghostty: ["com.mitchellh.ghostty"]
+        case .orca: ["com.stablyai.orca", "com.stablyai.orca.dev"]
+        }
+    }
+
+    /// Whether the terminal has to be *asked* for an accessibility tree before there is anything to
+    /// read.
+    ///
+    /// Chromium hands out empty groups until an assistive client announces itself, and it is that
+    /// announcement -- not a setting -- that makes a web-view terminal publish its rows at all. The
+    /// native three need nothing: their text is there whether anyone is looking or not.
+    public var needsAccessibilityWarmUp: Bool {
+        switch self {
+        case .appleTerminal, .iTerm2, .ghostty: false
+        case .orca: true
         }
     }
 
     public init?(bundleIdentifier: String?) {
         guard let bundleIdentifier,
-              let match = Self.allCases.first(where: { $0.bundleIdentifier == bundleIdentifier })
+              let match = Self.allCases.first(where: { $0.bundleIdentifiers.contains(bundleIdentifier) })
         else { return nil }
         self = match
     }

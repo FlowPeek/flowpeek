@@ -71,10 +71,14 @@ final class OnboardingCoordinator {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         window.level = .floating
         window.hidesOnDeactivate = false
-        // 40pt taller than it was: the permission step now explains the choice and offers two
-        // buttons, and its card is the one that decides this height. Kept well under the 775pt a
-        // 1280x800 display leaves below the menu bar.
-        window.setContentSize(NSSize(width: 720, height: 720))
+        // The card's own size, plus the room its shadow needs around it. 656pt square is what the
+        // permission step decides -- it explains the choice and offers two buttons, and it is the
+        // tallest card. With the shadow's margin that is 758pt, under the 775pt a 1280x800 display
+        // leaves below the menu bar.
+        window.setContentSize(NSSize(
+            width: OnboardingCardShadow.cardSide + OnboardingCardShadow.margin.width,
+            height: OnboardingCardShadow.cardSide + OnboardingCardShadow.margin.height
+        ))
         window.center()
         window.isReleasedWhenClosed = false
         // Escape has to route through closeWindow() rather than the window's own close(): that is
@@ -138,6 +142,48 @@ final class OnboardingCoordinator {
             accessibilityGranted: app.accessibilityGranted,
             permissionDeclined: app.permissionDeclined
         )
+    }
+}
+
+/// The card's drop shadow, and the room the window has to leave for it.
+///
+/// A shadow is drawn *inside* the window that hosts it, so whatever falls past the padding around
+/// the card is not clipped gently -- it stops at that pixel. 32 points of uniform padding against a
+/// 35-point blur left 3% of the fade standing at the window edge, which is the hard line the
+/// shadow used to end in, worst along the bottom where the 16-point offset pushed it further out.
+///
+/// The trap is that a CoreGraphics blur reaches far past its nominal radius. Rendering this shadow
+/// offscreen and walking outwards from the card, its darkness falls below half a percent -- the
+/// point an edge stops being visible against a light background -- at about 1.8x the radius, not at
+/// the radius. So the extent is measured and written down here rather than computed from the
+/// radius, and the radius itself is what had to come down: at 35 the tail needs 64 points at the
+/// sides and 76 below, which puts a 656-point card in a 784-point window and past the 775 points a
+/// 1280x800 display leaves under the menu bar.
+private enum OnboardingCardShadow {
+    static let color = Color.black.opacity(0.24)
+    static let radius: CGFloat = 24
+    /// Positive is downward, which is why the bottom needs the most room and the top the least.
+    static let offsetY: CGFloat = 12
+    /// How far the blur still darkens anything, to the side where the offset does not reach.
+    /// Measured at `radius`: under half a percent by 44 points, and this is 12 points past that,
+    /// because the offscreen measurement is of an opaque white card on white while the real one is
+    /// translucent over whatever is behind the window -- at 51 points a tenth of a percent was
+    /// still standing at the edge on a real screen. Re-measure if the radius changes; it is not a
+    /// formula, and it is not the radius.
+    static let extent: CGFloat = 56
+    /// What the tallest card asks for, which is the permission step's.
+    static let cardSide: CGFloat = 656
+
+    static let insets = EdgeInsets(
+        top: extent - offsetY,
+        leading: extent,
+        bottom: extent + offsetY,
+        trailing: extent
+    )
+
+    /// What the window adds to the card to fit the shadow on every side.
+    static var margin: NSSize {
+        NSSize(width: insets.leading + insets.trailing, height: insets.top + insets.bottom)
     }
 }
 
@@ -225,8 +271,12 @@ struct OnboardingView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.30), lineWidth: 1))
-        .shadow(color: .black.opacity(0.24), radius: 35, y: 16)
-        .padding(32)
+        .shadow(
+            color: OnboardingCardShadow.color,
+            radius: OnboardingCardShadow.radius,
+            y: OnboardingCardShadow.offsetY
+        )
+        .padding(OnboardingCardShadow.insets)
         .animation(.snappy, value: step)
         .onAppear { permissionFlow.update(isGranted: app.accessibilityGranted) }
         .onChange(of: app.accessibilityGranted) { _, granted in

@@ -21,7 +21,7 @@
 "onboarding.window.title" = "FlowPeek 시작하기";
 "onboarding.welcome.title" = "Mermaid를 선택하는 순간, 미리보기";
 "onboarding.welcome.message" = "브라우저나 앱에서 Mermaid 문법을 드래그해 선택하면 바로 옆에 나타나는 버튼으로 네이티브 미리보기를 열 수 있습니다. 선택 내용은 기기 밖으로 나가지 않습니다.";
-"onboarding.permission.title" = "선택 사항인 스위치 하나";
+"onboarding.permission.title" = "켜면 더 편하고, 건너뛰어도 됩니다";
 "onboarding.permission.message" = "다이어그램 복사는 권한이 필요하지 않습니다. 다른 앱에서 드래그한 텍스트 옆에 버튼까지 띄우려면 그 선택 영역을 읽을 권한이 필요합니다. 그 밖의 것은 읽지 않고, 아무것도 이 Mac 밖으로 나가지 않습니다.";
 "tutorial.title" = "세 가지 모두 해보기";
 "tutorial.message" = "FlowPeek에 닿는 길은 세 가지입니다. 연습 페이지를 열고 실제로 한 번씩 써보세요 — 해낸 만큼 체크가 채워집니다.";

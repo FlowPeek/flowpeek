@@ -1064,7 +1064,23 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
-		090B6F9659402B2D35CAA7AD0C56AE87 /* Release */ = {
+		099712129F3E0FA6DE10BE7634E959C2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = F7WUT95TT6;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekCoreTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		0E2D8D93656659725EA4068D7BDD997D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -1101,6 +1117,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				FLOWPEEK_APP_NAME = FlowPeek;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -1119,47 +1136,28 @@
 			};
 			name = Release;
 		};
-		099712129F3E0FA6DE10BE7634E959C2 /* Debug */ = {
+		1F1BCD01EAF471B17D813939D75A333D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/FlowPeekQuickLook.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = F7WUT95TT6;
-				GENERATE_INFOPLIST_FILE = YES;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Config/FlowPeekQuickLook-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.FlowPeekCoreTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.debug.QuickLook;
+				PRODUCT_MODULE_NAME = FlowPeekQuickLook;
+				PRODUCT_NAME = FlowPeekQuickLook;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
-		};
-		0C14B939167698F07BF60E214B89B42D /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Config/FlowPeek.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = F7WUT95TT6;
-				ENABLE_APP_SANDBOX = NO;
-				ENABLE_HARDENED_RUNTIME = YES;
-				ENABLE_TESTABILITY = NO;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Config/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek;
-				PRODUCT_NAME = FlowPeek;
-				SDKROOT = macosx;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Release;
 		};
 		237D9EC1EB412C614539F14868AEA6B4 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -1200,21 +1198,34 @@
 			};
 			name = Release;
 		};
-		922EFE204CE7B1C4D53360EFFC66636E /* Debug */ = {
+		82D2E319E7FCC2CFB257F4DA611D6AC6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/FlowPeek.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = F7WUT95TT6;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_TESTABILITY = YES;
-				EXECUTABLE_PREFIX = lib;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_MODULE_NAME = FlowPeekCore;
-				PRODUCT_NAME = FlowPeekCore;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.debug;
+				PRODUCT_MODULE_NAME = FlowPeek;
+				PRODUCT_NAME = "$(FLOWPEEK_APP_NAME)";
 				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
-		926F6BC6B0D709FF81F74185C2388B42 /* Debug */ = {
+		882A6BE80139EAF595FC8889D35C830B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -1251,6 +1262,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				FLOWPEEK_APP_NAME = "FlowPeek Debug";
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -1276,30 +1288,21 @@
 			};
 			name = Debug;
 		};
-		B0EB20993FD1967993C39DD2C9B35487 /* Debug */ = {
+		922EFE204CE7B1C4D53360EFFC66636E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = Config/FlowPeekQuickLook.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = F7WUT95TT6;
-				ENABLE_APP_SANDBOX = YES;
-				ENABLE_HARDENED_RUNTIME = NO;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "Config/FlowPeekQuickLook-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
+				ENABLE_TESTABILITY = YES;
+				EXECUTABLE_PREFIX = lib;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek.QuickLook;
-				PRODUCT_MODULE_NAME = FlowPeekQuickLook;
-				PRODUCT_NAME = FlowPeekQuickLook;
+				PRODUCT_MODULE_NAME = FlowPeekCore;
+				PRODUCT_NAME = FlowPeekCore;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
-		C1233E756F074EA689584E62B80CD951 /* Release */ = {
+		C8CDBFA107DD34F355A461F236544144 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -1313,11 +1316,38 @@
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlowPeek.app/Contents/MacOS/FlowPeek";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/$(FLOWPEEK_APP_NAME).app/Contents/MacOS/$(FLOWPEEK_APP_NAME)";
+			};
+			name = Debug;
+		};
+		DE813E198100F9ABCE51E3BD14A94534 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/FlowPeek.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = F7WUT95TT6;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_TESTABILITY = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek;
+				PRODUCT_MODULE_NAME = FlowPeek;
+				PRODUCT_NAME = "$(FLOWPEEK_APP_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
-		CAF5CDC3235228322B14E1B03B2F3B18 /* Debug */ = {
+		EE16DC2C8FE4186875922B1243A79946 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -1331,9 +1361,9 @@
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 6.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlowPeek.app/Contents/MacOS/FlowPeek";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/$(FLOWPEEK_APP_NAME).app/Contents/MacOS/$(FLOWPEEK_APP_NAME)";
 			};
-			name = Debug;
+			name = Release;
 		};
 		FE2DC6C8E5E441A35CA808A6775190EE /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -1349,40 +1379,14 @@
 			};
 			name = Release;
 		};
-		FFB772923C6A9F9797300E6DA6050C57 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Config/FlowPeek.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = F7WUT95TT6;
-				ENABLE_APP_SANDBOX = NO;
-				ENABLE_HARDENED_RUNTIME = NO;
-				ENABLE_TESTABILITY = YES;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Config/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.selenehyun.FlowPeek;
-				PRODUCT_NAME = FlowPeek;
-				SDKROOT = macosx;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Debug;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
 		0B3BB1827692FF554328F7EA016ED14F /* Build configuration list for PBXProject "FlowPeek" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				926F6BC6B0D709FF81F74185C2388B42 /* Debug */,
-				090B6F9659402B2D35CAA7AD0C56AE87 /* Release */,
+				882A6BE80139EAF595FC8889D35C830B /* Debug */,
+				0E2D8D93656659725EA4068D7BDD997D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1409,7 +1413,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				374E659F76D3B76F17761D2C380E4766 /* Release */,
-				B0EB20993FD1967993C39DD2C9B35487 /* Debug */,
+				1F1BCD01EAF471B17D813939D75A333D /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1417,8 +1421,8 @@
 		BDA7B2085546D3CE27605CC344862E54 /* Build configuration list for PBXNativeTarget "FlowPeekRendererTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				C1233E756F074EA689584E62B80CD951 /* Release */,
-				CAF5CDC3235228322B14E1B03B2F3B18 /* Debug */,
+				EE16DC2C8FE4186875922B1243A79946 /* Release */,
+				C8CDBFA107DD34F355A461F236544144 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1426,8 +1430,8 @@
 		EB3317C98AC6C3E3ADD5D00842049A80 /* Build configuration list for PBXNativeTarget "FlowPeek" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				0C14B939167698F07BF60E214B89B42D /* Release */,
-				FFB772923C6A9F9797300E6DA6050C57 /* Debug */,
+				DE813E198100F9ABCE51E3BD14A94534 /* Release */,
+				82D2E319E7FCC2CFB257F4DA611D6AC6 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

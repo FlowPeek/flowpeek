@@ -39,6 +39,21 @@ DEVELOPMENT_TEAM = "F7WUT95TT6"
 MARKETING_VERSION = "0.1.0"
 CURRENT_PROJECT_VERSION = "1"
 BUNDLE_ID = "com.selenehyun.FlowPeek"
+# A Debug build installs beside the release one under its own identifier, because macOS keys almost
+# everything an app owns off that: the Accessibility grant, the defaults domain, the log subsystem
+# and the single-instance lock. Sharing it meant every switch between a release install and a local
+# build revoked the other's Accessibility permission and asked for it again.
+def bundle_id(configuration_name)
+  configuration_name == "Debug" ? "#{BUNDLE_ID}.debug" : BUNDLE_ID
+end
+
+# What the bundle, the executable and every list macOS shows call it. A Debug build is renamed as
+# well as re-identified: two processes both called "FlowPeek" are indistinguishable in Activity
+# Monitor, in Force Quit and to anything scripting them, which is most of the confusion the split
+# was meant to remove. Release keeps the name, so the DMG and the notarised bundle are untouched.
+def app_name(configuration_name)
+  configuration_name == "Debug" ? "FlowPeek Debug" : "FlowPeek"
+end
 # Carried by SPM's `.process("Resources")` rule, not by the app bundle.
 EXCLUDED_RESOURCES = ["placeholder.txt", ".DS_Store"].freeze
 # What the Quick Look extension needs a copy of. Only the engine: it draws one diagram and says
@@ -186,6 +201,8 @@ add_swift_sources(root, "Tests/FlowPeekRendererTests", renderer_tests_group, ren
 
 project.build_configurations.each do |configuration|
   configuration.build_settings["MACOSX_DEPLOYMENT_TARGET"] = DEPLOYMENT_TARGET
+  # Project-wide so the app names itself and the hosted test suite finds it by the same string.
+  configuration.build_settings["FLOWPEEK_APP_NAME"] = app_name(configuration.name)
 end
 
 core.build_configurations.each do |configuration|
@@ -200,8 +217,12 @@ end
 
 app.build_configurations.each do |configuration|
   configuration.build_settings.merge!({
-    "PRODUCT_BUNDLE_IDENTIFIER" => BUNDLE_ID,
-    "PRODUCT_NAME" => "FlowPeek",
+    "PRODUCT_BUNDLE_IDENTIFIER" => bundle_id(configuration.name),
+    "PRODUCT_NAME" => "$(FLOWPEEK_APP_NAME)",
+    # Pinned, because the Swift module name follows the product name by default and a Debug build
+    # renamed the module to `FlowPeek_Debug` -- which is not what `@testable import FlowPeek` in the
+    # hosted suite asks for, and that suite only ever builds in Debug.
+    "PRODUCT_MODULE_NAME" => "FlowPeek",
     "INFOPLIST_FILE" => "Config/Info.plist",
     "GENERATE_INFOPLIST_FILE" => "NO",
     "CODE_SIGN_ENTITLEMENTS" => "Config/FlowPeek.entitlements",
@@ -222,7 +243,7 @@ end
 
 quicklook.build_configurations.each do |configuration|
   configuration.build_settings.merge!({
-    "PRODUCT_BUNDLE_IDENTIFIER" => "#{BUNDLE_ID}.QuickLook",
+    "PRODUCT_BUNDLE_IDENTIFIER" => "#{bundle_id(configuration.name)}.QuickLook",
     "PRODUCT_NAME" => "FlowPeekQuickLook",
     "PRODUCT_MODULE_NAME" => "FlowPeekQuickLook",
     "INFOPLIST_FILE" => "Config/FlowPeekQuickLook-Info.plist",
@@ -266,7 +287,9 @@ end
 
 renderer_tests.build_configurations.each do |configuration|
   configuration.build_settings.merge!({
-    "TEST_HOST" => "$(BUILT_PRODUCTS_DIR)/FlowPeek.app/Contents/MacOS/FlowPeek",
+    # Through the shared name, because a Debug build is called something else and this suite only
+    # ever runs in Debug -- a literal "FlowPeek.app" here would look for a bundle that is not built.
+    "TEST_HOST" => "$(BUILT_PRODUCTS_DIR)/$(FLOWPEEK_APP_NAME).app/Contents/MacOS/$(FLOWPEEK_APP_NAME)",
     "BUNDLE_LOADER" => "$(TEST_HOST)",
   })
 end

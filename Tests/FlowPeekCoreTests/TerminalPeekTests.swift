@@ -9,6 +9,18 @@ final class TerminalPeekPolicyTests: XCTestCase {
         XCTAssertEqual(TerminalApp(bundleIdentifier: "com.apple.Terminal"), .appleTerminal)
         XCTAssertEqual(TerminalApp(bundleIdentifier: "com.googlecode.iterm2"), .iTerm2)
         XCTAssertEqual(TerminalApp(bundleIdentifier: "com.mitchellh.ghostty"), .ghostty)
+        XCTAssertEqual(TerminalApp(bundleIdentifier: "com.stablyai.orca"), .orca)
+        // A terminal can install beside itself; the development build carries its own identifier.
+        XCTAssertEqual(TerminalApp(bundleIdentifier: "com.stablyai.orca.dev"), .orca)
+    }
+
+    /// Only the web-view terminal has to be asked for a tree, and it has to be asked by this route:
+    /// the pointer route defers over a terminal, so nothing else announces a client to it.
+    func testOnlyAWebViewTerminalIsWarmedUp() {
+        XCTAssertTrue(TerminalApp.orca.needsAccessibilityWarmUp)
+        for native in [TerminalApp.appleTerminal, .iTerm2, .ghostty] {
+            XCTAssertFalse(native.needsAccessibilityWarmUp, native.rawValue)
+        }
     }
 
     /// Orca embeds Ghostty but paints it into a web view, so it exposes no text and must not be

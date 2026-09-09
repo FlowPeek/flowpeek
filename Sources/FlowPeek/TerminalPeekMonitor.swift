@@ -44,6 +44,11 @@ final class TerminalPeekMonitor {
     /// How deep the walk for the text area goes. Measured: Terminal.app puts it three levels under
     /// the window, iTerm2 four, Ghostty four.
     private static let descentLimit = 8
+    /// How much further to look once a web area has been entered. Measured in Orca: the row list
+    /// sits twenty levels below the window, eighteen of them Chromium's own wrappers.
+    private static let webDescentLimit = 20
+    /// The class xterm.js puts on the list it publishes the visible rows into.
+    private static let rowListClass = "xterm-accessibility-tree"
     /// How far inside the content rectangle the corner probes sit, in points. Far enough to be
     /// inside the first and last row, close enough not to skip one.
     private static let cornerInset: CGFloat = 4
@@ -296,10 +301,31 @@ final class TerminalPeekMonitor {
         let content: CGRect
         let visible: NSRange?
         let scroll: Double?
+        /// A hash of the text itself, where reading all of it is cheap enough to do every poll.
+        /// The other three terms are geometry, and geometry is what a repaint holds constant while
+        /// changing everything on screen.
+        let digest: Int?
+
+        init(characters: Int, content: CGRect, visible: NSRange?, scroll: Double?, digest: Int? = nil) {
+            self.characters = characters
+            self.content = content
+            self.visible = visible
+            self.scroll = scroll
+            self.digest = digest
+        }
     }
 
     private func read(_ terminal: TerminalApp, in application: NSRunningApplication, deadline: Date) -> Read {
         reading = application.processIdentifier
+        // A web-view terminal publishes nothing until an assistive client announces itself, and on
+        // this route nothing else does the announcing: the pointer route warms the app it is about
+        // to read, but it defers to this watch over a terminal and so never gets that far. Without
+        // this, a terminal that turns its accessibility tree on when one is attached would wait for
+        // an attachment that never comes. Memoised per process, so this is one message the first
+        // time and none after it.
+        if terminal.needsAccessibilityWarmUp {
+            AccessibilityTreeWarmUp.shared.warmUp(application.processIdentifier, before: deadline)
+        }
         let app = AXUIElementCreateApplication(application.processIdentifier)
         _ = AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
         guard let window = AccessibilityRead.element(app, kAXFocusedWindowAttribute as String, before: deadline) else {
@@ -360,6 +386,12 @@ final class TerminalPeekMonitor {
             forgetPane()
             return nil
         }
+        // A row list is read from the rows, not from a character count -- Chromium reports the
+        // list's own `AXNumberOfCharacters` as zero, because its text lives in the rows below it --
+        // so it brings its own cheap half and skips the preamble below entirely.
+        if case .rows = pane.strategy {
+            return rowsLook(pane.pane, deadline: deadline)
+        }
         // What the terminal is *showing*, which is not the text area's own frame: Terminal.app's
         // text area measured 2145 points tall inside a 385-point window, because the frame covers
         // the whole scrollback. The scroll area around it is the viewport, and where there is none
@@ -401,6 +433,9 @@ final class TerminalPeekMonitor {
                 deadline: deadline
             )
             return located.isEmpty ? .nothing : .blocks(located)
+        case .rows:
+            // Handled before the preamble above; a row list never reaches this switch.
+            return .nothing
         case .grid:
             guard let grid = grid(pane.pane, characters: characters, before: deadline) else { return .nothing }
             let fingerprint = Fingerprint(
@@ -644,6 +679,70 @@ final class TerminalPeekMonitor {
         }
     }
 
+    /// One look at a web view's row list.
+    ///
+    /// The cheap half is the whole viewport as one string: two marker calls, 0.33 ms measured, and
+    /// -- unlike every other fingerprint in this file -- it is made of the text itself, so a
+    /// repaint that leaves the geometry alone cannot hide behind it. That is the failure this
+    /// route was built knowing about.
+    private func rowsLook(_ pane: Pane, deadline: Date) -> Look? {
+        guard let text = AccessibilityRead.markerText(pane.text, before: deadline),
+              let content = AccessibilityRead.rect(pane.text, "AXFrame", before: deadline),
+              ScreenGeometry.isUsable(content)
+        else {
+            // The list stopped answering, which is what a replaced pane looks like.
+            forgetPane()
+            return nil
+        }
+        let fingerprint = Fingerprint(
+            characters: text.utf16.count,
+            content: content,
+            visible: nil,
+            scroll: nil,
+            digest: text.hashValue
+        )
+        if let shortcut = shortcut(for: fingerprint) { return shortcut }
+        let located = rowsRead(pane, content: content, deadline: deadline)
+        return located.isEmpty ? .nothing : .blocks(located)
+    }
+
+    /// Reads a web view's row list: one element per visible row, each answering for its own text
+    /// and its own frame.
+    ///
+    /// The exact strategy of the three. A row's rectangle is measured rather than divided out of a
+    /// content height, so nothing here can be wrong about how tall a row is -- and the rows the
+    /// list holds are by construction the rows on screen, so there is no scroll offset to apply and
+    /// no visible range to intersect.
+    ///
+    /// Read row by row rather than in one call, because the single call that returns the whole
+    /// viewport returns it with no line breaks at all: the rows arrive concatenated, and
+    /// `cat x` followed by a diagram came back as one 857-character line. Per row it is 2.45 ms
+    /// measured against Orca, and the fingerprint above is what keeps that off an idle poll.
+    private func rowsRead(_ pane: Pane, content: CGRect, deadline: Date) -> [Located] {
+        guard let children = AccessibilityRead.attribute(
+            pane.text,
+            kAXChildrenAttribute as String,
+            before: deadline
+        ) as? [AnyObject] else { return [] }
+        let rows: [AXUIElement] = children
+            .filter { CFGetTypeID($0) == AXUIElementGetTypeID() }
+            .map { unsafeDowncast($0, to: AXUIElement.self) }
+        guard !rows.isEmpty else { return [] }
+        let lines = rows.map { AccessibilityRead.markerText($0, before: deadline) ?? "" }
+        let window = lines.joined(separator: "\n")
+        guard !window.isEmpty else { return [] }
+        let blocks = TerminalBufferScanner.blocks(in: window, visible: 0...(rows.count - 1))
+        guard !blocks.isEmpty else { return [] }
+        let width = content.minX...content.maxX
+        return blocks.compactMap { block in
+            guard block.lines.lowerBound >= 0, block.lines.upperBound < rows.count,
+                  let first = AccessibilityRead.rect(rows[block.lines.lowerBound], "AXFrame", before: deadline),
+                  let last = AccessibilityRead.rect(rows[block.lines.upperBound], "AXFrame", before: deadline),
+                  let rectangle = TerminalPeekPolicy.band(from: first, to: last, across: width) else { return nil }
+            return Located(block: block, rectangle: rectangle, content: content)
+        }
+    }
+
     private func line(of index: Int, in text: AXUIElement, before deadline: Date) -> Int? {
         guard index >= 0 else { return nil }
         return AccessibilityRead.number(
@@ -680,9 +779,19 @@ final class TerminalPeekMonitor {
 
     private struct Pane {
         let text: AXUIElement
-        /// The scroll area around the text, where there is one. Both strategies need it: the ranged
-        /// one for the viewport rectangle, the grid one for the content size and the scroll bar.
+        /// The scroll area around the text, where there is one. Both of the character-range
+        /// strategies need it: the ranged one for the viewport rectangle, the grid one for the
+        /// content size and the scroll bar.
         let scroll: AXUIElement?
+        /// True when `text` is a web view's row list rather than a text area, which is a different
+        /// shape entirely: it holds one element per visible row instead of one string with offsets.
+        let isRowList: Bool
+
+        init(text: AXUIElement, scroll: AXUIElement?, isRowList: Bool = false) {
+            self.text = text
+            self.scroll = scroll
+            self.isRowList = isRowList
+        }
     }
 
     /// How a terminal answers, from what it says it can answer. Deliberately not a per-terminal
@@ -692,6 +801,10 @@ final class TerminalPeekMonitor {
     private enum Strategy {
         case ranged
         case grid
+        /// One element per visible row, each answering for its own text and its own frame. No
+        /// arithmetic: the rectangle a block occupies is measured rather than derived, so the
+        /// mistakes the other two can make about row height cannot happen here.
+        case rows
     }
 
     private func strategy(of text: AXUIElement, before deadline: Date) -> Strategy? {
@@ -714,7 +827,10 @@ final class TerminalPeekMonitor {
         if let cached, CFEqual(cached.window, window) { return (cached.pane, cached.strategy) }
         guard let pane = descend(to: window, before: deadline) else { return nil }
         _ = AXUIElementSetMessagingTimeout(pane.text, Self.messagingTimeout)
-        guard let strategy = strategy(of: pane.text, before: deadline) else { return nil }
+        // A row list advertises the same parameterized attributes as everything else in a Chromium
+        // tree and answers none of them usefully, so what was found decides how it is read.
+        let strategy: Strategy? = pane.isRowList ? .rows : strategy(of: pane.text, before: deadline)
+        guard let strategy else { return nil }
         cached = (window, pane, strategy)
         return (pane, strategy)
     }
@@ -723,24 +839,40 @@ final class TerminalPeekMonitor {
     /// down in Terminal.app, four in iTerm2 and Ghostty, always inside an `AXScrollArea` whose
     /// frame is the viewport.
     private func descend(to window: AXUIElement, before deadline: Date) -> Pane? {
-        func descend(_ element: AXUIElement, depth: Int, scroll: AXUIElement?) -> Pane? {
-            guard depth < Self.descentLimit, Date() < deadline else { return nil }
+        func descend(_ element: AXUIElement, depth: Int, limit: Int, scroll: AXUIElement?) -> Pane? {
+            guard depth < limit, Date() < deadline else { return nil }
             let role = AccessibilityRead.string(element, kAXRoleAttribute as String, before: deadline)
             if role == "AXTextArea" { return Pane(text: element, scroll: scroll) }
+            // A web view's rows are a list, and every Electron window is full of lists, so the DOM
+            // class is what identifies this one. Only asked for inside a web area: it is one more
+            // message per node, and a native terminal has no DOM to ask about.
+            if role == "AXList", limit > Self.descentLimit,
+               AccessibilityRead.classList(element, before: deadline).contains(Self.rowListClass) {
+                return Pane(text: element, scroll: scroll, isRowList: true)
+            }
             let scroll = role == "AXScrollArea" ? element : scroll
+            // Chromium nests its content far deeper than a native view does -- Orca's row list
+            // measured twenty levels down -- so entering a web area buys the extra depth rather
+            // than spending it on every window.
+            let limit = role == "AXWebArea" ? depth + Self.webDescentLimit : limit
             guard let children = AccessibilityRead.attribute(
                 element,
                 kAXChildrenAttribute as String,
                 before: deadline
             ) as? [AnyObject] else { return nil }
             for child in children where CFGetTypeID(child) == AXUIElementGetTypeID() {
-                if let pane = descend(unsafeDowncast(child, to: AXUIElement.self), depth: depth + 1, scroll: scroll) {
+                if let pane = descend(
+                    unsafeDowncast(child, to: AXUIElement.self),
+                    depth: depth + 1,
+                    limit: limit,
+                    scroll: scroll
+                ) {
                     return pane
                 }
             }
             return nil
         }
-        return descend(window, depth: 0, scroll: nil)
+        return descend(window, depth: 0, limit: Self.descentLimit, scroll: nil)
     }
 
     private func string(_ text: AXUIElement, in range: NSRange, before deadline: Date) -> String? {

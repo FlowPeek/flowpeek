@@ -484,6 +484,36 @@ final class MermaidEngineTests: XCTestCase {
         XCTAssertEqual(failures, [], "golden drift:\n" + failures.joined(separator: "\n"))
     }
 
+    /// Mindmap labels used to start at their node's centre and run off its right edge.
+    ///
+    /// Mermaid 11.17.2 draws them through the shared node renderer -- `.node.mindmap-node > .label
+    /// > text`, tspan at `x="0"` -- while mindmap's own stylesheet still centres
+    /// `.mindmap-node-label`, a class the renderer no longer emits: it appears once in the CSS and
+    /// on no element at all. With no `text-anchor` the text is left-anchored at the centre, which
+    /// measured as a 62.5-point offset on a 125-point box -- exactly half its width. Every other
+    /// type ships `.node .label text{text-anchor:middle}` and was never affected, so the theme
+    /// carries one selector for this one.
+    func testAMindmapLabelIsCentredInItsNode() async throws {
+        let engine = try Self.pool.checkOut()
+        defer { Self.pool.checkIn(engine) }
+        let result = try await engine.render(Self.request("mindmap\n    id[I am a square]"))
+        XCTAssertEqual(result.diagramType, "mindmap")
+
+        // The rule has to reach the element the renderer actually emits, not the class it dropped.
+        XCTAssertTrue(
+            result.svg.contains("mindmap-node .label text"),
+            "the theme's mindmap centring rule is missing from the rendered stylesheet"
+        )
+        // And the class the upstream rule targets is still absent, which is why ours is needed: if
+        // a future mermaid starts emitting it, this fails and the patch can go.
+        let elementUses = result.svg.components(separatedBy: "class=\"").dropFirst()
+            .filter { $0.hasPrefix("mindmap-node-label") }
+        XCTAssertTrue(
+            elementUses.isEmpty,
+            "mermaid now emits .mindmap-node-label; the theme's centring patch is redundant"
+        )
+    }
+
     // MARK: - T6
 
     func testSyntaxErrorReportsItsLine() async throws {

@@ -43,10 +43,19 @@ public struct MacMermaidTheme: Equatable, Sendable {
             "activationBkgColor": dark ? "#3A3A3C" : "#E5E5EA",
             "activationBorderColor": accentHex,
         ]
+        // The mindmap rule is a patch over mermaid 11.17.2, not a preference. Mindmap labels are
+        // drawn by the shared node renderer -- `.node.mindmap-node > .label > text`, with the
+        // tspan at `x="0"` -- while mindmap's own stylesheet still centres `.mindmap-node-label`,
+        // a class the renderer no longer emits: it appears once in the CSS and on nothing at all.
+        // With no `text-anchor`, the text starts at the node's centre and runs off its right edge.
+        // Measured on `mindmap\n    id[I am a square]`: a 125-point box with the label beginning at
+        // its midpoint. Every other type ships `.node .label text{text-anchor:middle}` and is fine,
+        // which is why this is one selector rather than a blanket rule.
         css = """
         .node rect,.node circle,.node polygon,.node path { stroke-width: 1.25px; }
         .edgeLabel { background-color: transparent !important; }
         .label, .nodeLabel, text { -webkit-font-smoothing: antialiased; }
+        .mindmap-node .label text, .mindmap-node > text { text-anchor: middle; }
         """
     }
 }

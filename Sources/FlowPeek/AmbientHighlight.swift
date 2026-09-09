@@ -8,6 +8,13 @@ import SwiftUI
 final class AmbientHighlightCoordinator {
     var onActivate: (() -> Void)?
 
+    /// What colour to draw the frame and the chip in. Set from settings and pushed straight at the
+    /// model, so a change lands on an outline that is already on screen.
+    var tint: HintTintChoice {
+        get { model.tint }
+        set { model.tint = newValue }
+    }
+
     /// How far the stroke sits outside the block, so it frames the text instead of touching it.
     private static let inset: CGFloat = 5
     private static let hintBarHeight: CGFloat = 20
@@ -314,6 +321,21 @@ final class AmbientHighlightModel: ObservableObject {
     @Published var isRevealed = true
     /// Whether the modifier that turns the whole frame into the button is down.
     @Published var isArmed = false
+    /// What colour to draw in. On the model rather than read from `AppState` where it is used,
+    /// because these views are hosted in a panel of their own and a settings change has to reach
+    /// them the same way every other change does.
+    @Published var tint: HintTintChoice = .systemAccent
+}
+
+extension HintTintChoice {
+    /// The colour to draw with. `.systemAccent` resolves to `Color.accentColor` here rather than
+    /// being stored as a colour, so it keeps following the accent when the user changes it.
+    var color: Color {
+        switch self {
+        case .systemAccent: .accentColor
+        case .fixed(let tint): Color(red: tint.red, green: tint.green, blue: tint.blue)
+        }
+    }
 }
 
 /// A slow breath, for a frame that sits over somebody else's text without being asked.
@@ -435,13 +457,13 @@ struct AmbientHighlightView: View {
 
     private var outline: some View {
         RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(Color.accentColor.opacity(isLoud ? 0.85 : 0.40), lineWidth: isLoud ? 2 : 1)
+            .strokeBorder(model.tint.color.opacity(isLoud ? 0.85 : 0.40), lineWidth: isLoud ? 2 : 1)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     // Barely more fill while armed than while merely approached. The frame is
                     // about to take a click, but the pointer already says so, and a heavier tint
                     // over a block the width of a terminal reads as a slab rather than a hint.
-                    .fill(Color.accentColor.opacity(model.isArmed ? 0.10 : (isLoud ? 0.07 : 0)))
+                    .fill(model.tint.color.opacity(model.isArmed ? 0.10 : (isLoud ? 0.07 : 0)))
             )
             .modifier(BreathingOpacity(isActive: !isLoud))
             .frame(height: model.outlineHeight)
@@ -507,7 +529,7 @@ struct AmbientHighlightView: View {
         // the terminal -- a capsule several hundred points long across the first row.
         .frame(height: hintBarHeight)
         .fixedSize()
-        .background(Color.accentColor, in: Capsule())
+        .background(model.tint.color, in: Capsule())
         .foregroundStyle(.white)
         .contentShape(Capsule())
     }

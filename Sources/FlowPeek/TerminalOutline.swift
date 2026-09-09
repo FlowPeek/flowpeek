@@ -24,6 +24,17 @@ final class TerminalOutlineCoordinator {
     static let maximumOutlines = 4
 
     private var frames: [AmbientHighlightCoordinator] = []
+    /// Held as well as forwarded, because the frames are built on demand: one raised after a
+    /// settings change would otherwise open in the previous colour.
+    private var storedTint: HintTintChoice = .systemAccent
+
+    var tint: HintTintChoice {
+        get { storedTint }
+        set {
+            storedTint = newValue
+            for frame in frames { frame.tint = newValue }
+        }
+    }
     private var pointerMonitor: Any?
     private var flagsMonitor: Any?
     private var isArmed = false
@@ -41,6 +52,7 @@ final class TerminalOutlineCoordinator {
         while frames.count < wanted.count {
             let index = frames.count
             let frame = AmbientHighlightCoordinator(tracksPointer: false)
+            frame.tint = storedTint
             frame.onActivate = { [weak self] in self?.onActivate?(index) }
             frame.onPointerOverPanel = { [weak self] point in self?.update(pointer: point) }
             frames.append(frame)

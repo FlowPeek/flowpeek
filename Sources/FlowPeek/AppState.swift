@@ -50,6 +50,20 @@ final class AppState: ObservableObject {
             applyEnabledState()
         }
     }
+    /// What colour the hint box is drawn in.
+    ///
+    /// Follows the system accent unless the user says otherwise. The override is not a theming
+    /// preference: the frame and the chip carry their meaning *in* colour -- "there is a diagram
+    /// here", "click this" -- and the accent palette's blues and greens are what a red-green
+    /// deficiency, the common one, sees least of. A colour somebody picked themselves is the only
+    /// one certain to be visible to them.
+    @Published var hintTint = HintTintChoice(storedValue: Defaults.stringIfPresent(.hintTint)) {
+        didSet {
+            Defaults.set(hintTint.storedValue, .hintTint)
+            highlight.tint = hintTint
+            terminalHighlight.tint = hintTint
+        }
+    }
     /// Press Option twice to open the copied diagram. On by default, unlike hold to peek: this
     /// registers no hot key and takes nothing from any other app, because Option on its own already
     /// does nothing. It only watches.
@@ -181,6 +195,11 @@ final class AppState: ObservableObject {
         // claiming to be watching for diagrams; the literal it used to hold was a claim nothing
         // had checked.
         refreshMenuBarStatus()
+        // The stored colour, applied once. `didSet` only fires on a change, so without this a user
+        // who picked a colour last week would get one outline in the accent -- the first one after
+        // launch -- and the right colour only once they touched the setting again.
+        highlight.tint = hintTint
+        terminalHighlight.tint = hintTint
         // Wired here rather than in `start()`: a preview can be promoted from the demo arguments and
         // from the AI window, neither of which goes through the monitors that `start()` arms.
         previews.onPromotedChange = { [weak self] hasWindow in self?.hasPromotedPreview = hasWindow }
@@ -268,6 +287,7 @@ final class AppState: ObservableObject {
             case starDiagramsOpened = "flowpeek.star.diagramsOpened"
             case starFirstDiagram = "flowpeek.star.firstDiagram"
             case starAsked = "flowpeek.star.asked"
+            case hintTint = "flowpeek.hint.tint"
         }
 
         static func bool(_ key: Key, default fallback: Bool) -> Bool {
@@ -276,6 +296,12 @@ final class AppState: ObservableObject {
 
         static func string(_ key: Key, default fallback: String) -> String {
             UserDefaults.standard.string(forKey: key.rawValue) ?? fallback
+        }
+
+        /// Absent rather than defaulted, for a setting whose "not set" is a meaningful answer and
+        /// not the same as any string a caller could pass.
+        static func stringIfPresent(_ key: Key) -> String? {
+            UserDefaults.standard.string(forKey: key.rawValue)
         }
 
         static func set(_ value: Bool, _ key: Key) {

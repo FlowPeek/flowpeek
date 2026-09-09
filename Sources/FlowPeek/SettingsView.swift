@@ -346,6 +346,23 @@ struct SettingsView: View {
 
             settingsCard {
                 HStack(alignment: .top, spacing: 14) {
+                    settingIcon("eyedropper.halffull", color: .pink)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("settings.hint-tint")
+                            .font(.headline)
+                        Text("settings.hint-tint.short")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 14)
+                }
+                HintTintPicker(choice: $app.hintTint)
+                explanation(HintTintPreview(), detail: "settings.hint-tint.description")
+            }
+
+            settingsCard {
+                HStack(alignment: .top, spacing: 14) {
                     settingIcon("power", color: .blue)
                     VStack(alignment: .leading, spacing: 5) {
                         Text("settings.launch-at-login").font(.headline)
@@ -710,7 +727,11 @@ struct SettingsView: View {
     /// looks it up, and a sentence already composed has to be wrapped where the wrapping is visible.
     private func explanation(_ scene: some View, detail: Text) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            // Every drawing is of FlowPeek's own hint, so it is drawn in the colour the hint is
+            // actually in. Injected here rather than inside each scene: one place decides, and a
+            // scene added later inherits it without being told.
             scene
+                .environment(\.skeletonTint, app.hintTint.color)
             DisclosureGroup {
                 detail
                     .font(.callout)

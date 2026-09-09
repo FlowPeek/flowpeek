@@ -420,3 +420,17 @@
 "settings.history.age.week" = "A week";
 "settings.history.age.month" = "A month";
 "settings.history.age.quarter" = "Three months";
+
+/* The hint box's colour, which a reader with colour-vision deficiency may have to choose. */
+"settings.hint-tint" = "Hint Colour";
+"settings.hint-tint.short" = "What colour the frame and its button are drawn in.";
+"settings.hint-tint.description" = "The hint says two things in colour: the frame means a diagram is here, and the button means this one opens. If the accent is a colour you cannot separate from the text behind it, neither of those reaches you. The swatches are a palette published for exactly that — it stays distinguishable under the common forms of colour blindness — and the well takes any colour at all, because the only one certain to work is the one you can see. Every drawing in this window follows your choice, so what you pick is what you will meet.";
+"settings.hint-tint.system" = "Follow the system accent";
+"settings.hint-tint.custom" = "Any colour";
+"hint-tint.orange" = "Orange";
+"hint-tint.skyBlue" = "Sky blue";
+"hint-tint.bluishGreen" = "Bluish green";
+"hint-tint.yellow" = "Yellow";
+"hint-tint.blue" = "Blue";
+"hint-tint.vermillion" = "Red-orange";
+"hint-tint.reddishPurple" = "Reddish purple";

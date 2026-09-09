@@ -420,3 +420,17 @@
 "settings.history.age.week" = "일주일";
 "settings.history.age.month" = "한 달";
 "settings.history.age.quarter" = "세 달";
+
+/* The hint box's colour, which a reader with colour-vision deficiency may have to choose. */
+"settings.hint-tint" = "힌트 색상";
+"settings.hint-tint.short" = "테두리와 버튼을 어떤 색으로 그릴지 정합니다.";
+"settings.hint-tint.description" = "힌트는 두 가지를 색으로 말합니다. 테두리는 여기에 다이어그램이 있다는 뜻이고, 버튼은 이걸 누르면 열린다는 뜻입니다. 강조색이 뒤의 글자와 구분되지 않는 색이라면 둘 다 전달되지 않습니다. 스와치는 바로 그 목적으로 공개된 팔레트로, 흔한 색약에서도 서로 구분됩니다. 그리고 오른쪽 색 상자로는 어떤 색이든 고를 수 있습니다 — 확실히 보이는 색은 결국 본인이 보이는 색뿐이니까요. 이 창의 모든 그림이 고른 색을 따라가므로, 고른 그대로를 만나게 됩니다.";
+"settings.hint-tint.system" = "시스템 강조색 따르기";
+"settings.hint-tint.custom" = "직접 고르기";
+"hint-tint.orange" = "주황";
+"hint-tint.skyBlue" = "하늘색";
+"hint-tint.bluishGreen" = "청록";
+"hint-tint.yellow" = "노랑";
+"hint-tint.blue" = "파랑";
+"hint-tint.vermillion" = "주홍";
+"hint-tint.reddishPurple" = "붉은 자주";

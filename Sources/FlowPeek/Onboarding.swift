@@ -269,6 +269,10 @@ struct OnboardingView: View {
                 footer
             }
         }
+        // The same colour the hint itself is drawn in, so what the wizard shows is what the reader
+        // will see. At the card root rather than on the step's drawing, because the tutorial's
+        // lesson drawings are its siblings and would otherwise stay in the accent.
+        .environment(\.skeletonTint, app.hintTint.color)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.30), lineWidth: 1))
         .shadow(

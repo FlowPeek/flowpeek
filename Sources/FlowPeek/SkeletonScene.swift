@@ -12,7 +12,6 @@ enum Skeleton {
     /// Everything is drawn from these three weights, so a scene cannot invent its own greys and
     /// drift away from the others.
     static func line(_ level: Double = 0.30) -> Color { .primary.opacity(level) }
-    static let accent = Color.accentColor
 
     static let rowHeight: CGFloat = 5
     static let rowGap: CGFloat = 6
@@ -26,6 +25,23 @@ enum Skeleton {
     static let cardSize = CGSize(width: 168, height: 104)
     static let stepSize = CGSize(width: 268, height: 150)
     static let rowSize = CGSize(width: 196, height: 116)
+}
+
+private struct SkeletonTintKey: EnvironmentKey {
+    static let defaultValue = Color.accentColor
+}
+
+extension EnvironmentValues {
+    /// The colour the drawings use for anything that stands for FlowPeek's own hint box.
+    ///
+    /// An environment value rather than a constant, because these drawings exist to show the user
+    /// what the hint looks like -- and once the colour is theirs to choose, a drawing in the accent
+    /// would be illustrating somebody else's app. Injected once where the drawings are hosted, so a
+    /// scene never has to know where the colour came from.
+    var skeletonTint: Color {
+        get { self[SkeletonTintKey.self] }
+        set { self[SkeletonTintKey.self] = newValue }
+    }
 }
 
 /// Plays a script by moving one piece of state at each step, rather than by redrawing every frame.
@@ -142,6 +158,7 @@ struct SkeletonPointer: View {
 /// as a diagram rather than as more boxes. Every mechanic ends with one of these, so they all end
 /// looking like the same thing happened -- which is the point, because it is.
 struct SkeletonDiagram: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     /// How far down what the diagram opened over is pushed while it is on screen. Without this the
     /// nodes sat among the rows they had been read out of, and the drawing read as clutter rather
     /// than as a window that had opened on top of something.
@@ -159,7 +176,7 @@ struct SkeletonDiagram: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(Skeleton.accent.opacity(0.55), lineWidth: 1)
+                .strokeBorder(skeletonTint.opacity(0.55), lineWidth: 1)
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .transition(.scale(scale: 0.9).combined(with: .opacity))
@@ -167,17 +184,18 @@ struct SkeletonDiagram: View {
 
     private func node(width: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 2, style: .continuous)
-            .strokeBorder(Skeleton.accent.opacity(0.75), lineWidth: 1)
+            .strokeBorder(skeletonTint.opacity(0.75), lineWidth: 1)
             .frame(width: width, height: 10)
     }
 
     private var edge: some View {
-        Rectangle().fill(Skeleton.accent.opacity(0.5)).frame(width: 1, height: 6)
+        Rectangle().fill(skeletonTint.opacity(0.5)).frame(width: 1, height: 6)
     }
 }
 
 /// A key, drawn as a cap so a held one and a tapped one are the same object in two states.
 struct SkeletonKey: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     let glyph: String
     var pressed = false
 
@@ -188,7 +206,7 @@ struct SkeletonKey: View {
             .frame(width: 18, height: 16)
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(pressed ? Skeleton.accent : Skeleton.line(0.12))
+                    .fill(pressed ? skeletonTint : Skeleton.line(0.12))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -217,6 +235,7 @@ struct SkeletonChord: View {
 
 /// The badge the clipboard watch slides in under the menu bar.
 struct SkeletonBadge: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     var body: some View {
         HStack(spacing: 3) {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
@@ -228,13 +247,14 @@ struct SkeletonBadge: View {
         }
         .padding(.horizontal, 5)
         .padding(.vertical, 4)
-        .background(Skeleton.accent, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .background(skeletonTint, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 }
 
 /// The label FlowPeek puts on a frame, at the size these drawings work at.
 struct SkeletonLabel: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     var body: some View {
         HStack(spacing: 2) {
             Circle().fill(.white.opacity(0.9)).frame(width: 3, height: 3)
@@ -244,7 +264,7 @@ struct SkeletonLabel: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 3)
-        .background(Skeleton.accent, in: Capsule())
+        .background(skeletonTint, in: Capsule())
     }
 }
 
@@ -260,6 +280,7 @@ enum TerminalWatchStage: Equatable, Sendable {
 }
 
 struct TerminalWatchScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     static let script = SkeletonScript<TerminalWatchStage>(
         [
             .init(.printing, 1.1),
@@ -317,10 +338,10 @@ struct TerminalWatchScene: View {
             + CGFloat(Self.block.count - 1) * Skeleton.rowGap + 6
         let loud = stage != .framed
         return RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .strokeBorder(Skeleton.accent.opacity(loud ? 0.9 : 0.42), lineWidth: loud ? 1.5 : 1)
+            .strokeBorder(skeletonTint.opacity(loud ? 0.9 : 0.42), lineWidth: loud ? 1.5 : 1)
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(Skeleton.accent.opacity(loud ? 0.10 : 0))
+                    .fill(skeletonTint.opacity(loud ? 0.10 : 0))
             )
             .frame(height: height)
             .overlay(alignment: .topTrailing) {
@@ -349,6 +370,7 @@ enum ClipboardWatchStage: Equatable, Sendable {
 }
 
 struct ClipboardWatchScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     static let script = SkeletonScript<ClipboardWatchStage>(
         [
             .init(.idle, 0.8),
@@ -381,7 +403,7 @@ struct ClipboardWatchScene: View {
                                 .background(alignment: .leading) {
                                     if highlighted(stage, index) {
                                         RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                            .fill(Skeleton.accent.opacity(0.22))
+                                            .fill(skeletonTint.opacity(0.22))
                                             .frame(width: 120, height: 9)
                                     }
                                 }
@@ -424,6 +446,7 @@ enum HoldToPeekStage: Equatable, Sendable {
 }
 
 struct HoldToPeekScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     static let script = SkeletonScript<HoldToPeekStage>(
         [
             .init(.idle, 0.8),
@@ -477,10 +500,10 @@ struct HoldToPeekScene: View {
         let height = CGFloat(Self.block.count) * Skeleton.rowHeight
             + CGFloat(Self.block.count - 1) * Skeleton.rowGap + 6
         return RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .strokeBorder(Skeleton.accent.opacity(framed ? 0.9 : 0.3), lineWidth: framed ? 1.5 : 1)
+            .strokeBorder(skeletonTint.opacity(framed ? 0.9 : 0.3), lineWidth: framed ? 1.5 : 1)
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(Skeleton.accent.opacity(framed ? 0.10 : 0))
+                    .fill(skeletonTint.opacity(framed ? 0.10 : 0))
             )
             .frame(height: height)
             .overlay(alignment: .topTrailing) {
@@ -504,6 +527,7 @@ enum DoubleTapStage: Equatable, Sendable {
 }
 
 struct DoubleTapScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     static let script = SkeletonScript<DoubleTapStage>(
         [
             .init(.idle, 0.9),
@@ -527,7 +551,7 @@ struct DoubleTapScene: View {
                         HStack(spacing: 4) {
                             ForEach(0..<2, id: \.self) { index in
                                 Circle()
-                                    .fill(Skeleton.accent.opacity(taps(stage) > index ? 0.9 : 0.18))
+                                    .fill(skeletonTint.opacity(taps(stage) > index ? 0.9 : 0.18))
                                     .frame(width: 5, height: 5)
                             }
                         }
@@ -564,6 +588,7 @@ enum SelectionStage: Equatable, Sendable {
 }
 
 struct SelectionScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     static let script = SkeletonScript<SelectionStage>(
         [
             .init(.idle, 0.7),
@@ -593,7 +618,7 @@ struct SelectionScene: View {
                                 .background(alignment: .leading) {
                                     if selected(stage, index) {
                                         RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                            .fill(Skeleton.accent.opacity(0.22))
+                                            .fill(skeletonTint.opacity(0.22))
                                             .frame(width: 110, height: 9)
                                     }
                                 }
@@ -627,7 +652,7 @@ struct SelectionScene: View {
             SkeletonPointer()
             if offered {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(Skeleton.accent)
+                    .fill(skeletonTint)
                     .frame(width: 16, height: 13)
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
@@ -646,6 +671,7 @@ enum PermissionStage: Equatable, Sendable {
 }
 
 struct PermissionScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     static let script = SkeletonScript<PermissionStage>(
         [
             .init(.listed, 1.1),
@@ -692,7 +718,7 @@ struct PermissionScene: View {
 
     private func toggle(on: Bool) -> some View {
         Capsule()
-            .fill(on ? Skeleton.accent : Skeleton.line(0.16))
+            .fill(on ? skeletonTint : Skeleton.line(0.16))
             .frame(width: 18, height: 10)
             .overlay(alignment: on ? .trailing : .leading) {
                 Circle()
@@ -712,10 +738,10 @@ struct PermissionScene: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .strokeBorder(Skeleton.accent.opacity(0.9), lineWidth: 1.5)
+                .strokeBorder(skeletonTint.opacity(0.9), lineWidth: 1.5)
                 .background(
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Skeleton.accent.opacity(0.10))
+                        .fill(skeletonTint.opacity(0.10))
                 )
                 .frame(height: 2 * Skeleton.rowHeight + Skeleton.rowGap + 6)
                 .overlay(alignment: .topTrailing) { SkeletonLabel().padding(2) }
@@ -735,6 +761,7 @@ enum LaunchStage: Equatable, Sendable {
 }
 
 struct LaunchScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     static let script = SkeletonScript<LaunchStage>(
         [
             .init(.bare, 1.0),
@@ -808,7 +835,7 @@ struct LaunchScene: View {
             if stage != .bare {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
                     .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(Skeleton.accent)
+                    .foregroundStyle(skeletonTint)
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
         }
@@ -830,6 +857,7 @@ enum WelcomeStage: Equatable, Sendable {
 }
 
 struct WelcomeScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     static let script = SkeletonScript<WelcomeStage>(
         [
             .init(.select, 1.5),
@@ -858,7 +886,7 @@ struct WelcomeScene: View {
                             .background(alignment: .leading) {
                                 if stage == .select, Self.block.contains(index) {
                                     RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                        .fill(Skeleton.accent.opacity(0.22))
+                                        .fill(skeletonTint.opacity(0.22))
                                         .frame(width: 110, height: 9)
                                 }
                             }
@@ -872,7 +900,7 @@ struct WelcomeScene: View {
                         // the highlight behind the rows is a fixed width, so this is the same
                         // number rather than a guess about it.
                         RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(Skeleton.accent)
+                            .fill(skeletonTint)
                             .frame(width: 16, height: 13)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .offset(x: Self.selectionWidth + 4, y: CGFloat(Self.block.upperBound) * pitch)
@@ -892,10 +920,10 @@ struct WelcomeScene: View {
 
     private var frame: some View {
         RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .strokeBorder(Skeleton.accent.opacity(0.9), lineWidth: 1.5)
+            .strokeBorder(skeletonTint.opacity(0.9), lineWidth: 1.5)
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(Skeleton.accent.opacity(0.10))
+                    .fill(skeletonTint.opacity(0.10))
             )
             .frame(height: CGFloat(Self.block.count) * Skeleton.rowHeight
                 + CGFloat(Self.block.count - 1) * Skeleton.rowGap + 6)
@@ -922,6 +950,7 @@ enum MenuBarStage: Equatable, Sendable {
 }
 
 struct MenuBarScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
     static let script = SkeletonScript<MenuBarStage>(
         [
             .init(.mark, 1.2),
@@ -969,11 +998,11 @@ struct MenuBarScene: View {
             }
             Image(systemName: "point.3.connected.trianglepath.dotted")
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(Skeleton.accent)
+                .foregroundStyle(skeletonTint)
                 .padding(.horizontal, 2)
                 .background(
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(Skeleton.accent.opacity(highlighted ? 0.22 : 0))
+                        .fill(skeletonTint.opacity(highlighted ? 0.22 : 0))
                 )
         }
         .padding(.horizontal, 7)
@@ -996,7 +1025,7 @@ struct MenuBarScene: View {
                         // same grey as the row behind it and all that read was the knob, which
                         // looks like a bullet rather than a switch.
                         Capsule()
-                            .fill(configuring ? Skeleton.accent : Skeleton.line(0.14))
+                            .fill(configuring ? skeletonTint : Skeleton.line(0.14))
                             .frame(width: 18, height: 10)
                             .overlay(Capsule().strokeBorder(Skeleton.line(0.22), lineWidth: 0.5))
                             .overlay(alignment: configuring ? .trailing : .leading) {

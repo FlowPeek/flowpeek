@@ -332,7 +332,7 @@ final class TerminalPeekMonitor {
             forgetPane()
             return Date() < deadline ? .nothing : .abandoned
         }
-        guard let found = look(window, in: app, deadline: deadline) else {
+        guard let found = look(window, in: app, terminal: terminal, deadline: deadline) else {
             return Date() < deadline ? .nothing : .abandoned
         }
         guard case .blocks(let located) = found else { return found.read }
@@ -381,8 +381,13 @@ final class TerminalPeekMonitor {
     /// viewport plus its margins. Four of those a second, forever, for a screen nobody is changing
     /// is the wrong shape; four fingerprints a second is 0.3 ms. So a poll over a still terminal
     /// asks its four or five questions and stops.
-    private func look(_ window: AXUIElement, in app: AXUIElement, deadline: Date) -> Look? {
-        guard let pane = pane(under: window, before: deadline) else {
+    private func look(
+        _ window: AXUIElement,
+        in app: AXUIElement,
+        terminal: TerminalApp,
+        deadline: Date
+    ) -> Look? {
+        guard let pane = pane(under: window, terminal: terminal, before: deadline) else {
             forgetPane()
             return nil
         }
@@ -686,23 +691,40 @@ final class TerminalPeekMonitor {
     /// repaint that leaves the geometry alone cannot hide behind it. That is the failure this
     /// route was built knowing about.
     private func rowsLook(_ pane: Pane, deadline: Date) -> Look? {
-        guard let text = AccessibilityRead.markerText(pane.text, before: deadline),
-              let content = AccessibilityRead.rect(pane.text, "AXFrame", before: deadline),
-              ScreenGeometry.isUsable(content)
-        else {
-            // The list stopped answering, which is what a replaced pane looks like.
+        var texts: [String] = []
+        var frames: [CGRect] = []
+        for list in pane.rowLists {
+            guard let text = AccessibilityRead.markerText(list, before: deadline),
+                  let frame = AccessibilityRead.rect(list, "AXFrame", before: deadline),
+                  ScreenGeometry.isUsable(frame)
+            else {
+                // A list stopped answering, which is what a closed or replaced pane looks like.
+                forgetPane()
+                return nil
+            }
+            texts.append(text)
+            frames.append(frame)
+        }
+        guard let first = frames.first else {
             forgetPane()
             return nil
         }
+        // One fingerprint over every pane, joined on a character no terminal prints, so that two
+        // panes swapping content cannot cancel out and a pane opening or closing is a change.
+        let joined = texts.joined(separator: "\u{0}")
         let fingerprint = Fingerprint(
-            characters: text.utf16.count,
-            content: content,
+            characters: joined.utf16.count,
+            content: frames.dropFirst().reduce(first) { $0.union($1) },
             visible: nil,
             scroll: nil,
-            digest: text.hashValue
+            digest: joined.hashValue
         )
         if let shortcut = shortcut(for: fingerprint) { return shortcut }
-        let located = rowsRead(pane, content: content, deadline: deadline)
+        // Each pane's own frame, not the union: it is what the block's rectangle is clipped to, and
+        // clipping one pane's diagram to both panes would let it run over its neighbour.
+        let located = zip(pane.rowLists, frames).flatMap { list, frame in
+            rowsRead(list, content: frame, deadline: deadline)
+        }
         return located.isEmpty ? .nothing : .blocks(located)
     }
 
@@ -718,9 +740,9 @@ final class TerminalPeekMonitor {
     /// viewport returns it with no line breaks at all: the rows arrive concatenated, and
     /// `cat x` followed by a diagram came back as one 857-character line. Per row it is 2.45 ms
     /// measured against Orca, and the fingerprint above is what keeps that off an idle poll.
-    private func rowsRead(_ pane: Pane, content: CGRect, deadline: Date) -> [Located] {
+    private func rowsRead(_ list: AXUIElement, content: CGRect, deadline: Date) -> [Located] {
         guard let children = AccessibilityRead.attribute(
-            pane.text,
+            list,
             kAXChildrenAttribute as String,
             before: deadline
         ) as? [AnyObject] else { return [] }
@@ -783,14 +805,22 @@ final class TerminalPeekMonitor {
         /// strategies need it: the ranged one for the viewport rectangle, the grid one for the
         /// content size and the scroll bar.
         let scroll: AXUIElement?
-        /// True when `text` is a web view's row list rather than a text area, which is a different
-        /// shape entirely: it holds one element per visible row instead of one string with offsets.
-        let isRowList: Bool
+        /// Every row list under the window, when the terminal publishes them -- empty for a native
+        /// one, whose text is `text`.
+        ///
+        /// A list rather than the single `text` because a web-view terminal shows several panes in
+        /// one window and each publishes its own: a split Orca window carries two, and reading only
+        /// the first left the other one unframed.
+        let rowLists: [AXUIElement]
 
-        init(text: AXUIElement, scroll: AXUIElement?, isRowList: Bool = false) {
+        /// True when this pane is read from row elements rather than from a string with offsets --
+        /// a different shape entirely.
+        var isRowList: Bool { !rowLists.isEmpty }
+
+        init(text: AXUIElement, scroll: AXUIElement?, rowLists: [AXUIElement] = []) {
             self.text = text
             self.scroll = scroll
-            self.isRowList = isRowList
+            self.rowLists = rowLists
         }
     }
 
@@ -823,10 +853,20 @@ final class TerminalPeekMonitor {
     /// accessibility messages, measured in all three terminals -- and the answer only changes when
     /// the focused window does. A window that keeps its identity while replacing its text view
     /// would leave a dead element here; the caller drops the cache the moment it stops answering.
-    private func pane(under window: AXUIElement, before deadline: Date) -> (pane: Pane, strategy: Strategy)? {
+    private func pane(
+        under window: AXUIElement,
+        terminal: TerminalApp,
+        before deadline: Date
+    ) -> (pane: Pane, strategy: Strategy)? {
         if let cached, CFEqual(cached.window, window) { return (cached.pane, cached.strategy) }
-        guard let pane = descend(to: window, before: deadline) else { return nil }
-        _ = AXUIElementSetMessagingTimeout(pane.text, Self.messagingTimeout)
+        guard let pane = descend(
+            to: window,
+            isWebView: terminal.needsAccessibilityWarmUp,
+            before: deadline
+        ) else { return nil }
+        for element in pane.rowLists.isEmpty ? [pane.text] : pane.rowLists {
+            _ = AXUIElementSetMessagingTimeout(element, Self.messagingTimeout)
+        }
         // A row list advertises the same parameterized attributes as everything else in a Chromium
         // tree and answers none of them usefully, so what was found decides how it is read.
         let strategy: Strategy? = pane.isRowList ? .rows : strategy(of: pane.text, before: deadline)
@@ -838,20 +878,36 @@ final class TerminalPeekMonitor {
     /// The first text area under the window, and the scroll area it sits in. Measured: three levels
     /// down in Terminal.app, four in iTerm2 and Ghostty, always inside an `AXScrollArea` whose
     /// frame is the viewport.
-    private func descend(to window: AXUIElement, before deadline: Date) -> Pane? {
-        func descend(_ element: AXUIElement, depth: Int, limit: Int, scroll: AXUIElement?) -> Pane? {
-            guard depth < limit, Date() < deadline else { return nil }
+    /// - Parameter isWebView: whether this terminal draws into a web view. It decides what the
+    ///   descent is looking for, and how much of the tree it is worth walking: a native terminal
+    ///   has one text area and stops at it, while a web view can hold several row lists and has to
+    ///   be walked out to find them all.
+    private func descend(to window: AXUIElement, isWebView: Bool, before deadline: Date) -> Pane? {
+        var rowLists: [AXUIElement] = []
+        var textArea: (element: AXUIElement, scroll: AXUIElement?)?
+        var finished = false
+
+        func walk(_ element: AXUIElement, depth: Int, limit: Int, scroll: AXUIElement?) {
+            guard !finished, depth < limit, Date() < deadline else { return }
             let role = AccessibilityRead.string(element, kAXRoleAttribute as String, before: deadline)
-            if role == "AXTextArea" { return Pane(text: element, scroll: scroll) }
+            if role == "AXTextArea", textArea == nil {
+                textArea = (element, scroll)
+                // A native terminal's tree holds one text area and no row lists, so there is
+                // nothing further to look for and the descent costs what it always did.
+                if !isWebView { finished = true }
+                return
+            }
             // A web view's rows are a list, and every Electron window is full of lists, so the DOM
-            // class is what identifies this one. Only asked for inside a web area: it is one more
+            // class is what identifies this one. Only asked for in a web view: it is one more
             // message per node, and a native terminal has no DOM to ask about.
-            if role == "AXList", limit > Self.descentLimit,
+            if isWebView, role == "AXList",
                AccessibilityRead.classList(element, before: deadline).contains(Self.rowListClass) {
-                return Pane(text: element, scroll: scroll, isRowList: true)
+                rowLists.append(element)
+                // Its children are rows, not another pane.
+                return
             }
             let scroll = role == "AXScrollArea" ? element : scroll
-            // Chromium nests its content far deeper than a native view does -- Orca's row list
+            // Chromium nests its content far deeper than a native view does -- Orca's row lists
             // measured twenty levels down -- so entering a web area buys the extra depth rather
             // than spending it on every window.
             let limit = role == "AXWebArea" ? depth + Self.webDescentLimit : limit
@@ -859,20 +915,22 @@ final class TerminalPeekMonitor {
                 element,
                 kAXChildrenAttribute as String,
                 before: deadline
-            ) as? [AnyObject] else { return nil }
+            ) as? [AnyObject] else { return }
             for child in children where CFGetTypeID(child) == AXUIElementGetTypeID() {
-                if let pane = descend(
-                    unsafeDowncast(child, to: AXUIElement.self),
-                    depth: depth + 1,
-                    limit: limit,
-                    scroll: scroll
-                ) {
-                    return pane
-                }
+                walk(unsafeDowncast(child, to: AXUIElement.self), depth: depth + 1, limit: limit, scroll: scroll)
             }
-            return nil
         }
-        return descend(window, depth: 0, limit: Self.descentLimit, scroll: nil)
+        walk(window, depth: 0, limit: Self.descentLimit, scroll: nil)
+
+        // A row list wins over a text area. A web view exposes text areas of its own -- xterm's
+        // hidden helper textarea is one, and every search field in the window is another -- and
+        // whichever the walk happened to reach first would otherwise decide how the terminal is
+        // read. That it worked was an accident of tree order.
+        if let first = rowLists.first {
+            return Pane(text: first, scroll: nil, rowLists: rowLists)
+        }
+        guard let textArea else { return nil }
+        return Pane(text: textArea.element, scroll: textArea.scroll)
     }
 
     private func string(_ text: AXUIElement, in range: NSRange, before deadline: Date) -> String? {

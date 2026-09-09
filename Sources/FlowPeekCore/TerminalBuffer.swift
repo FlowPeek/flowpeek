@@ -22,6 +22,17 @@ public struct TerminalDiagramBlock: Equatable, Sendable {
     /// exactly where it ends; an unfenced one is bounded by a guess about blank lines.
     public let isFenced: Bool
 
+    /// The offset of the block's last character, for measuring where the block ends on screen.
+    ///
+    /// The last *character*, not the start of the last row, because a row longer than the terminal
+    /// is wide occupies more than one row of screen. Terminal.app answered `AXBoundsForRange` for
+    /// a 180-character line in an 80-column window with a 42-point rectangle -- three rows of 14 --
+    /// while the row's first character alone measured 14. Asking about the first character puts the
+    /// bottom of the outline two rows above the text it is meant to enclose.
+    public var lastCharacter: Int {
+        lastRow.location + max(0, lastRow.length - 1)
+    }
+
     public init(
         detection: MermaidDetection,
         text: String,
@@ -67,14 +78,24 @@ public enum TerminalBufferScanner {
         let lines = self.lines(of: window)
         guard !lines.isEmpty else { return [] }
 
+        // Which rows are the tail of the row above them, so a line the terminal or a program broke
+        // across rows is read as the one line it is.
+        let continuations = RowContinuation.flags(in: lines.map(\.text))
+
         var blocks: [TerminalDiagramBlock] = []
         var index = 0
         while index < lines.count {
+            // A row that is the middle of somebody else's line starts nothing: the fence or the
+            // declaration it appears to carry is text inside a label.
+            if continuations[index] {
+                index += 1
+                continue
+            }
             if let open = MarkdownFence.open(lines[index].text) {
-                let close = closingFence(lines, after: index, marker: open.marker)
+                let close = closingFence(lines, after: index, marker: open.marker, continuations)
                 let last = close ?? lines.count - 1
                 let held = open.mayHoldMermaid
-                    && append(&blocks, lines, from: index, to: last, fenced: true, minimumConfidence)
+                    && append(&blocks, lines, from: index, to: last, fenced: true, continuations, minimumConfidence)
                 if held {
                     // Past the whole block, closing fence included: a fence inside a fence is
                     // content, and treating it as an opener would start a block in the middle of a
@@ -93,8 +114,8 @@ public enum TerminalBufferScanner {
                 continue
             }
             if MermaidDetector.declaresDiagram(lines[index].text) {
-                let last = unfencedEnd(lines, from: index)
-                append(&blocks, lines, from: index, to: last, fenced: false, minimumConfidence)
+                let last = unfencedEnd(lines, from: index, continuations)
+                append(&blocks, lines, from: index, to: last, fenced: false, continuations, minimumConfidence)
                 index = last + 1
                 continue
             }
@@ -132,13 +153,14 @@ public enum TerminalBufferScanner {
         from first: Int,
         to last: Int,
         fenced: Bool,
+        _ continuations: [Bool],
         _ minimumConfidence: MermaidDetection.Confidence
     ) -> Bool {
         // Trailing blank lines are dropped: a block that ends in whitespace would claim rows the
         // diagram does not occupy, and the outline is drawn around exactly these rows.
         var end = last
         while end > first, lines[end].text.trimmingCharacters(in: .whitespaces).isEmpty { end -= 1 }
-        let text = lines[first...end].map(\.text).joined(separator: "\n")
+        let text = source(lines, from: first, to: end, continuations)
         let detection = MermaidDetector.detect(text)
         guard detection.confidence >= minimumConfidence else { return false }
         blocks.append(
@@ -160,8 +182,46 @@ public enum TerminalBufferScanner {
         return true
     }
 
-    private static func closingFence(_ lines: [Line], after index: Int, marker: Character) -> Int? {
-        lines.indices.dropFirst(index + 1).first { MarkdownFence.closes(lines[$0].text, marker: marker) }
+    private static func closingFence(
+        _ lines: [Line],
+        after index: Int,
+        marker: Character,
+        _ continuations: [Bool]
+    ) -> Int? {
+        lines.indices.dropFirst(index + 1).first {
+            !continuations[$0] && MarkdownFence.closes(lines[$0].text, marker: marker)
+        }
+    }
+
+    /// The block's text as its author wrote it: one line per line, with rows that are the tail of
+    /// the row above them joined back on.
+    ///
+    /// The margin comes off the joined piece. A program that wraps its own output prints the same
+    /// left margin on every row it emits -- Claude Code's is two spaces, the same two the diagram's
+    /// declaration carries -- so the tail arrives with a margin in the middle of a label. Only that
+    /// exact prefix is removed, and only when the row carries it: a terminal wrapping a line of its
+    /// own adds nothing, and a tail that happens to begin with spaces of its own keeps them.
+    private static func source(
+        _ lines: [Line],
+        from first: Int,
+        to end: Int,
+        _ continuations: [Bool]
+    ) -> String {
+        let margin = lines[first].text.prefix { $0 == " " || $0 == "\t" }
+        var pieces: [String] = []
+        for index in first...end {
+            let text = lines[index].text
+            // The block's own first row starts it, whatever it continues above.
+            guard index > first, continuations[index], !pieces.isEmpty else {
+                pieces.append(text)
+                continue
+            }
+            let tail = !margin.isEmpty && text.hasPrefix(margin)
+                ? String(text.dropFirst(margin.count))
+                : text
+            pieces[pieces.count - 1] += tail
+        }
+        return pieces.joined(separator: "\n")
     }
 
     /// Where an unfenced block printed into a terminal stops.
@@ -180,11 +240,19 @@ public enum TerminalBufferScanner {
     /// The cost of being wrong is asymmetric, which is why the rule leans towards stopping early:
     /// too short means the detector turns the block down and no outline appears, while too long
     /// means an outline around a prompt and a preview of somebody's shell session.
-    private static func unfencedEnd(_ lines: [Line], from first: Int) -> Int {
+    private static func unfencedEnd(_ lines: [Line], from first: Int, _ continuations: [Bool]) -> Int {
         var index = first
         let limit = min(lines.count - 1, first + maximumUnfencedLines - 1)
         let base = indentWidth(lines[first].text)
         while index < limit {
+            // The tail of the row above is the same line, and a line cannot end the block it is
+            // part of. Without this the block stopped at the first row a wrap had broken: the tail
+            // carries the wrapping program's margin rather than the diagram's indentation, so it
+            // read as un-indented, and it holds a fragment of a label rather than an arrow.
+            if continuations[index + 1] {
+                index += 1
+                continue
+            }
             let next = lines[index + 1].text
             if next.trimmingCharacters(in: .whitespaces).isEmpty {
                 guard let following = lines.indices.dropFirst(index + 2).first(where: {

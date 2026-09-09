@@ -319,6 +319,79 @@ final class TerminalPeekPolicyTests: XCTestCase {
         XCTAssertEqual(rectangle.height, 7 * 16.0625, accuracy: 0.001)
     }
 
+    // MARK: - Rows behind a wrapped line
+
+    /// Measured in Terminal.app, an 80-column window showing a diagram whose rows run to 180
+    /// characters. Its `AXValue` keeps every row whole, so the scanner counts `graph TD` as line
+    /// 43 and the 180-character row as line 56, while the terminal's own `AXLineForIndex` answers
+    /// 45 and 59 -- the drift being the wraps above each. Row numbers taken from the scanner would
+    /// draw an outline two rows short of the diagram.
+    func testRowsComeFromTheTerminalNotFromTheLineCount() throws {
+        // The measured mapping, as `AXLineForIndex` answered it: character offset -> screen row.
+        let measured: [Int: Int] = [860: 45, 1_100: 59, 1_279: 61]
+        let rows = try XCTUnwrap(
+            TerminalPeekPolicy.rows(ofBlockFrom: 860, to: 1_279, line: { measured[$0] })
+        )
+        XCTAssertEqual(rows, 45...61)
+        // 17 rows of screen for a block the scanner sees as 19 lines of text: the rows are the
+        // terminal's answer, and the outline is drawn from them.
+        XCTAssertEqual(rows.count, 17)
+    }
+
+    /// A row that wraps is drawn on more than one row of screen, and the block ends on the last of
+    /// them. Terminal.app measured the 180-character row at y 658 for its first character and
+    /// y 686 for its last, both 14 points tall: asking about the first leaves 28 points of the
+    /// diagram outside the outline.
+    func testABlockEndsOnTheLastRowOfAWrappedLine() throws {
+        let firstCharacterOfLastRow = CGRect(x: 1_954, y: 658, width: 7, height: 14)
+        let lastCharacterOfLastRow = CGRect(x: 1_954, y: 686, width: 7, height: 14)
+        let top = CGRect(x: 1_954, y: 462, width: 7, height: 14)
+        let clipped = try XCTUnwrap(
+            TerminalPeekPolicy.band(from: top, to: firstCharacterOfLastRow, across: 1_944...2_524)
+        )
+        let whole = try XCTUnwrap(
+            TerminalPeekPolicy.band(from: top, to: lastCharacterOfLastRow, across: 1_944...2_524)
+        )
+        XCTAssertEqual(whole.maxY, 700)
+        XCTAssertEqual(whole.height - clipped.height, 28)
+    }
+
+    /// Which character the block's bottom is measured at. The last one, so a wrapped final row is
+    /// measured on the row it actually ends on.
+    func testABlockPointsAtItsLastCharacter() throws {
+        let block = try XCTUnwrap(
+            TerminalBufferScanner.blocks(in: "graph TD\n    A --> B\n").first
+        )
+        XCTAssertEqual(block.lastCharacter, block.lastRow.location + block.lastRow.length - 1)
+        XCTAssertEqual(block.lastCharacter, block.range.upperBound - 1)
+    }
+
+    /// An empty last row cannot be indexed one character in. Blocks never end on a blank row --
+    /// the scanner trims them -- but the arithmetic must not run backwards if one ever arrives.
+    func testAnEmptyLastRowPointsAtItself() {
+        let block = TerminalDiagramBlock(
+            detection: MermaidDetector.detect("graph TD"),
+            text: "graph TD",
+            lines: 0...0,
+            range: NSRange(location: 0, length: 8),
+            lastRow: NSRange(location: 8, length: 0),
+            isFenced: false
+        )
+        XCTAssertEqual(block.lastCharacter, 8)
+    }
+
+    /// Rows that cannot be placed answer nothing rather than a rectangle from half an answer: an
+    /// offset the terminal will not map, and a bottom above the top.
+    func testUnmappableRowsAnswerNothing() {
+        XCTAssertNil(TerminalPeekPolicy.rows(ofBlockFrom: 10, to: 20, line: { _ in nil }))
+        XCTAssertNil(TerminalPeekPolicy.rows(ofBlockFrom: 10, to: 20, line: { $0 == 10 ? 8 : nil }))
+        XCTAssertNil(TerminalPeekPolicy.rows(ofBlockFrom: 10, to: 20, line: { $0 == 10 ? 8 : 4 }))
+        XCTAssertNil(TerminalPeekPolicy.rows(ofBlockFrom: -1, to: 20, line: { _ in 0 }))
+        XCTAssertNil(TerminalPeekPolicy.rows(ofBlockFrom: 30, to: 20, line: { _ in 0 }))
+        // A block that begins and ends on one row is one row, not none.
+        XCTAssertEqual(TerminalPeekPolicy.rows(ofBlockFrom: 10, to: 20, line: { _ in 7 }), 7...7)
+    }
+
     // MARK: - Bands
 
     /// Terminal.app, measured: rows 27 to 32 of a small buffer came back as two 14-point rectangles

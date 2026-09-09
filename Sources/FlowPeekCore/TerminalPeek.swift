@@ -280,6 +280,34 @@ public enum TerminalPeekPolicy {
         return rectangle
     }
 
+    /// Which rows a block occupies, asked of the terminal rather than counted off the text.
+    ///
+    /// A buffer's lines and a screen's rows stop being the same thing as soon as a line is longer
+    /// than the terminal is wide, and the two terminals measured disagree about which one they
+    /// report. Terminal.app, 80 columns: the `AXValue` keeps a 180-character line whole, so the
+    /// scanner counts it as one line, while `AXLineForIndex` answers 59 for the line the string
+    /// puts 56th -- the drift being every wrap above it. Ghostty: `AXLineForIndex` answers 2 for
+    /// both ends of a 320-character line that is drawn on three rows, so it counts lines, like its
+    /// value does.
+    ///
+    /// So the terminal is asked instead of the newlines being counted: where the answer is rows it
+    /// is the right answer, and where it is lines it is at least the same numbering the rest of the
+    /// grid arithmetic uses. Converting lines to rows for a terminal of the second kind needs the
+    /// column count, which neither of Ghostty's geometry attributes reports; that conversion is
+    /// still missing, and shows up as an outline one row short per wrap inside the block.
+    ///
+    /// `last` is the block's last character rather than the start of its last row, so a terminal
+    /// that does answer in rows counts every row a wrapped final line occupies.
+    public static func rows(
+        ofBlockFrom first: Int,
+        to last: Int,
+        line: (Int) -> Int?
+    ) -> ClosedRange<Int>? {
+        guard first >= 0, last >= first, let top = line(first), let bottom = line(last),
+              top >= 0, bottom >= top else { return nil }
+        return top...bottom
+    }
+
     /// Where a run of rows sits on screen, in accessibility coordinates -- the same top-left origin
     /// the frames these numbers came from are expressed in.
     ///

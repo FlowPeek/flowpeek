@@ -524,8 +524,13 @@ final class TerminalPeekMonitor {
         return blocks.compactMap { block in
             // One row at a time, because a six-row range measured 21 points wide in iTerm2. A
             // single character is enough to place a row: the rectangle that comes back is the row's.
+            //
+            // The bottom is asked about the last row's last character, not its first. A row wider
+            // than the terminal is drawn on more than one row of screen -- Terminal.app measured a
+            // 180-character line in an 80-column window as 42 points, three rows -- and its first
+            // character answers only for the first of them.
             guard let first = rowRectangle(at: window.location + block.range.location, in: pane.text, before: deadline),
-                  let last = rowRectangle(at: window.location + block.lastRow.location, in: pane.text, before: deadline),
+                  let last = rowRectangle(at: window.location + block.lastCharacter, in: pane.text, before: deadline),
                   let rectangle = TerminalPeekPolicy.band(from: first, to: last, across: width) else { return nil }
             return Located(block: block, rectangle: rectangle, content: content)
         }
@@ -670,16 +675,24 @@ final class TerminalPeekMonitor {
         guard end > start,
               let text = string(pane.text, in: NSRange(location: start, length: end - start), before: deadline)
         else { return [] }
-        return TerminalBufferScanner.blocks(
-            in: text,
-            visible: (grid.visible.lowerBound - first)...(grid.visible.upperBound - first)
-        ).compactMap { block in
-            guard let rectangle = TerminalPeekPolicy.rowsRectangle(
-                lines: (first + block.lines.lowerBound)...(first + block.lines.upperBound),
-                viewport: grid.viewport,
-                rowHeight: grid.rowHeight,
-                offset: grid.offset
-            ) else { return nil }
+        // The scanner counts newlines; this arithmetic wants whatever `AXLineForIndex` counts,
+        // because the visible range and the row height are expressed in that. Adding `first` -- a
+        // number from the terminal -- to the scanner's own line numbers mixed the two, so the
+        // terminal is asked about the block's ends directly and the on-screen test compares its
+        // answers with its own visible range. A terminal that counts lines rather than rows still
+        // needs the column count to place a wrapped line; see `TerminalPeekPolicy.rows`.
+        return TerminalBufferScanner.blocks(in: text).compactMap { block in
+            guard let rows = TerminalPeekPolicy.rows(
+                ofBlockFrom: start + block.range.location,
+                to: start + block.lastCharacter,
+                line: { self.line(of: $0, in: pane.text, before: deadline) }
+            ), rows.overlaps(grid.visible),
+                let rectangle = TerminalPeekPolicy.rowsRectangle(
+                    lines: rows,
+                    viewport: grid.viewport,
+                    rowHeight: grid.rowHeight,
+                    offset: grid.offset
+                ) else { return nil }
             return Located(block: block, rectangle: rectangle, content: grid.viewport)
         }
     }

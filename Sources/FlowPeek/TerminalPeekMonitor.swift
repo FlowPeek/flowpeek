@@ -18,9 +18,14 @@ import OSLog
 ///   rows come back as a rectangle. The viewport is `AXVisibleCharacterRange` where it narrows
 ///   (Terminal.app: 1639 of 8808 characters, measured) and `AXRangeForPosition` at the content
 ///   corners where it does not (iTerm2 reports the whole buffer as visible).
-/// - **by grid arithmetic.** Ghostty answers neither, so the row height comes from its scroll
-///   area's `AXContentSize` divided by the line count, and the scroll bar's value says how far down
-///   the buffer the viewport is. Measured 2056 points over 128 lines, or 16.06 per row.
+/// - **by grid arithmetic.** Ghostty answers neither, so the geometry is solved for instead: its
+///   scroll area reports `rows * rowHeight + padding` as its content height, and the rows are the
+///   rows of the lines its `AXValue` holds, so the column count -- the one thing that decides how
+///   many rows a line takes -- can be worked out from the height. `TerminalGridInference` does
+///   that, sieving candidates across several looks until they agree; measured on Ghostty, 138
+///   columns of 16 points with 6 points of padding. Until they agree, and for a buffer too big to
+///   read, the row height is the content height over the line count as before, which is right only
+///   while nothing wraps.
 ///
 /// A terminal that renders into a canvas inside a web view exposes no text at all -- Orca's
 /// embedded Ghostty answers with one `AXWebArea` whose value is empty, and anything on xterm.js is
@@ -82,6 +87,10 @@ final class TerminalPeekMonitor {
     /// leaving exactly the fresh-window case with nothing to fall back on. A font change while no
     /// buffer overflows is the price, and it corrects itself on the next read that does.
     private var rowHeights: [pid_t: CGFloat] = [:]
+    /// Grids that still explain everything this pane has reported. Sieved on every look and used
+    /// only once they agree, so a wrong column count cannot place an outline; see
+    /// `TerminalGridInference`.
+    private var gridCandidates: [pid_t: [TerminalGrid]] = [:]
     /// Whose buffer the read in flight is looking at, for `rowHeights`.
     private var reading: pid_t?
     /// How many polls in a row have been answered from `lastLook` without reading the buffer.
@@ -197,9 +206,10 @@ final class TerminalPeekMonitor {
     /// identifier cannot inherit another terminal's font. Cheap: the dictionary holds one entry per
     /// terminal the user has looked at this session.
     private func forgetDeadProcesses() {
-        guard rowHeights.count > 1 else { return }
+        guard rowHeights.count > 1 || gridCandidates.count > 1 else { return }
         let alive = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
         rowHeights = rowHeights.filter { alive.contains($0.key) }
+        gridCandidates = gridCandidates.filter { alive.contains($0.key) }
     }
 
     private func scrolled() {
@@ -620,7 +630,14 @@ final class TerminalPeekMonitor {
         let offset: CGFloat
         let value: Double
         let lineCount: Int
+        /// Which lines the viewport shows, for choosing what to scan.
         let visible: ClosedRange<Int>
+        /// The grid the pane's own numbers gave up, and the line lengths it was worked out from.
+        /// Present only once the sieve has settled; without it the rows below are lines, which is
+        /// what this path assumed before any of them could be told apart.
+        let inferred: (grid: TerminalGrid, lineLengths: [Int])?
+        /// Which rows the viewport shows. Rows, not lines, so only present alongside `inferred`.
+        let visibleRows: ClosedRange<Int>?
     }
 
     private func grid(_ pane: Pane, characters: Int, before deadline: Date) -> Grid? {
@@ -629,14 +646,6 @@ final class TerminalPeekMonitor {
               let viewport = AccessibilityRead.rect(scroll, "AXFrame", before: deadline),
               let lastLine = line(of: characters - 1, in: pane.text, before: deadline) else { return nil }
         let lineCount = lastLine + 1
-        guard let measurement = TerminalPeekPolicy.rowHeight(
-            contentHeight: contentSize.height,
-            viewportHeight: viewport.height,
-            lineCount: lineCount,
-            remembered: reading.flatMap { rowHeights[$0] }
-        ) else { return nil }
-        let rowHeight = measurement.height
-        if measurement.isMeasured, let reading { rowHeights[reading] = rowHeight }
         // No scroll bar means nothing has scrolled off, and the offset is then zero whatever value
         // is assumed -- `scrollOffset` multiplies by an overflow of nothing. A bar with no readable
         // value is taken to be at the bottom, which is where a terminal sits unless someone moved it.
@@ -647,6 +656,53 @@ final class TerminalPeekMonitor {
             contentHeight: contentSize.height,
             viewportHeight: viewport.height
         )
+
+        if let inferred = inferredGrid(
+            pane,
+            characters: characters,
+            lineCount: lineCount,
+            contentHeight: contentSize.height,
+            viewport: viewport,
+            before: deadline
+        ), let rows = TerminalGridInference.visibleRows(
+            offset: offset,
+            viewportHeight: viewport.height,
+            grid: inferred.grid,
+            totalRows: TerminalGridInference.rowStarts(
+                inferred.lineLengths,
+                columns: inferred.grid.columns
+            )[inferred.lineLengths.count]
+        ), let first = TerminalGridInference.line(
+            ofRow: rows.lowerBound,
+            lineLengths: inferred.lineLengths,
+            columns: inferred.grid.columns
+        ), let last = TerminalGridInference.line(
+            ofRow: rows.upperBound,
+            lineLengths: inferred.lineLengths,
+            columns: inferred.grid.columns
+        ) {
+            return Grid(
+                viewport: viewport,
+                rowHeight: inferred.grid.rowHeight,
+                // The rows start below the pane's own padding, so the offset a row is placed
+                // against is the scrolled distance less that padding.
+                offset: offset - inferred.grid.topPadding,
+                value: value,
+                lineCount: inferred.lineLengths.count,
+                visible: first...max(first, last),
+                inferred: inferred,
+                visibleRows: rows
+            )
+        }
+
+        guard let measurement = TerminalPeekPolicy.rowHeight(
+            contentHeight: contentSize.height,
+            viewportHeight: viewport.height,
+            lineCount: lineCount,
+            remembered: reading.flatMap { rowHeights[$0] }
+        ) else { return nil }
+        let rowHeight = measurement.height
+        if measurement.isMeasured, let reading { rowHeights[reading] = rowHeight }
         guard let visible = TerminalPeekPolicy.visibleLines(
             offset: offset,
             viewportHeight: viewport.height,
@@ -659,8 +715,67 @@ final class TerminalPeekMonitor {
             offset: offset,
             value: value,
             lineCount: lineCount,
-            visible: visible
+            visible: visible,
+            inferred: nil,
+            visibleRows: nil
         )
+    }
+
+    /// The pane's grid, once its own numbers have narrowed to one answer.
+    ///
+    /// A terminal that answers nothing about where a character is drawn still reports how tall its
+    /// content is, and that height is a fact about the rows the text occupies -- so the column count
+    /// can be solved for. One look is not enough (a wrong column count explains one height as well
+    /// as the right one does), so candidates are kept and sieved against every later look, and
+    /// nothing is drawn from them until the survivors agree. See `TerminalGridInference`.
+    ///
+    /// The line lengths come from `AXValue`. Ghostty caps what it exposes at about 32,000
+    /// characters and answered in 0.07 to 0.21 ms at every buffer size measured, up to 20,000 lines
+    /// printed; the cap here is the same one the scanner refuses to look past, so a terminal that
+    /// hands over an unbounded buffer is left to the path below rather than copied every poll.
+    private func inferredGrid(
+        _ pane: Pane,
+        characters: Int,
+        lineCount: Int,
+        contentHeight: CGFloat,
+        viewport: CGRect,
+        before deadline: Date
+    ) -> (grid: TerminalGrid, lineLengths: [Int])? {
+        guard characters <= TerminalBufferScanner.maximumWindowCharacters,
+              contentHeight > viewport.height + TerminalPeekPolicy.overflowTolerance,
+              let pid = reading,
+              let buffer = AccessibilityRead.string(pane.text, kAXValueAttribute as String, before: deadline)
+        else { return nil }
+        let lengths = TerminalGridInference.lineLengths(of: buffer)
+        // The slice this path reads is cut with `AXLineForIndex`, so the terminal's lines and the
+        // value's lines have to be the same lines. Ghostty's are: it counts whole lines in both,
+        // and its buffer ends on a prompt rather than a newline, so the two counts match. A
+        // terminal that counted rows there would report more of them than the value holds lines,
+        // and its rows are already correct without any of this -- so it is left alone rather than
+        // sliced with numbers from the wrong count.
+        guard !lengths.isEmpty, lineCount <= lengths.count else { return nil }
+
+        var candidates = (gridCandidates[pid] ?? []).filter {
+            TerminalGridInference.explains(
+                $0,
+                contentHeight: contentHeight,
+                viewportHeight: viewport.height,
+                lineLengths: lengths
+            )
+        }
+        // Nothing survived, so either this is the first look or the pane was resized or its font
+        // changed. Either way the answer starts again from what is on screen now.
+        if candidates.isEmpty {
+            candidates = TerminalGridInference.candidates(
+                contentHeight: contentHeight,
+                viewportHeight: viewport.height,
+                paneWidth: viewport.width,
+                lineLengths: lengths
+            )
+        }
+        gridCandidates[pid] = candidates
+        guard let grid = TerminalGridInference.agreed(candidates, lineLengths: lengths) else { return nil }
+        return (grid, lengths)
     }
 
     private func gridRead(_ pane: Pane, grid: Grid, characters: Int, deadline: Date) -> [Located] {
@@ -675,12 +790,29 @@ final class TerminalPeekMonitor {
         guard end > start,
               let text = string(pane.text, in: NSRange(location: start, length: end - start), before: deadline)
         else { return [] }
-        // The scanner counts newlines; this arithmetic wants whatever `AXLineForIndex` counts,
-        // because the visible range and the row height are expressed in that. Adding `first` -- a
-        // number from the terminal -- to the scanner's own line numbers mixed the two, so the
-        // terminal is asked about the block's ends directly and the on-screen test compares its
-        // answers with its own visible range. A terminal that counts lines rather than rows still
-        // needs the column count to place a wrapped line; see `TerminalPeekPolicy.rows`.
+        // With the grid known, the block's rows are counted from the line lengths -- a line wider
+        // than the pane occupies as many rows as it wraps to -- and the on-screen test is rows
+        // against rows.
+        if let inferred = grid.inferred, let visibleRows = grid.visibleRows {
+            return TerminalBufferScanner.blocks(in: text).compactMap { block in
+                guard let rows = TerminalGridInference.rowSpan(
+                    ofLines: (first + block.lines.lowerBound)...(first + block.lines.upperBound),
+                    lineLengths: inferred.lineLengths,
+                    columns: inferred.grid.columns
+                ), rows.overlaps(visibleRows),
+                    let rectangle = TerminalPeekPolicy.rowsRectangle(
+                        lines: rows,
+                        viewport: grid.viewport,
+                        rowHeight: grid.rowHeight,
+                        offset: grid.offset
+                    ) else { return nil }
+                return Located(block: block, rectangle: rectangle, content: grid.viewport)
+            }
+        }
+        // Without it, the scanner counts newlines while this arithmetic wants whatever
+        // `AXLineForIndex` counts, and adding `first` -- a number from the terminal -- to the
+        // scanner's own line numbers mixed the two. The terminal is asked about the block's ends
+        // directly instead, and the on-screen test compares its answers with its own visible range.
         return TerminalBufferScanner.blocks(in: text).compactMap { block in
             guard let rows = TerminalPeekPolicy.rows(
                 ofBlockFrom: start + block.range.location,

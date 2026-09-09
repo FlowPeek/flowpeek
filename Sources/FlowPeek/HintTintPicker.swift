@@ -30,7 +30,6 @@ struct HintTintPreview: View {
     }
 
     private var frame: some View {
-        let pitch = Skeleton.rowHeight + Skeleton.rowGap
         let height = CGFloat(Self.rows.count) * Skeleton.rowHeight
             + CGFloat(Self.rows.count - 1) * Skeleton.rowGap + 6
         return RoundedRectangle(cornerRadius: 4, style: .continuous)

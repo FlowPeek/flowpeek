@@ -183,13 +183,14 @@ public enum TerminalBufferScanner {
     private static func unfencedEnd(_ lines: [Line], from first: Int) -> Int {
         var index = first
         let limit = min(lines.count - 1, first + maximumUnfencedLines - 1)
+        let base = indentWidth(lines[first].text)
         while index < limit {
             let next = lines[index + 1].text
             if next.trimmingCharacters(in: .whitespaces).isEmpty {
                 guard let following = lines.indices.dropFirst(index + 2).first(where: {
                     !lines[$0].text.trimmingCharacters(in: .whitespaces).isEmpty
-                }), following <= limit, continuesBlock(lines[following].text) else { break }
-            } else if !continuesBlock(next) {
+                }), following <= limit, continuesBlock(lines[following].text, deeperThan: base) else { break }
+            } else if !continuesBlock(next, deeperThan: base) {
                 break
             }
             index += 1
@@ -198,14 +199,27 @@ public enum TerminalBufferScanner {
     }
 
     /// Whether a line is still part of the diagram above it.
-    private static func continuesBlock(_ line: String) -> Bool {
-        if line.first?.isWhitespace == true { return true }
+    ///
+    /// Indented *further than the declaration*, rather than indented at all. A terminal user
+    /// interface that prints a margin down the left of everything it says makes "indented at all"
+    /// true of its prose as well as of the diagram inside it: measured against Claude Code, whose
+    /// margin is two spaces, a diagram declared at that margin swallowed every paragraph after it
+    /// and mermaid's parse error was drawn over the lot. The declaration's own indentation is the
+    /// margin, so the diagram's body is what sits past it.
+    private static func continuesBlock(_ line: String, deeperThan base: Int) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.hasPrefix("%%") { return true }
+        if !trimmed.isEmpty, indentWidth(line) > base { return true }
         // A rule of dashes is a separator in someone's output, not a link, and `---` is in the
         // arrow table. Everything else with an arrow in it belongs to the diagram.
         guard !trimmed.allSatisfy({ $0 == "-" }) else { return false }
         return MermaidDetector.hasEdgeToken(trimmed)
+    }
+
+    /// Leading spaces and tabs, counted in characters. A terminal has already expanded its own
+    /// tabs, so a tab that survives came from the text and one column is as good a guess as eight.
+    private static func indentWidth(_ line: String) -> Int {
+        line.prefix { $0 == " " || $0 == "\t" }.count
     }
 
     // MARK: - Lines
@@ -238,6 +252,11 @@ public enum TerminalBufferScanner {
             lines.append(Line(text: text, start: start, contentEnd: start + text.utf16.count))
             start += units + 1
         }
-        return lines
+        // A box drawn around the output hides everything inside it -- `│ ```mermaid` opens no fence
+        // -- so the borders come off before anything is looked for. The offsets do not move with
+        // the text: they name where the row is in the buffer, which is what puts the outline on
+        // screen, and a row is in the same place whether or not it has a border down its side.
+        guard let stripped = BoxGutter.strip(lines.map(\.text)) else { return lines }
+        return zip(lines, stripped).map { Line(text: $1, start: $0.start, contentEnd: $0.contentEnd) }
     }
 }

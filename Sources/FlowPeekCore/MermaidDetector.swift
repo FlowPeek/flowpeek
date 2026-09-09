@@ -126,10 +126,22 @@ public enum MermaidDetector {
         guard !rest.isEmpty else { return true }
         // Statement punctuation belongs to the grammar, not to the word: `graph TD;` and
         // `gitGraph LR:` are both declarations.
-        let tail = String(rest.prefix { !$0.isWhitespace })
+        let tailWord = rest.prefix { !$0.isWhitespace }
+        let tail = String(tailWord)
             .trimmingCharacters(in: statementPunctuation)
             .lowercased()
-        return declarationTails.contains(tail)
+        guard declarationTails.contains(tail) else { return false }
+        // And nothing may follow a direction or a flag, which is the half of the rule that only
+        // the terminal needs. Reading a line of the user's own prose is not a hypothetical there:
+        // narrowing a Ghostty window from 100 columns to 70 reflowed a typed question so that
+        // `flowchart TD renderer handles` began a row, the tail was `td`, and FlowPeek framed the
+        // paragraph and rendered mermaid's parse error over it. A title takes free text after it and
+        // a statement separator hands the line back to the grammar, so `pie title Q3 revenue` and
+        // `flowchart TD; A --> B` both stay declarations.
+        if tail == "title" { return true }
+        if let last = tailWord.last, ";:,".contains(last) { return true }
+        let trailing = rest.dropFirst(tailWord.count).trimmingCharacters(in: .whitespaces)
+        return trailing.isEmpty || trailing.hasPrefix("%%")
     }
 
     /// What may still follow the matched starter *inside the same word*. The table stores the
@@ -314,6 +326,11 @@ public enum MermaidDetector {
         // about how confidently its opening line was recognised, and counting it downgraded a
         // clean block with a trailing "Copy" -- or merely a trailing blank line -- from certain.
         dropTrailingChrome(&lines)
+        // Before the line-number gutter: a boxed listing wears both, borders outermost.
+        if let unboxed = BoxGutter.strip(lines) {
+            lines = unboxed
+            outcome.changed = true
+        }
         if stripGutter(&lines) { outcome.changed = true }
         dropLeadingChrome(&lines, into: &outcome)
         return outcome

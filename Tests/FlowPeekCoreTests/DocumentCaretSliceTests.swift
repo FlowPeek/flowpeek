@@ -263,6 +263,22 @@ final class DocumentCaretSliceTests: XCTestCase {
         }
     }
 
+    /// A direction ends the declaration line. Prose that a narrow terminal reflowed onto one --
+    /// measured by narrowing a Ghostty window from 100 columns to 70, which pushed a typed question
+    /// onto `flowchart TD renderer handles` -- otherwise passes on the strength of its second word
+    /// alone, and mermaid's parse error gets drawn over the paragraph.
+    func testProseAfterADirectionIsNotADeclaration() {
+        for prose in ["flowchart TD renderer handles", "graph LR is what we want", "pie showData for Q3",
+                      "xychart-beta horizontal axis labels are wrong"] {
+            XCTAssertFalse(MermaidDetector.declaresDiagram(prose), prose)
+        }
+        // What may still follow one: a comment, and a separator that hands the line back to the
+        // grammar. A title takes free text and is already covered above.
+        for opening in ["flowchart TD %% left to right reads better", "flowchart TD; A --> B", "graph LR;"] {
+            XCTAssertTrue(MermaidDetector.declaresDiagram(opening), opening)
+        }
+    }
+
     // MARK: - What one read is allowed to cost
 
     /// An editor hands over its whole buffer and the split below it is linear in that, so the size

@@ -57,6 +57,31 @@ public enum TerminalPeekPolicy {
     /// of the three terminals costs; it exists so a wedged one cannot hold the main actor.
     public static let readBudget: TimeInterval = 0.15
 
+    /// How many polls in a row may be answered by "the terminal looks the same as last time"
+    /// before the buffer is read again anyway.
+    ///
+    /// The cheap half of a read -- a character count, the viewport rectangle, the scroll bar's
+    /// value -- is what that comparison is made of, and none of those terms is derived from the
+    /// text. A terminal that repaints its rows with rows of the same length holds all of them
+    /// constant while showing something else entirely, which is not a corner case: measured against
+    /// Claude Code's virtualised scrollback, twenty-two consecutive polls saw identical numbers
+    /// while the diagram on screen changed five times, and no outline was ever drawn.
+    ///
+    /// Four polls is one second, and it costs a quarter of a full read per idle poll -- the state
+    /// this exists to keep cheap, a terminal with nothing in it, is also the state where being a
+    /// second late is invisible.
+    public static let rescanInterval = 4
+
+    /// Whether a poll has to read the buffer rather than trust matching fingerprints.
+    ///
+    /// An outline that is up always reads. A frame is drawn *around specific rows*, so one left
+    /// behind by a repaint is pointing at whatever took their place -- the worst thing this route
+    /// can do, and worth four reads a second for as long as one is on screen. With nothing drawn
+    /// the cost of being stale is an outline that arrives late, which the interval bounds.
+    public static func mustRescan(isShowing: Bool, shortcutsTaken: Int) -> Bool {
+        isShowing || shortcutsTaken >= rescanInterval
+    }
+
     /// Same floor as the pointer route: a `.weak` match is the kind of thing that fires on prose
     /// containing the word "graph", and an outline over ordinary output is worse than none.
     public static let minimumConfidence: MermaidDetection.Confidence = .likely
@@ -122,13 +147,70 @@ public enum TerminalPeekPolicy {
 
     // MARK: - Grid arithmetic
 
-    /// The height of one row, from a scroll area that reports how tall its content is. Nil when the
-    /// answer is not a plausible row.
-    public static func rowHeight(contentHeight: CGFloat, lineCount: Int) -> CGFloat? {
-        guard lineCount > 0, contentHeight.isFinite, contentHeight > 0 else { return nil }
+    /// How much taller than its viewport a scroll area's content has to claim to be before it is
+    /// believed to be reporting its own height. One point, against float noise in two numbers that
+    /// are equal by construction whenever the buffer fits.
+    public static let overflowTolerance: CGFloat = 1
+
+    /// The height of one row, and whether this read is where it came from.
+    public struct RowHeight: Equatable, Sendable {
+        public let height: CGFloat
+        /// Divided out of an overflowing buffer on this read, rather than carried over from an
+        /// earlier one. Only a measured height is worth remembering.
+        public let isMeasured: Bool
+
+        public init(height: CGFloat, isMeasured: Bool) {
+            self.height = height
+            self.isMeasured = isMeasured
+        }
+    }
+
+    /// The height of one row, from a scroll area that reports how tall its content is.
+    ///
+    /// Dividing the content height by the line count only answers while the buffer is *taller* than
+    /// the viewport. A buffer that fits reports the viewport's height instead of its own -- Ghostty
+    /// answers `AXContentSize.height == AXFrame.height` exactly -- so the division then returns the
+    /// viewport divided by however many rows happen to be painted, which is a row height only in
+    /// the one case where the paint fills the window. Measured in Ghostty: 16 rows in a fresh window
+    /// divided out to 63.6 points against a real 16, and every frame was drawn four times too tall;
+    /// `cat` of a thirty-line file divided out to 32.8 and settled there, framing rows the diagram
+    /// was thirty points above. Both were confident and both were wrong, which is worse than
+    /// refusing.
+    ///
+    /// So the division is only trusted while the buffer overflows, its answer is `remembered` by the
+    /// caller, and a buffer that fits is placed with that remembered height. With none to hand there
+    /// is no way to know how tall a row is and this answers nothing: no outline is worse than an
+    /// outline somewhere else.
+    ///
+    /// A remembered height is cross-checked against the one thing a fitting buffer does say. Its
+    /// content height *is* the viewport, and the painted rows fit inside the viewport by
+    /// construction, so `lineCount * height` may not exceed it -- which is what catches a height
+    /// remembered before the font grew. Nothing bounds it from below, so a height remembered before
+    /// the font *shrank* is accepted for as long as the buffer keeps fitting, and corrects itself on
+    /// the first read that overflows again.
+    /// - Parameters:
+    ///   - lineCount: rows the buffer has painted, which is the whole buffer -- both callers count
+    ///     it off the last character.
+    ///   - remembered: the height last measured off an overflowing buffer in this terminal.
+    public static func rowHeight(
+        contentHeight: CGFloat,
+        viewportHeight: CGFloat,
+        lineCount: Int,
+        remembered: CGFloat?
+    ) -> RowHeight? {
+        guard lineCount > 0, contentHeight.isFinite, contentHeight > 0, viewportHeight.isFinite else {
+            return nil
+        }
+        guard contentHeight > viewportHeight + overflowTolerance else {
+            guard viewportHeight > 0, let remembered, rowHeightRange.contains(remembered) else { return nil }
+            // One row of slack: the last row of a paint that fills the window is routinely a
+            // fraction of a row past its bottom edge.
+            guard CGFloat(lineCount) * remembered <= viewportHeight + remembered else { return nil }
+            return RowHeight(height: remembered, isMeasured: false)
+        }
         let height = contentHeight / CGFloat(lineCount)
         guard rowHeightRange.contains(height) else { return nil }
-        return height
+        return RowHeight(height: height, isMeasured: true)
     }
 
     /// How far the buffer is scrolled, in points. A scroll bar's value is the fraction of the

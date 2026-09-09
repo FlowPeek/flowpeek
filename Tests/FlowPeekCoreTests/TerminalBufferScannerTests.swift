@@ -303,6 +303,53 @@ final class TerminalBufferScannerTests: XCTestCase {
         XCTAssertEqual(TerminalBufferScanner.blocks(in: "", visible: 0...0), [])
     }
 
+    /// Claude Code prints everything it says behind a two-space margin, which used to make every
+    /// paragraph after a diagram look indented under it: the block ran to the end of the answer and
+    /// mermaid's parse error was drawn over the prose. Measured, and it failed on line 5.
+    func testAMarginDownTheLeftDoesNotMakeProseIntoDiagramBody() throws {
+        let window = """
+          Here is the flow you asked for:
+
+          flowchart TD
+              A[Start] --> B[Render]
+              B --> C[Done]
+
+          The renderer hands the SVG back to the panel, which
+          sizes itself to it before it is shown.
+        """
+        let blocks = TerminalBufferScanner.blocks(in: window)
+        XCTAssertEqual(blocks.count, 1)
+        let block = try XCTUnwrap(blocks.first)
+        XCTAssertEqual(block.lines, 2...4)
+        XCTAssertFalse(block.text.contains("renderer hands"))
+    }
+
+    /// The same margin, and a diagram whose body sits at it rather than past it: an arrow still says
+    /// the line belongs to the block.
+    func testAnArrowStillContinuesABlockAtTheSameIndent() throws {
+        let window = """
+          flowchart TD
+          A --> B
+          B --> C
+          The point of all this is that the renderer is lazy.
+        """
+        let block = try XCTUnwrap(TerminalBufferScanner.blocks(in: window).first)
+        XCTAssertEqual(block.lines, 0...2)
+    }
+
+    /// Narrowing a Ghostty window from 100 columns to 70 reflowed a typed question so that
+    /// `flowchart TD renderer handles` began a row. It scored `.certain` and drew a frame around
+    /// the user's own prompt.
+    func testAReflowedPromptIsNotADiagram() {
+        let window = """
+        > Explain how the
+          flowchart TD renderer handles
+          hard wraps in the middle of a
+          declaration line
+        """
+        XCTAssertEqual(TerminalBufferScanner.blocks(in: window), [])
+    }
+
     /// CRLF reaches a terminal from a Windows file read over a mount, and the offsets a rectangle
     /// is asked for are counted in UTF-16 code units.
     func testCarriageReturnsDoNotShiftTheRange() throws {

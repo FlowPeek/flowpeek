@@ -67,6 +67,20 @@ final class TerminalPeekMonitor {
     /// What the last read looked at, and whether it reached a conclusion it acted on. A poll that
     /// sees the same numbers as a settled read has nothing to recompute.
     private var lastLook: (fingerprint: Fingerprint, settled: Bool)?
+    /// The row height last divided out of an overflowing buffer, per terminal process.
+    ///
+    /// The grid strategy cannot measure a row while the buffer fits its viewport, because a scroll
+    /// area that has nothing to scroll reports the viewport's height as its content's -- so this is
+    /// what places a diagram in a window that has not filled up yet, which is every fresh one.
+    /// Keyed by process rather than by window: a second window of the same terminal is the same
+    /// font, and keying it to the pane cache would throw the answer away on every window switch,
+    /// leaving exactly the fresh-window case with nothing to fall back on. A font change while no
+    /// buffer overflows is the price, and it corrects itself on the next read that does.
+    private var rowHeights: [pid_t: CGFloat] = [:]
+    /// Whose buffer the read in flight is looking at, for `rowHeights`.
+    private var reading: pid_t?
+    /// How many polls in a row have been answered from `lastLook` without reading the buffer.
+    private var shortcutsTaken = 0
 
     /// Why the watch is standing down. A set rather than a flag because the reasons arrive from
     /// unrelated places and overlap: opening a diagram from an outline raises `preview` while the
@@ -141,6 +155,7 @@ final class TerminalPeekMonitor {
         guard isRunning else { return }
         // A different application means a different window, and with it a different text area.
         forgetPane()
+        forgetDeadProcesses()
         guard TerminalApp(bundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier) != nil else {
             suspend()
             retire()
@@ -170,6 +185,16 @@ final class TerminalPeekMonitor {
     private func forgetPane() {
         cached = nil
         lastLook = nil
+        shortcutsTaken = 0
+    }
+
+    /// Forgets the row heights of terminals that are no longer running, so a recycled process
+    /// identifier cannot inherit another terminal's font. Cheap: the dictionary holds one entry per
+    /// terminal the user has looked at this session.
+    private func forgetDeadProcesses() {
+        guard rowHeights.count > 1 else { return }
+        let alive = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
+        rowHeights = rowHeights.filter { alive.contains($0.key) }
     }
 
     private func scrolled() {
@@ -274,6 +299,7 @@ final class TerminalPeekMonitor {
     }
 
     private func read(_ terminal: TerminalApp, in application: NSRunningApplication, deadline: Date) -> Read {
+        reading = application.processIdentifier
         let app = AXUIElementCreateApplication(application.processIdentifier)
         _ = AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
         guard let window = AccessibilityRead.element(app, kAXFocusedWindowAttribute as String, before: deadline) else {
@@ -390,8 +416,16 @@ final class TerminalPeekMonitor {
     }
 
     /// Whether this look can stop here, and what to record for the next one.
+    ///
+    /// Matching fingerprints are necessary but not sufficient: none of the terms is derived from the
+    /// text, so `mustRescan` decides how long they may speak for it.
     private func shortcut(for fingerprint: Fingerprint) -> Look? {
-        if let lastLook, lastLook.settled, lastLook.fingerprint == fingerprint { return .unchanged }
+        if let lastLook, lastLook.settled, lastLook.fingerprint == fingerprint,
+           !TerminalPeekPolicy.mustRescan(isShowing: showing, shortcutsTaken: shortcutsTaken) {
+            shortcutsTaken += 1
+            return .unchanged
+        }
+        shortcutsTaken = 0
         self.lastLook = (fingerprint, true)
         return nil
     }
@@ -550,10 +584,14 @@ final class TerminalPeekMonitor {
               let viewport = AccessibilityRead.rect(scroll, "AXFrame", before: deadline),
               let lastLine = line(of: characters - 1, in: pane.text, before: deadline) else { return nil }
         let lineCount = lastLine + 1
-        guard let rowHeight = TerminalPeekPolicy.rowHeight(
+        guard let measurement = TerminalPeekPolicy.rowHeight(
             contentHeight: contentSize.height,
-            lineCount: lineCount
+            viewportHeight: viewport.height,
+            lineCount: lineCount,
+            remembered: reading.flatMap { rowHeights[$0] }
         ) else { return nil }
+        let rowHeight = measurement.height
+        if measurement.isMeasured, let reading { rowHeights[reading] = rowHeight }
         // No scroll bar means nothing has scrolled off, and the offset is then zero whatever value
         // is assumed -- `scrollOffset` multiplies by an overflow of nothing. A bar with no readable
         // value is taken to be at the bottom, which is where a terminal sits unless someone moved it.

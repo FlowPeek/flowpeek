@@ -64,21 +64,177 @@ final class TerminalPeekPolicyTests: XCTestCase {
         XCTAssertEqual(span, 0...2)
     }
 
+    // MARK: - Rescanning
+
+    /// The state the shortcut exists for: nothing drawn, and the terminal answering the same cheap
+    /// numbers poll after poll.
+    func testAnIdleTerminalIsAnsweredFromTheLastRead() {
+        XCTAssertFalse(TerminalPeekPolicy.mustRescan(isShowing: false, shortcutsTaken: 0))
+        XCTAssertFalse(TerminalPeekPolicy.mustRescan(isShowing: false, shortcutsTaken: 3))
+    }
+
+    /// None of the fingerprint's terms comes from the text, so matching numbers cannot speak for
+    /// the buffer indefinitely. Claude Code's virtualised scrollback held all of them constant
+    /// across twenty-two polls while the diagram changed five times.
+    func testMatchingNumbersStopSpeakingForTheBufferAfterASecond() {
+        XCTAssertTrue(TerminalPeekPolicy.mustRescan(isShowing: false, shortcutsTaken: 4))
+        XCTAssertTrue(TerminalPeekPolicy.mustRescan(isShowing: false, shortcutsTaken: 22))
+        XCTAssertEqual(
+            Double(TerminalPeekPolicy.rescanInterval) * TerminalPeekPolicy.pollInterval,
+            1,
+            accuracy: 0.0001
+        )
+    }
+
+    /// A frame is drawn around specific rows, so one on screen reads every poll: a repaint under it
+    /// leaves it pointing at whatever took those rows.
+    func testAnOutlineOnScreenAlwaysReadsTheBuffer() {
+        XCTAssertTrue(TerminalPeekPolicy.mustRescan(isShowing: true, shortcutsTaken: 0))
+    }
+
     // MARK: - Grid arithmetic
 
-    /// Ghostty, measured: a scroll area 2056 points tall over a 128-line buffer.
+    /// Ghostty, measured: a scroll area 2056 points tall over a 128-line buffer, in a 1336-point
+    /// viewport it overflows.
     func testARowHeightComesFromContentOverLines() throws {
-        let height = try XCTUnwrap(TerminalPeekPolicy.rowHeight(contentHeight: 2_056, lineCount: 128))
-        XCTAssertEqual(height, 16.0625, accuracy: 0.0001)
+        let measurement = try XCTUnwrap(TerminalPeekPolicy.rowHeight(
+            contentHeight: 2_056,
+            viewportHeight: 1_336,
+            lineCount: 128,
+            remembered: nil
+        ))
+        XCTAssertEqual(measurement.height, 16.0625, accuracy: 0.0001)
+        XCTAssertTrue(measurement.isMeasured)
     }
 
     /// Soft wrapping puts two rows on one buffer line and is not announced, so an answer that is
     /// not a plausible row is refused rather than drawn somewhere wrong.
     func testAnImplausibleRowHeightIsRefused() {
-        XCTAssertNil(TerminalPeekPolicy.rowHeight(contentHeight: 2_056, lineCount: 2))
-        XCTAssertNil(TerminalPeekPolicy.rowHeight(contentHeight: 2_056, lineCount: 100_000))
-        XCTAssertNil(TerminalPeekPolicy.rowHeight(contentHeight: 0, lineCount: 128))
-        XCTAssertNil(TerminalPeekPolicy.rowHeight(contentHeight: 2_056, lineCount: 0))
+        for lineCount in [2, 100_000] {
+            XCTAssertNil(TerminalPeekPolicy.rowHeight(
+                contentHeight: 2_056,
+                viewportHeight: 1_336,
+                lineCount: lineCount,
+                remembered: nil
+            ))
+        }
+        XCTAssertNil(TerminalPeekPolicy.rowHeight(
+            contentHeight: 0,
+            viewportHeight: 1_336,
+            lineCount: 128,
+            remembered: nil
+        ))
+        XCTAssertNil(TerminalPeekPolicy.rowHeight(
+            contentHeight: 2_056,
+            viewportHeight: 1_336,
+            lineCount: 0,
+            remembered: nil
+        ))
+    }
+
+    /// Ghostty, measured in a fresh window: sixteen rows painted, and `AXContentSize.height` equal
+    /// to `AXFrame.height` to the point. The division answers 63.6 against a real 16, and every
+    /// frame drawn from it was four times too tall -- so a buffer that fits is not divided.
+    func testAFittingBufferIsNotDivided() {
+        XCTAssertNil(TerminalPeekPolicy.rowHeight(
+            contentHeight: 1_017.6,
+            viewportHeight: 1_017.6,
+            lineCount: 16,
+            remembered: nil
+        ))
+    }
+
+    /// The same window, once a row height has been measured off an overflowing buffer. Ghostty's
+    /// real row is 16 points, which is what the sixteen painted rows are placed with.
+    func testAFittingBufferIsPlacedWithTheRememberedRow() throws {
+        let measurement = try XCTUnwrap(TerminalPeekPolicy.rowHeight(
+            contentHeight: 1_017.6,
+            viewportHeight: 1_017.6,
+            lineCount: 16,
+            remembered: 16
+        ))
+        XCTAssertEqual(measurement.height, 16)
+        XCTAssertFalse(measurement.isMeasured, "a remembered height must not be remembered again")
+    }
+
+    /// `cat` of a thirty-line file in a window that holds sixty-three rows: the division settled on
+    /// 32.8 and framed rows the diagram was thirty points above.
+    func testAPartialPaintIsPlacedFromTheTopOfTheViewport() throws {
+        let measurement = try XCTUnwrap(TerminalPeekPolicy.rowHeight(
+            contentHeight: 1_008,
+            viewportHeight: 1_008,
+            lineCount: 30,
+            remembered: 16
+        ))
+        XCTAssertEqual(measurement.height, 16)
+        // Nothing has scrolled off a buffer that fits, so the rows start at the viewport's top.
+        XCTAssertEqual(TerminalPeekPolicy.scrollOffset(value: 1, contentHeight: 1_008, viewportHeight: 1_008), 0)
+        let rows = try XCTUnwrap(TerminalPeekPolicy.rowsRectangle(
+            lines: 10...13,
+            viewport: CGRect(x: 0, y: 100, width: 800, height: 1_008),
+            rowHeight: measurement.height,
+            offset: 0
+        ))
+        XCTAssertEqual(rows.minY, 260)
+        XCTAssertEqual(rows.height, 64)
+    }
+
+    /// A height remembered before the font grew would place rows past the bottom of the window. The
+    /// painted rows have to fit inside the viewport -- that is the one thing a fitting buffer says
+    /// about itself -- so a remembered height that says otherwise is stale and answers nothing.
+    func testARememberedRowThatNoLongerFitsIsRefused() {
+        XCTAssertNil(TerminalPeekPolicy.rowHeight(
+            contentHeight: 1_008,
+            viewportHeight: 1_008,
+            lineCount: 63,
+            remembered: 32
+        ))
+        // One row of slack, because the last row of a full window routinely straddles its edge.
+        XCTAssertNotNil(TerminalPeekPolicy.rowHeight(
+            contentHeight: 1_008,
+            viewportHeight: 1_008,
+            lineCount: 63,
+            remembered: 16
+        ))
+    }
+
+    /// Five Ghostty windows, read at once off a running instance. Two overflow and answer with the
+    /// real row; three fit and answer with the viewport, one of them a full-screen paint that
+    /// divides correctly by luck. What the division makes of the other two is the bug: 32.84 points
+    /// against a real 16.14 in a window showing a 23-line diagram, and 84.83 in one showing a
+    /// prompt -- the second is refused as implausible, the first was drawn.
+    func testTheRowHeightIsRightInEveryGhosttyWindowAtOnce() throws {
+        var remembered: CGFloat?
+        func read(lines: Int, content: CGFloat, viewport: CGFloat) -> CGFloat? {
+            guard let measurement = TerminalPeekPolicy.rowHeight(
+                contentHeight: content,
+                viewportHeight: viewport,
+                lineCount: lines,
+                remembered: remembered
+            ) else { return nil }
+            if measurement.isMeasured { remembered = measurement.height }
+            return measurement.height
+        }
+        // Overflowing: the division is the row.
+        XCTAssertEqual(try XCTUnwrap(read(lines: 71, content: 1_146, viewport: 1_018)), 16.14, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(read(lines: 220, content: 3_530, viewport: 1_018)), 16.05, accuracy: 0.01)
+        // Fitting: the diagram window whose frames were drawn at 32.84, and the prompt-only window.
+        XCTAssertEqual(try XCTUnwrap(read(lines: 31, content: 1_018, viewport: 1_018)), 16.05, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(read(lines: 12, content: 1_018, viewport: 1_018)), 16.05, accuracy: 0.01)
+        // A paint that fills the window, where the division would have been right anyway. It is
+        // also why the fit check carries a row of slack: 61 rows of 16.05 is 979 points of a
+        // 982-point viewport, and 61 of the remembered 16.14 is three points past it.
+        XCTAssertEqual(try XCTUnwrap(read(lines: 61, content: 982, viewport: 982)), 16.05, accuracy: 0.01)
+    }
+
+    /// A remembered height still has to be a plausible row, whatever it was remembered from.
+    func testAnImplausibleRememberedRowIsRefused() {
+        XCTAssertNil(TerminalPeekPolicy.rowHeight(
+            contentHeight: 1_008,
+            viewportHeight: 1_008,
+            lineCount: 4,
+            remembered: 2
+        ))
     }
 
     func testTheScrollOffsetIsTheFractionOfWhatOverflows() {

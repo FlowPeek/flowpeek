@@ -70,6 +70,37 @@ final class LocalizationCatalogTests: XCTestCase {
         }
     }
 
+    /// The feedback rows and their two destinations. Named in Swift rather than only in a view,
+    /// so a missing translation would ship as `menu.report` in somebody's menu bar.
+    func testTheFeedbackKeysAreDefinedInEveryLanguage() throws {
+        let needed = [
+            "menu.report", "menu.feedback.email",
+            "feedback.email.subject", "feedback.email.intro",
+            "settings.feedback.title", "settings.feedback.note",
+            "settings.feedback.github", "settings.feedback.idea",
+            "settings.feedback.email", "settings.feedback.copy",
+        ]
+        for language in Self.languages {
+            let keys = Set(try Self.keys(of: language))
+            XCTAssertEqual(needed.filter { !keys.contains($0) }, [], "\(language).lproj is missing these")
+        }
+    }
+
+    /// The app pre-fills the issue form by field id, and GitHub ignores a parameter that names no
+    /// field: rename the textarea and the pre-filling stops working with nothing to notice it. The
+    /// forms are checked in, so the invariant can be checked here.
+    func testEveryIssueFormCarriesTheFieldTheAppPreFills() throws {
+        let templates = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(".github/ISSUE_TEMPLATE")
+        for kind in FeedbackReport.Kind.allCases {
+            let form = templates.appendingPathComponent(kind.template)
+            let text = try String(contentsOf: form, encoding: .utf8)
+            XCTAssertTrue(text.contains("id: diagnostics"),
+                          "\(kind.template) has no field for the block the app fills in")
+        }
+    }
+
     private static func keys(of language: String) throws -> [String] {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // FlowPeekCoreTests

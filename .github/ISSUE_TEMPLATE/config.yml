@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ask a question
+    url: https://github.com/FlowPeek/flowpeek/discussions
+    about: Anything that is not a defect and not a request. Questions are welcome here.

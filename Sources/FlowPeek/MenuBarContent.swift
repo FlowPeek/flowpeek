@@ -257,6 +257,22 @@ struct MenuBarContent: View {
                     Spacer(minLength: 0)
                 }
             }
+            // Two rows rather than one: a GitHub account is not everybody's, and neither is
+            // reporting in public. Both open something the sender reads before it goes anywhere.
+            PanelRow(action: { dismiss(); FeedbackRoute.openGitHub(app, kind: .bug) }) {
+                HStack(spacing: 10) {
+                    rowIcon("ladybug")
+                    Text("menu.report").font(.system(size: 12))
+                    Spacer(minLength: 0)
+                }
+            }
+            PanelRow(action: { dismiss(); FeedbackRoute.openEmail(app) }) {
+                HStack(spacing: 10) {
+                    rowIcon("envelope")
+                    Text("menu.feedback.email").font(.system(size: 12))
+                    Spacer(minLength: 0)
+                }
+            }
             // Quiet, and deliberately not in the accent colour: the one blue thing in this panel
             // should be the remedy in the header, which is the only row that is ever urgent.
             HStack(spacing: 4) {

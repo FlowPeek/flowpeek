@@ -1,0 +1,27 @@
+name: An idea
+description: An application FlowPeek should read, a route it should have, something it should do differently.
+labels: ["idea"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: The idea
+      description: What you would like FlowPeek to do, and what you are doing today instead.
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Which application, if it is about one
+      description: >
+        FlowPeek reads a terminal through the accessibility API, so support is per application.
+        Naming the one you use is what decides which gets looked at next.
+      placeholder: WezTerm
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Filled in by FlowPeek when you report from the app. Not needed for an idea; clear it if you like.
+      render: text

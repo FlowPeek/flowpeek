@@ -434,3 +434,15 @@
 "hint-tint.blue" = "파랑";
 "hint-tint.vermillion" = "주홍";
 "hint-tint.reddishPurple" = "붉은 자주";
+
+/* Feedback: reporting a problem or an idea. Nothing is sent by the app itself. */
+"menu.report" = "문제 보고…";
+"menu.feedback.email" = "이메일로 피드백 보내기…";
+"feedback.email.subject" = "FlowPeek 피드백";
+"feedback.email.intro" = "무슨 일이 있었고, 무엇을 기대하셨는지 적어주세요:";
+"settings.feedback.title" = "피드백";
+"settings.feedback.note" = "FlowPeek은 스스로 아무것도 보내지 않습니다. 둘 다 내용을 직접 확인하고 보내는 방식입니다.";
+"settings.feedback.github" = "GitHub에 문제 보고";
+"settings.feedback.idea" = "아이디어 제안";
+"settings.feedback.email" = "이메일로 피드백 보내기";
+"settings.feedback.copy" = "진단 정보 복사";

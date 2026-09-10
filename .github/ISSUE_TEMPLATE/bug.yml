@@ -1,0 +1,45 @@
+name: Something is wrong
+description: A diagram that will not draw, an outline in the wrong place, a shortcut that does nothing.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. If FlowPeek filled the diagnostics in for you, everything in
+        this form is yours to read and edit before you send it.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, and what FlowPeek did instead of what you expected.
+      placeholder: |
+        I copied a flowchart out of a pull request and pressed the shortcut. The badge appeared but
+        the preview stayed empty.
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: >
+        The application you were in, and the route you used: pointer, copy, selection, terminal,
+        Quick Look. Leave it out if it does not apply.
+      placeholder: Ghostty, terminal route
+
+  - type: textarea
+    id: diagram
+    attributes:
+      label: The diagram, if you can share it
+      description: >
+        Only if it is yours to share. A diagram that reproduces the problem makes it far quicker to
+        fix, and FlowPeek never sends one on its own, so this is entirely your call.
+      render: text
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Filled in by FlowPeek when you report from the app. Edit or clear it freely.
+      render: text

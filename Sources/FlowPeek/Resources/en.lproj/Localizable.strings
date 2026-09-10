@@ -434,3 +434,15 @@
 "hint-tint.blue" = "Blue";
 "hint-tint.vermillion" = "Red-orange";
 "hint-tint.reddishPurple" = "Reddish purple";
+
+/* Feedback: reporting a problem or an idea. Nothing is sent by the app itself. */
+"menu.report" = "Report an Issue…";
+"menu.feedback.email" = "Send Feedback by Email…";
+"feedback.email.subject" = "FlowPeek feedback";
+"feedback.email.intro" = "What happened, and what you expected instead:";
+"settings.feedback.title" = "Feedback";
+"settings.feedback.note" = "FlowPeek sends nothing on its own. Both of these open something you read and send yourself.";
+"settings.feedback.github" = "Report an Issue on GitHub";
+"settings.feedback.idea" = "Suggest an Idea";
+"settings.feedback.email" = "Send Feedback by Email";
+"settings.feedback.copy" = "Copy Diagnostics";

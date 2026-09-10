@@ -449,10 +449,45 @@ struct SettingsView: View {
                 }
             }
 
+            feedbackCard
+
             Label("settings.privacy", systemImage: "lock.shield")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
+        }
+    }
+
+    /// Reporting something, in the same shape as everything else on this pane.
+    ///
+    /// Four buttons rather than one, because the ways people report are genuinely different: an
+    /// issue and an idea are separate forms on the other side, email is for anyone without a
+    /// GitHub account or without the wish to post in public, and the last one is for a report
+    /// being written somewhere else entirely. None of them sends anything; each opens something
+    /// the sender reads first, which is what the note under them says.
+    private var feedbackCard: some View {
+        settingsCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    settingIcon("bubble.left.and.text.bubble.right", color: .teal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("settings.feedback.title").font(.headline)
+                        Text("settings.feedback.note")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) {
+                    Button("settings.feedback.github") { FeedbackRoute.openGitHub(app, kind: .bug) }
+                    Button("settings.feedback.idea") { FeedbackRoute.openGitHub(app, kind: .idea) }
+                    Button("settings.feedback.email") { FeedbackRoute.openEmail(app) }
+                    Spacer(minLength: 0)
+                    Button("settings.feedback.copy") { FeedbackRoute.copyDiagnostics(app) }
+                }
+                .controlSize(.small)
+            }
         }
     }
 

@@ -739,6 +739,18 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         UserDefaults.standard.set(Double(size.height), forKey: surface.heightKey)
     }
 
+    /// Centred on the screen the preview is about to appear on, clamped so a window larger than
+    /// that screen still opens with its top-left corner reachable.
+    private func centredOrigin(for size: CGSize) -> CGPoint {
+        let frames = NSScreen.screens.map(\.visibleFrame)
+        guard let target = targetVisibleFrame() else { return .zero }
+        return ScreenGeometry.clamp(
+            origin: ScreenGeometry.centredOrigin(size: size, in: target),
+            size: size,
+            visibleFrames: frames.isEmpty ? [target] : frames
+        )
+    }
+
     /// Where the preview is about to appear, so a size saved on a large display is capped here.
     private func targetVisibleFrame() -> CGRect? {
         ScreenGeometry.visibleFrame(
@@ -898,7 +910,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
                 visibleFrames: NSScreen.screens.map(\.visibleFrame)
             ))
         } else {
-            window.center()
+            window.setFrameOrigin(centredOrigin(for: window.frame.size))
         }
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -1023,7 +1035,11 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         panel.contentView = ResizableContentView(content: hosting)
         panel.setFrame(CGRect(origin: panel.frame.origin, size: size), display: false)
         panel.contentMinSize = minSize
-        panel.center()
+        // Not `center()`: it sits the window a quarter of the free space from the top rather than
+        // in the middle, and it centres on the main screen because a panel is placed before it is
+        // ordered front and so belongs to no screen yet. The size already comes from the screen the
+        // pointer is on; the position now comes from the same place.
+        panel.setFrameOrigin(centredOrigin(for: size))
         panel.isReleasedWhenClosed = false
         panel.delegate = self
         return panel

@@ -118,6 +118,25 @@ public enum ScreenGeometry {
         return !rect.isEmpty && !rect.isNull && !rect.isInfinite
     }
 
+    /// Where a window of this size sits when it is centred in a screen's visible area.
+    ///
+    /// AppKit's own `NSWindow.center()` is not this, by design: it splits the free space one part
+    /// above to three parts below, which its documentation calls "somewhat above center". Measured
+    /// on a 2560x1440 display, visible area 1410 points tall, that puts a 908-point window 125
+    /// points above the middle and a 640-point one 192 points above it, and the taller the window
+    /// the further off it looks. A preview that draws a diagram is not a save sheet; it should sit
+    /// where the eye expects the middle to be.
+    ///
+    /// The other half of why this exists: `center()` centres on the main screen when the window is
+    /// not on a screen yet, which is exactly when a panel is placed -- before it is ordered front.
+    /// Taking the frame as an argument makes the caller say which screen it means.
+    public static func centredOrigin(size: CGSize, in visibleFrame: CGRect) -> CGPoint {
+        CGPoint(
+            x: (visibleFrame.midX - size.width / 2).rounded(),
+            y: (visibleFrame.midY - size.height / 2).rounded()
+        )
+    }
+
     /// Clamps a window origin so the whole window stays inside one screen's visible frame.
     /// Every screen is considered: the one already containing the window wins, otherwise the one it
     /// overlaps most, otherwise the one whose centre is nearest.

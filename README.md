@@ -20,7 +20,10 @@
 </div>
 
 <p align="center">
-  <img src="docs/images/preview.gif" width="640" alt="A Mermaid flowchart being copied and appearing a moment later in FlowPeek's glass preview">
+  <img src="docs/images/tour.gif" width="700" alt="Thirty-seven seconds of FlowPeek: a Mermaid block printed in a terminal is Option-clicked and drawn in place, the same source is copied from a documentation page and drawn again, a .mmd file in Finder is drawn by Quick Look, and the shelf of everything already seen is raised with a keystroke">
+</p>
+<p align="center">
+  <sub><a href="https://flowpeek.github.io/flowpeek/#tour">Watch the same tour at full size</a></sub>
 </p>
 
 ```sh

@@ -27,6 +27,14 @@ final class ClipboardMonitor {
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Clipboard")
     private var timer: Timer?
     private var lastChangeCount: Int
+    /// The text this last read off the pasteboard, announced or not.
+    ///
+    /// A second guard behind the markers, for a utility that borrows the clipboard and puts it back
+    /// without saying so: the change count moves, the content does not, and the badge would
+    /// announce a copy that already happened. Remembered for every write this looks at rather than
+    /// only the ones it announces, so copying something else and then copying the diagram again is
+    /// a new copy and does raise the badge. Only an unbroken repeat of the same text is silent.
+    private var lastSeenText: String?
 
     init(pasteboard: NSPasteboard = .general) {
         self.pasteboard = pasteboard
@@ -76,7 +84,26 @@ final class ClipboardMonitor {
         guard changeCount != lastChangeCount else { return }
         lastChangeCount = changeCount
 
+        // What the write says about itself, before what it holds is read at all. A utility that
+        // borrows the clipboard to read a selection and puts the old contents back marks the
+        // restore transient and auto-generated; a password manager marks its own write concealed.
+        // None of those is a copy the user made, and the concealed one must not be read even to be
+        // turned down.
+        let types = (pasteboard.types ?? []).map(\.rawValue)
+        guard PasteboardMarkers.isUserCopy(types: types) else {
+            logger.debug(
+                "pasteboard write passed over: \(PasteboardMarkers.markers(in: types).joined(separator: ", "), privacy: .public)"
+            )
+            return
+        }
+
         guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
+        // The same text arriving again is not a new copy, whatever moved the change count.
+        guard text != lastSeenText else {
+            logger.debug("pasteboard write passed over: identical to the one already read")
+            return
+        }
+        lastSeenText = text
         guard text.utf16.count <= Self.maximumLength else {
             logger.debug("copied text ignored: \(text.utf16.count) UTF-16 units exceeds the diagram limit")
             return

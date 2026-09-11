@@ -13,11 +13,13 @@ provider it finds. It does not have a list of approved applications and there is
 to.
 
 The one person who can say no is the reader. Every provider found here is listed in FlowPeek's
-settings, under Integrations, with a switch beside it; yours appears there the moment it registers,
-named by the `name` in your manifest. Switched off, FlowPeek never writes `ask` and never reads your
-answers, and your file is left exactly where you put it — it is yours, not ours to delete. So a
-provider that stops being asked has not failed; somebody has decided, and the right response is the
-idle loop you would run anyway.
+settings, under Integrations — the ones FlowPeek did not write under *Also registered here* — each
+with a switch beside it, named by the `name` in your manifest. That tab re-reads the directory every
+time it is opened, so a provider that registered after FlowPeek launched is in the list the next
+time somebody looks, without a relaunch. Switched off, FlowPeek stops writing `ask` and deletes the
+one it had already written, never reads your answers, and leaves your files exactly where you put
+them — they are yours, not ours to delete. So a provider that stops being asked has not failed;
+somebody has decided, and the right response is the idle loop you would run anyway.
 
 ## What you are agreeing to do
 
@@ -77,9 +79,11 @@ not being asked.
 
 ## 3. Answer: `answer.json`
 
-Write it when the visible picture changes, and only while `ask` is fresh. Write it atomically: to a
-temporary file in the same directory, then rename over the target. FlowPeek reads whole files and
-must never see half of one.
+Write it when the visible picture changes, and only while `ask` is fresh. A window that is only
+moved is not a change: FlowPeek measures your last answer against the window's new frame itself, so
+the frame follows a drag without you writing anything. Write it atomically: to a temporary file in
+the same directory, then rename over the target. FlowPeek reads whole files and must never see half
+of one.
 
 ```json
 {
@@ -92,6 +96,8 @@ must never see half of one.
     {
       "range": [0, 78],
       "clipped": false,
+      "clipped_top": false,
+      "clipped_bottom": false,
       "x": 56.0,
       "top": 34.0,
       "bottom": 124.0,
@@ -105,10 +111,13 @@ must never see half of one.
 | --- | --- |
 | `version` | `1`. An answer from a newer protocol is left alone. |
 | `ok` | `false` when you have nothing to say — no window, a document still loading. Everything else may be omitted. |
-| `at` | Unix seconds, when you wrote it. FlowPeek ignores an answer more than six seconds old, so it does not draw a frame around where a diagram used to be. |
-| `line_height`, `em_width` | Optional, in points. Not used for placement; reported because they are cheap and they explain the geometry. |
+| `at` | Unix seconds, when you wrote it. FlowPeek ignores an answer more than six seconds old, so it does not draw a frame around where a diagram used to be. It may be left out, but then nothing distinguishes a current answer from an abandoned one, so send it. |
+| `line_height`, `em_width` | Optional, in points. Neither places anything. `line_height` is read in one case: when a `clipped` block did not name its cut edges, it sets how close to the viewport's own edge counts as having been clamped against it, because clamping lands on a line boundary. `em_width` is reported because it is cheap and it explains the geometry. |
 | `content_inset_top` | Optional, in points. How far your content area sits below the top of your window frame. Leave it out unless the system would get it wrong; see below. |
 | `blocks` | What is visible. An empty array is a perfectly good answer and means "nothing on screen". |
+
+Keys FlowPeek does not know are ignored rather than refused. The reference implementation writes a
+few of its own for debugging; they are no part of the protocol and cost nothing.
 
 ### A block
 
@@ -116,9 +125,9 @@ must never see half of one.
 | --- | --- |
 | `range` | `[begin, end]` in your own buffer coordinates. FlowPeek does not interpret these; they are yours, for your own debugging. |
 | `clipped` | `true` if the block runs off the top or bottom of the viewport. FlowPeek frames it anyway, with the cut side left open, so a diagram taller than the window still gets an outline — that is the case where a preview is worth most. Clamp the coordinates to what you can see and set this. |
-| `clipped_top`, `clipped_bottom` | Optional. Which edge ran off. Say so if you know: FlowPeek otherwise works it out from where your rectangle sits, which is right but less certain than being told. |
+| `clipped_top`, `clipped_bottom` | Optional, and read only when both are there. Which edge ran off. Send both or neither: one on its own is ignored, and FlowPeek falls back to working the cut edges out from where your rectangle sits against the viewport, which is right but less certain than being told. When both are there they are taken as given — two `false`s frame the block closed whatever `clipped` says. |
 | `x`, `top`, `bottom` | **Content-area coordinates, top-left origin, in points.** Not screen coordinates — you do not know where your window is, and FlowPeek does. `top` is the top of the block's first line; `bottom` is the bottom of its last, so `bottom - top` is the block's height. Clamp `top` and `bottom` to your viewport when the block runs past it, but never `x`: the left edge is the block's own, and taking it from the first visible character instead moves the frame out to the window's edge whenever the diagram is scrolled. |
-| `text` | The Mermaid source, fences included or not. FlowPeek decides for itself whether this is a diagram; send what is between the fences and it will be fine. |
+| `text` | The Mermaid source, fences included or not. FlowPeek decides for itself whether this is a diagram; send what is between the fences and it will be fine. Text that carries on past its own closing fence is dropped rather than framed: that is a range that overran its block, and the frame it would draw is one around the rest of the document. |
 
 FlowPeek draws the frame from `x` to a little short of the window's right edge. You do not report a
 width: most text APIs cannot say where a rendered line ends, and a frame that stops in the middle of
@@ -163,16 +172,16 @@ while a preview is already covering the screen.
 
 ## A reference implementation
 
-`Sources/FlowPeek/Resources/flowpeek-sublime.py` is the whole of the Sublime Text provider, about a
-hundred lines of Python, and it is the same contract as anybody else's. Read it as the worked
-example. Note in particular:
+`Sources/FlowPeek/Resources/flowpeek-sublime.py` is the whole of the Sublime Text provider, 249
+lines of Python of which 160 are code, and it is the same contract as anybody else's. Read it as the
+worked example. Note in particular:
 
 - it polls once a second when nobody is asking, and five times a second when somebody is;
 - it writes only when the answer actually changed, so a reader who is reading produces no writes;
 - it finds fenced blocks through the editor's own syntax scopes before falling back to searching for
   the fence itself;
-- it clamps a partly visible block, marks it `clipped`, and names the edge that ran off, while still
-  sending the whole block's source;
+- it clamps a partly visible block, marks it `clipped`, and names both edges with `clipped_top` and
+  `clipped_bottom`, while still sending the whole block's source;
 - it maps buffer points to window coordinates through the editor's *layout* space rather than
   asking for a window position directly. Sublime answers `text_to_window` with `(0, 0)` for any
   point outside the viewport -- the x as well as the y -- so a block scrolled off the top reported

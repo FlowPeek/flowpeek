@@ -32,7 +32,9 @@ brew install --cask flowpeek/tap/flowpeek
 
 ## Ways to see a diagram
 
-**Hold ⌥ and point at it.** The block is outlined where it sits. Press Space and it draws.
+**Hold ⌥ and point at it.** The block is outlined where it sits. Press Space and it draws. The
+gesture is off until you switch it on: Setup offers it once Accessibility has been granted, and
+Settings carries the same switch.
 
 <img src="docs/images/hold-to-peek.gif" width="600" alt="Option held over a Mermaid code block on a documentation page: the block is outlined with a hint reading swimlane-beta, Option-Space, and pressing it draws the diagram">
 
@@ -54,6 +56,10 @@ printing a diagram into the scrollback. There is no file to open, because nothin
 to disk, and there is nothing clean to select either, because the terminal has already broken the
 block across its own line wraps. FlowPeek joins those rows back together before it draws. Asking
 the agent to render it instead costs a round trip, a file to open, and a file to delete.
+
+A program that has taken the whole screen is read too, in Ghostty: vim, `less`, `lazygit`, or that
+same agent's own full-screen interface. Nothing has to have scrolled past first — FlowPeek asks the
+terminal how big its grid is rather than working it out from what has already been printed.
 
 <img src="docs/images/terminal-watch.gif" width="620" alt="A fenced mermaid block printed in Terminal gets a faint frame around it; the pointer arrives and the frame brightens with a label reading flowchart, Option-click, and the diagram opens in its place">
 
@@ -140,6 +146,10 @@ Releases are built, signed and notarized by `.github/workflows/release.yml` on e
 
 - The text you point at, and the terminal buffer around a diagram on screen, are read into memory
   and never logged.
+- Two other things are read, and neither is written to: in Ghostty, the terminal's pty is opened
+  read-only and asked its size with a single `ioctl` — no byte is ever read from it — and when a
+  gesture finds nothing in VS Code or a fork of it, that editor's `product.json` and your
+  `settings.json` for it are read to see whether `editor.accessibilitySupport` is the reason.
 - The diagrams FlowPeek actually draws are saved on your Mac, in Application Support — the source
   and a small picture of each — so the shelf can offer them back. Nothing else is: a selection that
   was never previewed is never written down. Switching the history off, or clearing it, deletes
@@ -161,6 +171,16 @@ Releases are built, signed and notarized by `.github/workflows/release.yml` on e
 Because VS Code does not hand its text to macOS until you ask it to. Turn on **Toggle Screen Reader
 Accessibility Mode** from the Command Palette, or set `editor.accessibilitySupport` to `on` in
 settings, and reload the window.
+
+FlowPeek says so now rather than leaving you to find this page. A gesture that finds nothing in VS Code, or in a
+fork of it, puts up a badge naming the editor and that one setting, at most twice in a run. To
+tell "there is no diagram here" from "this editor hands out nothing", it reads two of the editor's
+own files and writes to neither: the `product.json` inside the application bundle, which names the
+editor and the directory it files data under, and that editor's own `settings.json`, for the value
+of `editor.accessibilitySupport`. If the setting is already `on`, nothing is said at all. The
+product file is what identifies the editor, rather than a list of bundle identifiers, so the forks
+come along with it — Cursor, Antigravity, Trae, Kiro, Positron, Void and VSCodium ship the same
+setting, the same default and the same silence.
 
 The setting ships as `auto`, which means "on when a screen reader is running". FlowPeek is not a
 screen reader and cannot answer to that, so on a default install the editor's accessibility node is
@@ -194,9 +214,17 @@ and works everywhere, because a copy is the one signal every application emits.
 
 ### It draws nothing in my terminal, or in some other app
 
-Same reason as Sublime, usually. Terminal, iTerm2 and Ghostty are read directly; a canvas-rendered
-terminal, such as the one inside an Electron app, paints its text and exposes none of it. Copying
-works there too, and an application that wants to be read properly can speak the integration
+Terminal, iTerm2 and Ghostty are read directly, a program that has taken the whole screen included.
+That last one is not solved out of the scrollback but asked for: FlowPeek opens Ghostty's pty
+read-only and issues one `ioctl(TIOCGWINSZ)` to ask how many rows and pixels it has — measured, 40
+rows in 1280 pixels, which is 32 device pixels a row and 16.000 points at a backing scale of 2. No
+byte is ever read from the device, and only Ghostty is asked; Terminal.app and iTerm2 answer
+per-character geometry directly and never reach that code. So vim, `less` or a coding agent's
+interface is framed on the first look, with nothing printed beforehand.
+
+Otherwise the reason is Sublime's, usually. A terminal that paints its text into a canvas, such as
+the one inside VS Code, exposes none of it and there is nothing FlowPeek can do there. Copying works
+there all the same, and an application that wants to be read properly can speak the integration
 protocol in [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
 ## Requirements

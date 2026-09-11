@@ -46,7 +46,7 @@
   <header>
     <a class="back" href="./">← FlowPeek</a>
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated 11 September 2026</p>
+    <p class="updated">Last updated 12 September 2026</p>
     <p class="lede">FlowPeek runs on your Mac and keeps what it reads there. There is no account,
       no analytics, and no server of ours for anything to be sent to.</p>
   </header>
@@ -66,6 +66,23 @@
     <li><strong>The visible part of a terminal or editor buffer.</strong> When one of the supported
       terminals or an editor with an integration is in front, FlowPeek reads the text around what is
       on screen so it can find where a diagram block starts and ends.</li>
+    <li><strong>How large a terminal's grid is, asked through its pty.</strong> A program that fills
+      the whole terminal, vim or a coding agent's interface, leaves nothing on screen that says where
+      one row ends and the next begins, so FlowPeek asks the terminal itself. It looks through the
+      terminal's child processes for the pty device behind the window, opens it read only, issues one
+      <code>ioctl(TIOCGWINSZ)</code> to ask how many rows it has and how tall the grid is in pixels,
+      and closes it. <strong>No byte of what is on that terminal is ever read through it.</strong>
+      There is no read of that device anywhere in the app, and nothing is written to it. Only Ghostty
+      is asked this; Terminal.app and iTerm2 answer where a character is drawn directly and never
+      reach that code.</li>
+    <li><strong>Two files belonging to a VS Code-family editor.</strong> When a gesture in VS Code,
+      Cursor, or another build of that editor finds nothing, FlowPeek reads the
+      <code>product.json</code> inside the editor's application bundle, which names the editor and
+      the folder it files its data under, and then that editor's own <code>settings.json</code>, to
+      see whether <code>editor.accessibilitySupport</code> is on. That one setting is the difference
+      between "there is no diagram here" and "this editor is not handing its text to macOS", and
+      saying which is the only use either file is put to. Nothing is written to either one, and when
+      the setting is already on nothing is said at all.</li>
     <li><strong>Nothing while the app is idle.</strong> Reading happens in response to your
       gesture, your copy, or a window you have in front, and each route can be switched off.</li>
   </ul>
@@ -80,7 +97,10 @@
     <li><strong>Diagrams it actually drew.</strong> The Mermaid source and a small picture of each
       are stored in <code>~/Library/Application Support/FlowPeek</code> so the shelf can offer them
       back to you. Something you selected but never previewed is never stored.</li>
-    <li><strong>Your settings</strong>, in the usual macOS preferences file for the app.</li>
+    <li><strong>Your settings</strong>, in the usual macOS preferences file for the app, and
+      alongside them one measurement per terminal: how tall a row of text is there, in points. It is
+      kept so the first diagram after a launch is framed correctly rather than the second, and it is
+      replaced whenever the terminal is measured again.</li>
     <li><strong>An API key, if you supply one</strong> for the optional AI feature. It is stored in
       the macOS Keychain, not in preferences and not in any file of ours.</li>
   </ul>

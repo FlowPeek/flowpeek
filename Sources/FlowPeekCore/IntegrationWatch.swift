@@ -247,7 +247,28 @@ public enum IntegrationWatch {
     /// source a provider sends is the whole block, not the visible part of it, so what opens is the
     /// whole diagram either way.
     public static func drawable(_ answer: Answer) -> [Answer.Block] {
-        (answer.blocks ?? []).filter { $0.bottom > $0.top }
+        (answer.blocks ?? []).filter { $0.bottom > $0.top && stopsAtItsOwnFence($0.text) }
+    }
+
+    /// Whether a block's source ends where its own fence does.
+    ///
+    /// The one part of an answer that can be checked against itself. A provider reports a range and
+    /// FlowPeek draws a rectangle for it, so a range that ran past the closing fence is a rectangle
+    /// around the rest of the document: measured in Sublime, a provider looking for the wrong fence
+    /// marker never found the closer, ran the block to the end of the file, and the frame covered
+    /// the whole window while the diagram itself was scrolled out of sight.
+    ///
+    /// A block that is never closed is left alone rather than refused. That is a diagram still
+    /// being written or still being printed, which is a thing to frame, not a fault.
+    public static func stopsAtItsOwnFence(_ text: String) -> Bool {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let first = lines.first, let open = MarkdownFence.open(String(first)) else { return true }
+        guard let closer = lines.dropFirst().firstIndex(
+            where: { MarkdownFence.closes(String($0), marker: open.marker) }
+        ) else { return true }
+        return lines[lines.index(after: closer)...].allSatisfy {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty
+        }
     }
 
     /// Which sides of a block are cuts rather than its own edges.

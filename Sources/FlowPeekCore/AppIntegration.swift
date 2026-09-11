@@ -69,12 +69,13 @@ public struct AppIntegration: Identifiable, Equatable, Sendable {
         displayName: "Sublime Text",
         installDirectory: ["Application Support", "Sublime Text", "Packages", "User"],
         payloadName: "FlowPeek.py",
-        // 5: frames a diagram taller than the window instead of skipping it -- it reports which
+        // 6: frames a diagram taller than the window instead of skipping it -- it reports which
         // edge ran off, finds a fence outside the visible text, and maps coordinates through the
         // layout so the block's left edge is the block's rather than the first visible character's.
         // It also stops answering when Sublime replaces it, so an updated payload does not run
-        // alongside the one it replaced.
-        payloadVersion: 5,
+        // alongside the one it replaced, and closes a fenced block with the marker that opened it
+        // rather than with whichever one the search loop left behind.
+        payloadVersion: 6,
         reasonKey: "integration.sublime.reason"
     )
 }

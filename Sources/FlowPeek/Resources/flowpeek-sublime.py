@@ -1,5 +1,5 @@
 # FlowPeek, for Sublime Text.        https://github.com/FlowPeek/flowpeek
-# flowpeek-version: 5
+# flowpeek-version: 6
 #
 # Sublime draws its own text and puts none of it in the macOS accessibility tree, so FlowPeek
 # cannot see a diagram in this editor the way it sees one in a terminal. This file is the way in.
@@ -77,13 +77,18 @@ def _regions(view):
     cursor = 0
     while True:
         opener = -1
-        for marker in FENCE_OPENERS:
-            at = lowered.find(marker, cursor)
+        opened_with = None
+        for candidate in FENCE_OPENERS:
+            at = lowered.find(candidate, cursor)
             if at >= 0 and (opener < 0 or at < opener):
-                opener = at
+                opener, opened_with = at, candidate
         if opener < 0:
             break
-        closer = lowered.find(marker[:3], opener + len(marker))
+        # Closed by the marker that opened this block, not by whichever one the loop above happened
+        # to leave behind. That bug looked for "~~~" to close a "```" block, never found one, and
+        # ran the block to the end of the search window: scrolled past a diagram, with the block
+        # entirely off the top of the screen, the frame was drawn over the whole window.
+        closer = lowered.find(opened_with[:3], opener + len(opened_with))
         end = len(text) if closer < 0 else closer + 3
         begin_at, end_at = offset + opener, offset + end
         # Widening the search means blocks entirely off screen turn up too. Only the ones with some

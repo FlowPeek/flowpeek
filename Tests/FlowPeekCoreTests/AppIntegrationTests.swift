@@ -266,6 +266,31 @@ final class IntegrationWatchTests: XCTestCase {
         XCTAssertEqual(IntegrationWatch.drawable(answer).count, 2)
     }
 
+    /// A provider whose range ran past the closing fence is describing a rectangle around the rest
+    /// of the document, and drawing it covers the reader's window. Measured in Sublime: the fence
+    /// search looked for the wrong marker, found no closer, and ran the block to the end of the
+    /// file, so a diagram scrolled out of sight framed everything that was on screen.
+    func testABlockThatRanPastItsClosingFenceIsNotDrawn() {
+        let good = block()
+        var swallowed = block()
+        swallowed.text = "```mermaid\nflowchart TD\n A --> B\n```\n\nLine 1: ordinary prose.\nLine 2: more."
+        let answer = IntegrationWatch.Answer(version: 1, ok: true, at: 1, blocks: [swallowed, good])
+        XCTAssertEqual(IntegrationWatch.drawable(answer).count, 1)
+    }
+
+    func testAWellFormedOrUnfinishedBlockIsKept() {
+        // Ends at its fence, trailing blank line and all.
+        XCTAssertTrue(IntegrationWatch.stopsAtItsOwnFence("```mermaid\nflowchart TD\n```\n"))
+        // Never closed: a diagram still being written or still being printed.
+        XCTAssertTrue(IntegrationWatch.stopsAtItsOwnFence("```mermaid\nflowchart TD\n A --> B"))
+        // Not fenced at all, which is what a provider sends when it reports the source alone.
+        XCTAssertTrue(IntegrationWatch.stopsAtItsOwnFence("flowchart TD\n A --> B"))
+        // A tilde fence closed by a tilde fence.
+        XCTAssertTrue(IntegrationWatch.stopsAtItsOwnFence("~~~mermaid\nflowchart TD\n~~~"))
+        // And the fault itself.
+        XCTAssertFalse(IntegrationWatch.stopsAtItsOwnFence("```mermaid\nflowchart TD\n```\nprose"))
+    }
+
     /// A provider that says which edge it cut is believed.
     func testTheProvidersOwnAnswerNamesTheOpenEdges() {
         var reported = block(clipped: true)

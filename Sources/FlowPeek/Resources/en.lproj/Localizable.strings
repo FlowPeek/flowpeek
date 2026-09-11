@@ -353,6 +353,7 @@
 "preview.export.save.png" = "Save as PNG…";
 "preview.export.save.pdf" = "Save as PDF…";
 "preview.export.save.svg" = "Save as SVG…";
+"preview.export.scale" = "Image Size";
 "preview.export.working" = "Exporting…";
 "preview.export.copied" = "Copied";
 "preview.export.saved" = "Saved";

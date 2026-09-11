@@ -40,7 +40,11 @@ final class DiagramExporter {
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Export")
 
-    func data(_ format: DiagramExportFormat, for request: Request) async throws -> Data {
+    func data(
+        _ format: DiagramExportFormat,
+        for request: Request,
+        scale: DiagramExportImage.Scale = DiagramExportImage.defaultScale
+    ) async throws -> Data {
         guard !request.svg.isEmpty, request.size.width > 0, request.size.height > 0 else {
             throw Failure.nothingRendered
         }
@@ -54,7 +58,7 @@ final class DiagramExporter {
             logger: logger
         )
         defer { session.finish() }
-        return format == .png ? try await session.png() : try await session.pdf()
+        return format == .png ? try await session.png(scale: scale) : try await session.pdf()
     }
 
     /// A small bitmap of the diagram, for a list that is looked at rather than read.
@@ -74,8 +78,13 @@ final class DiagramExporter {
 
     /// Writes an export to a file the user picks. Returns false when they cancel.
     @discardableResult
-    func save(_ format: DiagramExportFormat, for request: Request, title: String) async throws -> Bool {
-        let data = try await data(format, for: request)
+    func save(
+        _ format: DiagramExportFormat,
+        for request: Request,
+        title: String,
+        scale: DiagramExportImage.Scale = DiagramExportImage.defaultScale
+    ) async throws -> Bool {
+        let data = try await data(format, for: request, scale: scale)
         let panel = NSSavePanel()
         panel.nameFieldStringValue = DiagramExportName.fileName(for: title, format: format)
         if let type = UTType(format.contentType) {
@@ -166,8 +175,14 @@ final class DiagramExporter {
             return try await webView.pdf(configuration: configuration)
         }
 
-        /// - Parameter pixelWidth: the bitmap's width, or nil for the diagram's own export size.
-        func png(pixelWidth: CGFloat? = nil) async throws -> Data {
+        /// - Parameters:
+        ///   - pixelWidth: an exact width, for a thumbnail that has to fit a card whatever the
+        ///     diagram is. `nil` means the diagram's own export size at `scale`.
+        ///   - scale: how many pixels per point, when the width is not being dictated.
+        func png(
+            pixelWidth: CGFloat? = nil,
+            scale: DiagramExportImage.Scale = DiagramExportImage.defaultScale
+        ) async throws -> Data {
             let configuration = WKSnapshotConfiguration()
             configuration.rect = CGRect(origin: .zero, size: size)
             configuration.afterScreenUpdates = true
@@ -175,8 +190,8 @@ final class DiagramExporter {
             // scale of the screen the view is on: measured, a snapshotWidth of 216 came back 432
             // pixels wide on this display. So the requested pixel count is divided back out, and a
             // 2x export is 2x on a Retina display and on a 1x one alike.
-            let wanted = pixelWidth.map { CGFloat(min($0, size.width * 2)) }
-                ?? DiagramExportImage.pixelSize(for: natural).map { CGFloat($0.width) }
+            let wanted = pixelWidth.map { CGFloat(min($0, size.width * DiagramExportImage.Scale.x4.factor)) }
+                ?? DiagramExportImage.pixelSize(for: natural, at: scale).map { CGFloat($0.width) }
             if let wanted {
                 let backing = NSScreen.main?.backingScaleFactor ?? 2
                 configuration.snapshotWidth = NSNumber(value: Double(wanted) / max(1, backing))

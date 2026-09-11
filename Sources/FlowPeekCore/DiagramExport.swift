@@ -72,22 +72,53 @@ public enum DiagramExportName {
 
 /// How large a bitmap export is.
 public enum DiagramExportImage {
+    /// How many pixels a bitmap gets per point of the drawing.
+    ///
     /// The preview draws vectors, but a pasted bitmap is judged on a Retina screen, and a 1x PNG of
-    /// a flowchart's 15px labels is visibly soft there.
-    public static let scale: Double = 2
-    /// A ceiling on either edge. A 4000x3000pt diagram at 2x would be 96 MB of ARGB before it is
-    /// ever encoded, so past this the scale gives way rather than the export.
-    public static let maximumEdge: Double = 8192
+    /// a flowchart's 15px labels is visibly soft there, which is why 2x is the default rather than
+    /// the plain size. Past that it is a question of what the picture is for: 4x is for a slide
+    /// that will be projected or a diagram somebody will zoom into, and it costs what it sounds
+    /// like it costs.
+    ///
+    /// Measured through the real export path on this machine: a 266x6914pt flowchart came back at
+    /// 1066x27608 px in 450ms and 1.7MB of PNG, so WebKit re-renders the vector at whatever width
+    /// it is handed rather than upscaling a smaller raster. Against a 4x bilinear upscale of the 1x
+    /// bitmap the true 4x differs by 11% RMSE and carries a *quarter* of the distinct grey levels,
+    /// which is what a sharp edge looks like next to an interpolated one.
+    public enum Scale: Int, CaseIterable, Codable, Sendable {
+        case x1 = 1, x2 = 2, x3 = 3, x4 = 4
+
+        public var factor: Double { Double(rawValue) }
+        /// `2x`, for a menu that has to name four of these in a row.
+        public var label: String { "\(rawValue)x" }
+    }
+
+    /// What an export is unless the reader has said otherwise. The size FlowPeek has always
+    /// exported at, so an upgrade changes nobody's output.
+    public static let defaultScale = Scale.x2
+
+    /// A ceiling on either edge, and on the whole bitmap.
+    ///
+    /// The edge is the limit graphics stacks tend to state; the pixel count is the one that matches
+    /// what the memory actually costs, and a tall diagram needs the second because it fails the
+    /// first long before it is expensive. A 266x27608 bitmap is 29 megapixels and drew in 450ms,
+    /// while the square 8192x8192 the old single edge limit allowed is 67 megapixels and 268MB of
+    /// ARGB. Past either, the scale gives way rather than the export.
+    public static let maximumEdge: Double = 16_384
+    public static let maximumPixels: Double = 40_000_000
 
     /// The pixel size a bitmap export of `size` points should have, scaled down proportionally if
-    /// 2x would cross `maximumEdge`. Zero or non-finite input yields nothing to draw.
-    public static func pixelSize(for size: CGSize) -> CGSize? {
+    /// the requested scale would cross either ceiling. Zero or non-finite input yields nothing to
+    /// draw.
+    public static func pixelSize(for size: CGSize, at scale: Scale = defaultScale) -> CGSize? {
         let width = Double(size.width)
         let height = Double(size.height)
         guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
-        var factor = scale
+        var factor = scale.factor
         let longest = max(width, height) * factor
         if longest > maximumEdge { factor *= maximumEdge / longest }
+        let pixels = width * factor * height * factor
+        if pixels > maximumPixels { factor *= (maximumPixels / pixels).squareRoot() }
         return CGSize(
             width: max(1, (width * factor).rounded()),
             height: max(1, (height * factor).rounded())

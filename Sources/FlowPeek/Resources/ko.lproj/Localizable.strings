@@ -353,6 +353,7 @@
 "preview.export.save.png" = "PNG로 저장…";
 "preview.export.save.pdf" = "PDF로 저장…";
 "preview.export.save.svg" = "SVG로 저장…";
+"preview.export.scale" = "이미지 크기";
 "preview.export.working" = "내보내는 중…";
 "preview.export.copied" = "복사됨";
 "preview.export.saved" = "저장됨";

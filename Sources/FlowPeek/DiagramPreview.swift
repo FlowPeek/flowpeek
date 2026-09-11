@@ -68,6 +68,26 @@ final class DiagramViewModel: ObservableObject {
         UserDefaults.standard.object(forKey: labelContrastKey) as? Bool == false ? .off : .on
     }
 
+    /// How many pixels a copied or saved bitmap gets per point of the drawing. Remembered, because
+    /// somebody who needs 4x for slides needs it every time, and somebody who does not should never
+    /// have to say 2x again either.
+    @Published private(set) var imageScale = DiagramViewModel.storedImageScale
+
+    static let imageScaleKey = "flowpeek.export.imageScale"
+    private static var storedImageScale: DiagramExportImage.Scale {
+        guard let raw = UserDefaults.standard.object(forKey: imageScaleKey) as? Int,
+              let scale = DiagramExportImage.Scale(rawValue: raw) else {
+            return DiagramExportImage.defaultScale
+        }
+        return scale
+    }
+
+    func chooseImageScale(_ scale: DiagramExportImage.Scale) {
+        guard imageScale != scale else { return }
+        imageScale = scale
+        UserDefaults.standard.set(scale.rawValue, forKey: DiagramViewModel.imageScaleKey)
+    }
+
     let seed: String
     private(set) var source: String
     private let pool: MermaidWebViewPool
@@ -264,10 +284,11 @@ final class DiagramViewModel: ObservableObject {
     /// Every form at once, in one clipboard write: the destination picks, and the user does not
     /// have to know which of them their chat window understands.
     func copyImage() {
+        let scale = imageScale
         run { exporter, request in
             var payloads: [(DiagramExportFormat, Data)] = []
             for format in DiagramExportFormat.clipboardOrder {
-                payloads.append((format, try await exporter.data(format, for: request)))
+                payloads.append((format, try await exporter.data(format, for: request, scale: scale)))
             }
             DiagramPasteboard.write(payloads)
             return .copied
@@ -295,10 +316,11 @@ final class DiagramViewModel: ObservableObject {
 
     func save(_ format: DiagramExportFormat) {
         let title = title
+        let scale = imageScale
         // Most of a save is the user browsing for somewhere to put the file, and a spinner over
         // that says FlowPeek is busy when it is the one waiting.
         run(showingProgress: false) { exporter, request in
-            let saved = try await exporter.save(format, for: request, title: title)
+            let saved = try await exporter.save(format, for: request, title: title, scale: scale)
             return saved ? .saved : nil
         }
     }
@@ -1477,6 +1499,17 @@ struct DiagramChromeControls: View {
                     .keyboardShortcut(shortcut("s", modifiers: .command))
                 Button("preview.export.save.pdf") { model.save(.pdf) }
                 Button("preview.export.save.svg") { model.save(.svg) }
+                Divider()
+                // One choice for both the copy and the save, rather than four rows twice: the two
+                // produce the same bitmap and nobody wants one of them at 4x and the other at 2x.
+                // PDF and SVG are vectors and ignore it, which is why it sits under them rather
+                // than beside the PNG row.
+                Picker("preview.export.scale", selection: scaleBinding) {
+                    ForEach(DiagramExportImage.Scale.allCases, id: \.self) { scale in
+                        Text(verbatim: scale.label).tag(scale)
+                    }
+                }
+                .pickerStyle(.inline)
             }
             // Only the export rows depend on there being a drawing. The canvas is a preference and
             // has to stay reachable while the failure card is up -- it is the one control that used
@@ -1493,6 +1526,12 @@ struct DiagramChromeControls: View {
         .fixedSize()
         .help("preview.export.help")
         .accessibilityLabel(Text("preview.export.label"))
+    }
+
+    /// The picker writes through the model so the choice is remembered, and reads back from it so
+    /// two open panels never disagree about what 4x means.
+    private var scaleBinding: Binding<DiagramExportImage.Scale> {
+        Binding(get: { model.imageScale }, set: { model.chooseImageScale($0) })
     }
 
     /// In a window they are live -- see `PreviewCoordinator`, which consumes them from a local

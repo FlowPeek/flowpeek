@@ -53,6 +53,33 @@ final class DiagramExportRenderTests: XCTestCase {
         )
     }
 
+    /// Every step comes back at its own size, through the real page and the real snapshot. WebKit
+    /// re-renders the vector at the width it is handed rather than upscaling a smaller bitmap:
+    /// measured against a 4x bilinear upscale of the 1x export, the true 4x differs by 11% RMSE and
+    /// carries a quarter of the distinct grey levels, which is a sharp edge next to a blurred one.
+    func testABitmapComesBackAtEveryScaleItIsAskedFor() async throws {
+        let result = try await rendered()
+        var widths: [Int] = []
+        for scale in DiagramExportImage.Scale.allCases {
+            let data = try await DiagramExporter().data(.png, for: request(result), scale: scale)
+            let image = try XCTUnwrap(NSBitmapImageRep(data: data))
+            let expected = try XCTUnwrap(DiagramExportImage.pixelSize(for: result.size, at: scale))
+            XCTAssertEqual(
+                Double(image.pixelsWide), Double(expected.width), accuracy: 2,
+                "\(scale.label) came back \(image.pixelsWide)px wide"
+            )
+            XCTAssertEqual(
+                Double(image.pixelsWide) / Double(image.pixelsHigh),
+                result.width / result.height,
+                accuracy: 0.05,
+                "\(scale.label) changed the shape of the diagram"
+            )
+            widths.append(image.pixelsWide)
+        }
+        XCTAssertEqual(widths, widths.sorted(), "a larger scale has to produce a larger bitmap")
+        XCTAssertGreaterThan(widths[3], widths[0] * 3, "4x is not four times 1x")
+    }
+
     /// A blank snapshot is the failure this is really guarding against: a `WKWebView` that never
     /// reached a window paints nothing, and the export would silently be a white rectangle.
     func testTheBitmapIsNotBlank() async throws {

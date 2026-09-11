@@ -57,10 +57,18 @@ final class DiagramExportTests: XCTestCase {
 
     /// 2x of a wall-sized diagram is hundreds of megabytes before it is ever encoded, so past the
     /// ceiling the scale gives way — and the aspect ratio does not.
+    ///
+    /// This shape crosses both ceilings and the pixel budget is the one that binds: 18000x6000 is
+    /// inside neither, and shrinking only until the long edge fits would still leave 89 megapixels.
     func testAHugeDiagramGivesUpScaleRatherThanFailing() throws {
         let source = CGSize(width: 9000, height: 3000)
         let pixels = try XCTUnwrap(DiagramExportImage.pixelSize(for: source))
-        XCTAssertEqual(pixels.width, DiagramExportImage.maximumEdge, accuracy: 1)
+        XCTAssertLessThanOrEqual(Double(pixels.width), DiagramExportImage.maximumEdge)
+        XCTAssertEqual(
+            Double(pixels.width) * Double(pixels.height),
+            DiagramExportImage.maximumPixels,
+            accuracy: DiagramExportImage.maximumPixels * 0.01
+        )
         XCTAssertEqual(pixels.width / pixels.height, source.width / source.height, accuracy: 0.01)
     }
 
@@ -245,5 +253,50 @@ final class DiagramNarrationTests: XCTestCase {
         let reading = DiagramNarration.read("<svg><g><path d=\"M0,0 L1,1\"/><text> </text></g></svg>")
         XCTAssertTrue(reading.labels.isEmpty)
         XCTAssertNil(reading.spoken)
+    }
+
+    // MARK: - Scale
+
+    /// Every step is exactly what it says, and the default is the size FlowPeek has always
+    /// exported at, so nobody's output changes until they ask.
+    func testEveryScaleMultipliesTheDrawingByItsOwnNumber() throws {
+        let points = CGSize(width: 400, height: 300)
+        for scale in DiagramExportImage.Scale.allCases {
+            let pixels = try XCTUnwrap(DiagramExportImage.pixelSize(for: points, at: scale))
+            XCTAssertEqual(Double(pixels.width), 400 * scale.factor, accuracy: 0.5, "\(scale.label) width")
+            XCTAssertEqual(Double(pixels.height), 300 * scale.factor, accuracy: 0.5, "\(scale.label) height")
+        }
+        XCTAssertEqual(DiagramExportImage.defaultScale, .x2)
+        XCTAssertEqual(DiagramExportImage.Scale.allCases.map(\.label), ["1x", "2x", "3x", "4x"])
+    }
+
+    /// The ceilings bend the scale, never the drawing: an export that crosses one comes back
+    /// smaller than asked but still the whole diagram, in its own proportions.
+    func testAnExportTooLargeForEitherCeilingGivesUpScaleRatherThanShape() throws {
+        // Long and thin: the edge is what it crosses.
+        let tall = CGSize(width: 300, height: 9000)
+        let tallPixels = try XCTUnwrap(DiagramExportImage.pixelSize(for: tall, at: .x4))
+        XCTAssertLessThanOrEqual(Double(tallPixels.height), DiagramExportImage.maximumEdge)
+        XCTAssertEqual(
+            Double(tallPixels.width) / Double(tallPixels.height),
+            Double(tall.width) / Double(tall.height),
+            accuracy: 0.01
+        )
+
+        // Square and big: the edge is fine and the pixel count is not.
+        let wide = CGSize(width: 4000, height: 4000)
+        let widePixels = try XCTUnwrap(DiagramExportImage.pixelSize(for: wide, at: .x4))
+        XCTAssertLessThanOrEqual(
+            Double(widePixels.width) * Double(widePixels.height),
+            DiagramExportImage.maximumPixels * 1.01
+        )
+        XCTAssertEqual(Double(widePixels.width), Double(widePixels.height), accuracy: 1)
+    }
+
+    /// A diagram small enough for neither ceiling to matter is untouched by them.
+    func testTheCeilingsDoNotTouchAnOrdinaryDiagram() throws {
+        let pixels = try XCTUnwrap(DiagramExportImage.pixelSize(for: CGSize(width: 900, height: 600), at: .x4))
+        XCTAssertEqual(Double(pixels.width), 3600, accuracy: 0.5)
+        XCTAssertEqual(Double(pixels.height), 2400, accuracy: 0.5)
     }
 }

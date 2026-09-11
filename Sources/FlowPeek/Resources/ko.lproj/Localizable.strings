@@ -378,6 +378,11 @@
 "preview.labels.turn-on" = "다이어그램이 고른 색 위에서 글자가 읽히게 하기";
 "preview.labels.turn-off" = "모든 라벨을 테마가 준 색 그대로 두기";
 
+/* The pin: a preview that stays, and takes the next diagram */
+"preview.pin.label" = "미리보기 고정";
+"preview.pin.hold" = "고정해 두고 다음에 복사한 것을 여기에 그리기";
+"preview.pin.release" = "다른 곳을 클릭하면 다시 닫히게 하기";
+
 /* 앱이 유일하게 부탁하는 것 */
 "star.title" = "FlowPeek가 마음에 드시나요?";
 "star.message" = "GitHub에 별을 남겨 주시면 다른 사람들이 FlowPeek를 찾는 데 도움이 됩니다. 이 부탁은 이번 한 번뿐입니다.";

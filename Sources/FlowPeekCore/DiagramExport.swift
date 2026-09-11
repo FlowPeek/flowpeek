@@ -364,3 +364,32 @@ public enum DiagramNarration {
         return Unicode.Scalar(value)
     }
 }
+
+/// What a pinned preview changes, in one place both the coordinator and the state machine read.
+///
+/// Pinning is not a window level: the quick panel already floats above every other application's
+/// windows. What a pin changes is what may take it away, and what a newly copied diagram does with
+/// a panel that is already open.
+public enum PinnedPreviewPolicy {
+    /// What should happen when a copy is detected while a preview is open.
+    public enum Copied: Equatable, Sendable {
+        /// The badge near the menu bar, naming the key. What FlowPeek has always done.
+        case raiseBadge
+        /// Draw it in the panel that is already up, so several diagrams can be flipped through
+        /// without a keystroke between them.
+        case drawInPinnedPreview
+    }
+
+    public static func copied(pinned: Bool, showingDiagram: Bool) -> Copied {
+        pinned && showingDiagram ? .drawInPinnedPreview : .raiseBadge
+    }
+
+    /// Whether a click somewhere else takes the panel away. Unpinned, it does, which is what makes
+    /// the quick preview feel like a glance rather than a window. Pinned, only Escape or the close
+    /// button does.
+    public static func dismissesOnOutsideClick(pinned: Bool) -> Bool { !pinned }
+
+    /// Escape closes a pinned panel as readily as an unpinned one: it is the key a reader presses
+    /// to mean "I am done", and a pin that had to be undone first would be a trap.
+    public static func dismissesOnEscape(pinned: Bool) -> Bool { true }
+}

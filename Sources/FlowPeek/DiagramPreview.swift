@@ -82,6 +82,21 @@ final class DiagramViewModel: ObservableObject {
         return scale
     }
 
+    /// Whether this preview stays until it is dismissed on purpose. Held on the model because the
+    /// chrome is what toggles it and the chrome only ever sees a model; the coordinator owns what
+    /// it means, and hears about it through `onPinChange`.
+    @Published private(set) var isPinned = false
+
+    /// Set by whoever owns the window this model is drawn in. A promoted window leaves it nil: it
+    /// is an ordinary window and is already as pinned as a window gets.
+    var onPinChange: ((Bool) -> Void)?
+
+    func choosePinned(_ pinned: Bool) {
+        guard isPinned != pinned else { return }
+        isPinned = pinned
+        onPinChange?(pinned)
+    }
+
     func chooseImageScale(_ scale: DiagramExportImage.Scale) {
         guard imageScale != scale else { return }
         imageScale = scale
@@ -824,7 +839,35 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         return nil
     }
 
+    /// Whether the quick panel is pinned. Not remembered across launches: a pin belongs to the
+    /// window a reader put it on, and restoring one with no window to attach it to would only mean
+    /// that the next glance did not behave like a glance.
+    private(set) var quickIsPinned = false
+
+    /// A pinned panel that is already drawing takes the next diagram itself.
+    var acceptsDiagramInPlace: Bool { quickIsPinned && quickPanelIsDiagram && quickModel != nil }
+
+    private func setQuickPinned(_ pinned: Bool) {
+        guard quickIsPinned != pinned else { return }
+        quickIsPinned = pinned
+        trace(pinned ? "pinned" : "unpinned")
+        // The monitors are what a pin changes: the click-away one is not installed while pinned,
+        // and comes back the moment it is let go, so the next click somewhere else closes it.
+        if quickPanel != nil { installDismissMonitors() }
+    }
+
     func showQuick(document: DiagramDocument) {
+        // A pinned panel is the one surface that is not replaced: the diagram changes inside it,
+        // which is the whole point of pinning one open and copying three things in a row.
+        if acceptsDiagramInPlace, let model = quickModel {
+            trace("pinned panel takes \(document.title)")
+            model.title = document.title
+            model.update(source: document.source.text)
+            quickPanel?.title = document.title
+            quickPanel?.orderFrontRegardless()
+            markSettled(.quick)
+            return
+        }
         closeQuick()
         let model = DiagramViewModel(document: document, pool: pool)
         model.onDiagramDrawn = { [weak self] in
@@ -835,6 +878,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
             self?.reportVisibleSurface()
             self?.onDiagramDrawn?()
         }
+        model.onPinChange = { [weak self] pinned in self?.setQuickPinned(pinned) }
         quickModel = model
         model.attach()
         quickPanelIsDiagram = true
@@ -1037,6 +1081,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         if closing === quickPanel {
             shownSurfaces.remove(.quick)
             quickPanel = nil
+            quickIsPinned = false
             removeDismissMonitors()
             releaseQuickModel()
         } else if let index = promoted.firstIndex(where: { $0.window === closing }) {
@@ -1090,6 +1135,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
 
     private func dismissQuickPanel() {
         removeDismissMonitors()
+        quickIsPinned = false
         guard let panel = quickPanel else { return }
         quickPanel = nil
         panel.delegate = nil
@@ -1105,7 +1151,8 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
 
     private func installDismissMonitors() {
         removeDismissMonitors()
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown], handler: { [weak self] _ in
+        if PinnedPreviewPolicy.dismissesOnOutsideClick(pinned: quickIsPinned),
+           let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown], handler: { [weak self] _ in
             let location = NSEvent.mouseLocation
             Task { @MainActor in
                 // Clicking or dragging inside the preview is interaction with the preview. Without
@@ -1276,7 +1323,7 @@ struct DiagramPreviewView: View {
                 }
                 .transition(.opacity)
             }
-            DiagramChromeControls(model: model, keyEquivalentsWork: !compact)
+            DiagramChromeControls(model: model, keyEquivalentsWork: !compact, showsPin: compact)
             zoomCluster
                 .disabled(!hasDiagram)
             if compact {
@@ -1431,8 +1478,12 @@ struct DiagramChromeControls: View {
     /// False on the quick panel, which is non-activating: nothing is dispatched to it, so a menu
     /// row registered there would display a glyph for a key that does nothing.
     let keyEquivalentsWork: Bool
+    /// Only the quick panel offers a pin. A promoted window is an ordinary window and is already
+    /// as pinned as a window gets; a second control claiming to do that would be a lie.
+    var showsPin: Bool = false
 
     var body: some View {
+        if showsPin { pinButton }
         // The canvas first: it changes what is on screen now, where the menu produces a file.
         canvasButton
         readableLabelsButton
@@ -1462,6 +1513,27 @@ struct DiagramChromeControls: View {
         .help(model.canvas.isTransparent ? "preview.background.make-solid" : "preview.background.make-transparent")
         .accessibilityLabel(Text("preview.background.transparent-canvas"))
         .accessibilityValue(Text(model.canvas.isTransparent ? "preview.background.state.on" : "preview.background.state.off"))
+    }
+
+    /// Keeps this preview until it is dismissed on purpose, and lets the next diagram land in it.
+    ///
+    /// The panel already floats over every other application, so this is not a window level. It is
+    /// two things: a click somewhere else stops taking the preview away, and a diagram copied while
+    /// it is up is drawn here instead of raising a badge, which is what makes it possible to read
+    /// four diagrams by copying four times.
+    private var pinButton: some View {
+        Button {
+            model.choosePinned(!model.isPinned)
+        } label: {
+            Image(systemName: model.isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(model.isPinned ? "preview.pin.release" : "preview.pin.hold")
+        .accessibilityLabel(Text("preview.pin.label"))
+        .accessibilityValue(Text(model.isPinned ? "preview.background.state.on" : "preview.background.state.off"))
     }
 
     /// Whether a label on a fill the diagram chose gets ink that can be read on it.

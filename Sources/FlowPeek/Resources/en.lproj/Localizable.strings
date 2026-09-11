@@ -378,6 +378,11 @@
 "preview.labels.turn-on" = "Read Labels on the Colours the Diagram Chose";
 "preview.labels.turn-off" = "Leave Every Label the Colour the Theme Gave It";
 
+/* The pin: a preview that stays, and takes the next diagram */
+"preview.pin.label" = "Keep This Preview Open";
+"preview.pin.hold" = "Keep It Open and Draw What You Copy Next Here";
+"preview.pin.release" = "Let a Click Somewhere Else Close It Again";
+
 /* The one favour the app ever asks for */
 "star.title" = "Enjoying FlowPeek?";
 "star.message" = "A star on GitHub helps other people find it. This is the only time we will ask.";

@@ -782,10 +782,23 @@ final class AppState: ObservableObject {
         }
         copied = source
         tutorial.noteDetected(.clipboard)
-        indicator.show(
-            keyword: copy.detection.diagramKeyword,
-            shortcut: shortcuts.shortcuts[.previewClipboard].display
-        )
+        switch PinnedPreviewPolicy.copied(
+            pinned: previews.quickIsPinned,
+            showingDiagram: previews.acceptsDiagramInPlace
+        ) {
+        case .raiseBadge:
+            indicator.show(
+                keyword: copy.detection.diagramKeyword,
+                shortcut: shortcuts.shortcuts[.previewClipboard].display
+            )
+        case .drawInPinnedPreview:
+            // Still nothing opened and still no focus taken: the panel the reader pinned is already
+            // there, and this draws in it. The badge would be naming a key for a window that is
+            // in front of them.
+            logger.debug("copied Mermaid drawn in the pinned preview")
+            indicator.hide()
+            showCopied(source)
+        }
     }
 
     /// The key the onboarding tutorial teaches, so it has to answer whenever it is pressed. The

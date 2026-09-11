@@ -300,3 +300,41 @@ final class DiagramNarrationTests: XCTestCase {
         XCTAssertEqual(Double(pixels.height), 2400, accuracy: 0.5)
     }
 }
+
+/// The rules a pin changes, stated where both the coordinator and the state machine read them.
+final class PinnedPreviewPolicyTests: XCTestCase {
+    /// The point of the pin: copy, copy, copy, and read three diagrams in the one window.
+    func testACopyDrawsInThePinnedPreviewInsteadOfRaisingTheBadge() {
+        XCTAssertEqual(
+            PinnedPreviewPolicy.copied(pinned: true, showingDiagram: true),
+            .drawInPinnedPreview
+        )
+    }
+
+    /// A pinned panel holding an apology rather than a diagram has nothing to replace, and a badge
+    /// is the only thing that would tell the reader the copy was even noticed.
+    func testAPinnedPanelWithNoDiagramInItStillRaisesTheBadge() {
+        XCTAssertEqual(
+            PinnedPreviewPolicy.copied(pinned: true, showingDiagram: false),
+            .raiseBadge
+        )
+    }
+
+    /// Unpinned is what the app has always done, and a copy must not open anything by itself.
+    func testWithoutAPinACopyOnlyEverRaisesTheBadge() {
+        XCTAssertEqual(PinnedPreviewPolicy.copied(pinned: false, showingDiagram: true), .raiseBadge)
+        XCTAssertEqual(PinnedPreviewPolicy.copied(pinned: false, showingDiagram: false), .raiseBadge)
+    }
+
+    /// A glance goes when you look away; a pinned preview does not. This is the whole difference.
+    func testOnlyAnUnpinnedPreviewIsTakenAwayByAClickSomewhereElse() {
+        XCTAssertTrue(PinnedPreviewPolicy.dismissesOnOutsideClick(pinned: false))
+        XCTAssertFalse(PinnedPreviewPolicy.dismissesOnOutsideClick(pinned: true))
+    }
+
+    /// Escape means "I am done" in both states. A pin that had to be undone first would be a trap.
+    func testEscapeClosesEitherWay() {
+        XCTAssertTrue(PinnedPreviewPolicy.dismissesOnEscape(pinned: true))
+        XCTAssertTrue(PinnedPreviewPolicy.dismissesOnEscape(pinned: false))
+    }
+}

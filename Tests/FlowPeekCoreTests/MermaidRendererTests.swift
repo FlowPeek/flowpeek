@@ -120,7 +120,34 @@ final class MermaidRendererTests: XCTestCase {
         XCTAssertEqual(decoded.fontFamily, MacMermaidTheme.systemFontStack)
         XCTAssertEqual(decoded.themeVariables["primaryColor"], "#2C2C2E")
         XCTAssertEqual(decoded.themeCSS, theme.css)
+        XCTAssertEqual(decoded.labelContrast, .on, "readable labels are on unless a reader turns them off")
         XCTAssertEqual(try request.payloadJSON(), json, "payload encoding must be deterministic")
+    }
+
+    /// The two thresholds are the whole policy, so they are stated once and carried, never
+    /// re-derived in the page. A label on a fill the diagram chose has to clear AA outright; every
+    /// other label is left to the theme until it is not readable at all.
+    func testLabelContrastCarriesBothThresholdsAndBothInks() throws {
+        XCTAssertEqual(LabelContrast.readableRatio, 4.5)
+        XCTAssertEqual(LabelContrast.floorRatio, 2.5)
+        XCTAssertLessThan(
+            LabelContrast.floorRatio, LabelContrast.readableRatio,
+            "the floor has to be the more forgiving of the two, or an unauthored label is held to "
+                + "a higher standard than one the diagram styled itself"
+        )
+
+        let theme = MacMermaidTheme(appearance: .dark, accentHex: "#0A84FF", increaseContrast: false)
+        let off = MermaidRenderRequest(
+            source: "flowchart TD\n  A --> B", theme: theme, seed: "s", renderID: "fp-1",
+            labelContrast: .off
+        )
+        let decoded = try JSONDecoder().decode(
+            MermaidRenderPayload.self, from: Data(try off.payloadJSON().utf8))
+        XCTAssertFalse(decoded.labelContrast.enabled)
+        XCTAssertEqual(decoded.labelContrast.ratio, 4.5)
+        XCTAssertEqual(decoded.labelContrast.floor, 2.5)
+        XCTAssertEqual(decoded.labelContrast.darkInk, "#1C1C1E")
+        XCTAssertEqual(decoded.labelContrast.lightInk, "#FFFFFF")
     }
 
     func testPayloadEncodingEnforcesTheSwiftSideGates() {

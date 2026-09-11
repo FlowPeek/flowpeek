@@ -372,6 +372,11 @@
 "preview.background.state.on" = "Transparent";
 "preview.background.state.off" = "Solid";
 
+/* Readable labels: ink a label can be read in, on a fill the diagram chose for itself */
+"preview.labels.readable" = "Readable Labels";
+"preview.labels.turn-on" = "Read Labels on the Colours the Diagram Chose";
+"preview.labels.turn-off" = "Leave Every Label the Colour the Theme Gave It";
+
 /* The one favour the app ever asks for */
 "star.title" = "Enjoying FlowPeek?";
 "star.message" = "A star on GitHub helps other people find it. This is the only time we will ask.";

@@ -36,17 +36,82 @@ public enum MermaidRenderLimits {
     }
 }
 
+/// What a label has to clear to count as readable, and what to draw it in when it does not.
+///
+/// A diagram that names its own fills is authoritative about them, and FlowPeek honours that: a
+/// `style X fill:#fdd` is drawn `#fdd`. What the author has not said is what colour the *text* on
+/// that fill should be, and mermaid does not work it out. Measured on a flowchart node with
+/// `style X fill:#fdd,stroke:#c00` under the dark theme: the fill lands at `rgb(255,221,221)` while
+/// the label keeps the palette's `rgb(204,204,204)`, which is 1.27:1. That is not a low-contrast
+/// label, it is an invisible one, and mermaid.live draws it the same way.
+///
+/// So a label the author did not colour, sitting on a fill the author did choose, is given ink that
+/// can be read on it. Nothing else is touched: the fill, the stroke, the theme and every label the
+/// author did colour are left exactly as they were.
+public struct LabelContrast: Codable, Equatable, Sendable {
+    /// WCAG 2.1 AA for body text. Labels render at 15px, which is not "large text" by that
+    /// standard, so this is the applicable number rather than the 3:1 large-text one.
+    public static let readableRatio = 4.5
+    /// What any label has to clear, whoever chose the colours.
+    ///
+    /// Deliberately below WCAG's 3:1 for large text, because this number is not an accessibility
+    /// grade. It is the line past which a label has disappeared into its background rather than
+    /// merely being hard on the eye, and above it a diagram's own taste is left alone. The numbers
+    /// it was set against, all measured: radar's axis labels come out `rgb(204,204,204)` on
+    /// `rgb(222,222,222)` in dark mode, which is 1.19:1 and simply not there; mermaid's gantt bars
+    /// are white on `rgb(138,144,221)` at 2.95:1, which is under the large-text grade and perfectly
+    /// visible, and repainting those would restyle a standard chart to fix nothing anyone reported.
+    public static let floorRatio = 2.5
+    /// The ink to fall back to, taken from the theme's own two ends rather than pure black and
+    /// white: a corrected label should look like it belongs to the diagram, not like a warning.
+    public static let darkInk = "#1C1C1E"
+    public static let lightInk = "#FFFFFF"
+
+    public var enabled: Bool
+    /// Required of a label sitting on a fill the diagram itself chose.
+    public var ratio: Double
+    /// Required of every other label.
+    public var floor: Double
+    public var darkInk: String
+    public var lightInk: String
+
+    public init(
+        enabled: Bool,
+        ratio: Double = LabelContrast.readableRatio,
+        floor: Double = LabelContrast.floorRatio,
+        darkInk: String = LabelContrast.darkInk,
+        lightInk: String = LabelContrast.lightInk
+    ) {
+        self.enabled = enabled
+        self.ratio = ratio
+        self.floor = floor
+        self.darkInk = darkInk
+        self.lightInk = lightInk
+    }
+
+    public static let on = LabelContrast(enabled: true)
+    public static let off = LabelContrast(enabled: false)
+}
+
 public struct MermaidRenderRequest: Sendable, Equatable {
     public let source: String
     public let theme: MacMermaidTheme
     public let seed: String
     public let renderID: String
+    public let labelContrast: LabelContrast
 
-    public init(source: String, theme: MacMermaidTheme, seed: String, renderID: String) {
+    public init(
+        source: String,
+        theme: MacMermaidTheme,
+        seed: String,
+        renderID: String,
+        labelContrast: LabelContrast = .on
+    ) {
         self.source = source
         self.theme = theme
         self.seed = seed
         self.renderID = renderID
+        self.labelContrast = labelContrast
     }
 
     /// The JSON string handed to `window.__flowpeek.render`.
@@ -59,7 +124,8 @@ public struct MermaidRenderRequest: Sendable, Equatable {
             fontFamily: theme.fontFamily,
             themeVariables: theme.variables,
             themeCSS: theme.css,
-            dark: theme.appearance == .dark
+            dark: theme.appearance == .dark,
+            labelContrast: labelContrast
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -93,6 +159,7 @@ struct MermaidRenderPayload: Codable, Equatable, Sendable {
     /// Selects mermaid's own light or dark palette as the base, so diagram types that hardcode
     /// their colours still adapt instead of keeping light defaults under dark text.
     let dark: Bool
+    let labelContrast: LabelContrast
 }
 
 public struct MermaidRenderResult: Sendable, Equatable {
@@ -107,6 +174,9 @@ public struct MermaidRenderResult: Sendable, Equatable {
     /// `DiagramNotice.estimatedSizeMarker` in here means WebKit refused to measure the drawing and
     /// the size on screen is the layout box FlowPeek pinned instead.
     public let measurementFallbacks: [String]
+    /// How many labels were given readable ink. Zero for almost every diagram, and zero always when
+    /// the reader has the switch off, so a number here says the drawing named its own fills.
+    public let labelsCorrected: Int
 
     public init(
         svg: String,
@@ -116,7 +186,8 @@ public struct MermaidRenderResult: Sendable, Equatable {
         scrubbed: [String],
         durationMS: Int,
         cspViolations: [String] = [],
-        measurementFallbacks: [String] = []
+        measurementFallbacks: [String] = [],
+        labelsCorrected: Int = 0
     ) {
         self.svg = svg
         self.diagramType = diagramType
@@ -126,6 +197,7 @@ public struct MermaidRenderResult: Sendable, Equatable {
         self.durationMS = durationMS
         self.cspViolations = cspViolations
         self.measurementFallbacks = measurementFallbacks
+        self.labelsCorrected = labelsCorrected
     }
 
     public var size: CGSize { CGSize(width: width, height: height) }
@@ -345,6 +417,7 @@ public struct MermaidGlueResponse: Codable, Equatable, Sendable {
     public var engineVersion: String?
     public var cspViolations: [String]?
     public var measurementFallbacks: [String]?
+    public var labelsCorrected: Int?
 
     public init(
         ok: Bool,
@@ -359,7 +432,8 @@ public struct MermaidGlueResponse: Codable, Equatable, Sendable {
         durationMS: Int? = nil,
         engineVersion: String? = nil,
         cspViolations: [String]? = nil,
-        measurementFallbacks: [String]? = nil
+        measurementFallbacks: [String]? = nil,
+        labelsCorrected: Int? = nil
     ) {
         self.ok = ok
         self.code = code
@@ -374,6 +448,7 @@ public struct MermaidGlueResponse: Codable, Equatable, Sendable {
         self.engineVersion = engineVersion
         self.cspViolations = cspViolations
         self.measurementFallbacks = measurementFallbacks
+        self.labelsCorrected = labelsCorrected
     }
 }
 
@@ -427,7 +502,8 @@ public enum MermaidGlueDecoder {
             scrubbed: response.scrubbed ?? [],
             durationMS: response.durationMS ?? 0,
             cspViolations: response.cspViolations ?? [],
-            measurementFallbacks: response.measurementFallbacks ?? []
+            measurementFallbacks: response.measurementFallbacks ?? [],
+            labelsCorrected: response.labelsCorrected ?? 0
         )
     }
 

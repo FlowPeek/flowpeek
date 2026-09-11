@@ -58,6 +58,16 @@ final class DiagramViewModel: ObservableObject {
         UserDefaults.standard.object(forKey: transparencyKey) as? Bool ?? false
     }
 
+    /// Ink a label can be read in, on a fill the diagram chose for itself. On by default: the case
+    /// it corrects is a label nobody can read, and a reader who has never heard of the setting is
+    /// exactly the one who would otherwise be looking at an empty box.
+    @Published private(set) var labelContrast = DiagramViewModel.storedLabelContrast
+
+    static let labelContrastKey = "flowpeek.preview.readableLabels"
+    private static var storedLabelContrast: LabelContrast {
+        UserDefaults.standard.object(forKey: labelContrastKey) as? Bool == false ? .off : .on
+    }
+
     let seed: String
     private(set) var source: String
     private let pool: MermaidWebViewPool
@@ -130,6 +140,16 @@ final class DiagramViewModel: ObservableObject {
         canvas.choose(transparent)
         UserDefaults.standard.set(transparent, forKey: DiagramViewModel.transparencyKey)
         applyCanvas()
+    }
+
+    /// The user working the readable-labels switch. Unlike the canvas, this one changes the drawing
+    /// rather than what is behind it, so it re-renders: the SVG an export is drawn from is the SVG
+    /// the page produced, and it has to carry the same ink the reader is looking at.
+    func chooseLabelContrast(_ enabled: Bool) {
+        guard labelContrast.enabled != enabled else { return }
+        labelContrast = enabled ? .on : .off
+        UserDefaults.standard.set(enabled, forKey: DiagramViewModel.labelContrastKey)
+        render()
     }
 
     private func applyCanvas() {
@@ -344,7 +364,8 @@ final class DiagramViewModel: ObservableObject {
             source: source,
             theme: MermaidThemeFactory.current(appearance),
             seed: seed,
-            renderID: MermaidRenderIdentifier.renderID(Self.renderCounter)
+            renderID: MermaidRenderIdentifier.renderID(Self.renderCounter),
+            labelContrast: labelContrast
         )
         status = .rendering
         notice = nil
@@ -1392,6 +1413,7 @@ struct DiagramChromeControls: View {
     var body: some View {
         // The canvas first: it changes what is on screen now, where the menu produces a file.
         canvasButton
+        readableLabelsButton
         exportMenu
     }
 
@@ -1418,6 +1440,26 @@ struct DiagramChromeControls: View {
         .help(model.canvas.isTransparent ? "preview.background.make-solid" : "preview.background.make-transparent")
         .accessibilityLabel(Text("preview.background.transparent-canvas"))
         .accessibilityValue(Text(model.canvas.isTransparent ? "preview.background.state.on" : "preview.background.state.off"))
+    }
+
+    /// Whether a label on a fill the diagram chose gets ink that can be read on it.
+    ///
+    /// Beside the canvas switch because it is the other control that changes the drawing itself
+    /// rather than producing a file, and because the two are asked in the same breath: a diagram
+    /// that looks wrong on the glass is usually a diagram whose colours are fighting.
+    private var readableLabelsButton: some View {
+        Button {
+            model.chooseLabelContrast(!model.labelContrast.enabled)
+        } label: {
+            Image(systemName: model.labelContrast.enabled ? "textformat.size" : "textformat.size.smaller")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(model.labelContrast.enabled ? "preview.labels.turn-off" : "preview.labels.turn-on")
+        .accessibilityLabel(Text("preview.labels.readable"))
+        .accessibilityValue(Text(model.labelContrast.enabled ? "preview.background.state.on" : "preview.background.state.off"))
     }
 
     /// Copy and save. A menu rather than five more 22x20 glyphs: the strip is already six of them at

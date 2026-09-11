@@ -191,6 +191,173 @@
     return removed;
   }
 
+  // ---------------------------------------------------------------------------
+  // Readable labels.
+  //
+  // A diagram is authoritative about its own colours, with one gap: `style X fill:#fdd` says what
+  // the box is, and says nothing about the text on it. mermaid leaves the label at the palette's
+  // colour, so under the dark theme a pale fill gets `rgb(204,204,204)` ink on `rgb(255,221,221)`
+  // paper, which is 1.27:1 -- text that is there and cannot be read. This pass corrects that one
+  // case and touches nothing else.
+  //
+  // What makes it safe to do automatically is that mermaid marks the author's intent for us: a
+  // `color:` in `style` or `classDef` arrives as an inline `fill:...!important` on the <text>
+  // itself, and a label the author said nothing about has no style attribute at all. So "the
+  // author chose this" is a fact to read, not a guess. Everything else is left alone as well: a
+  // label with contrast to spare, a label with no measurable shape behind it, the fills, the
+  // strokes and the theme.
+  // ---------------------------------------------------------------------------
+
+  function parseRGB(value) {
+    var m = /rgba?\(([^)]+)\)/.exec(value || "");
+    if (!m) return null;
+    var parts = m[1].split(",");
+    if (parts.length > 3 && parseFloat(parts[3]) === 0) return null;
+    var rgb = [parseFloat(parts[0]), parseFloat(parts[1]), parseFloat(parts[2])];
+    if (rgb.some(function (c) { return !isFinite(c); })) return null;
+    return rgb;
+  }
+
+  function hexToRGB(hex) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+    if (!m) return null;
+    var n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  // WCAG 2.1 relative luminance and contrast ratio.
+  function luminance(rgb) {
+    var c = [rgb[0] / 255, rgb[1] / 255, rgb[2] / 255].map(function (v) {
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+
+  function contrast(a, b) {
+    var la = luminance(a), lb = luminance(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+
+  /// The colour an element actually paints, or null if it paints nothing. Zero-sized boxes are the
+  /// reason this checks geometry: mermaid puts two opaque `rect`s inside every flowchart label at
+  /// 0x0, and reading their fill instead of the node's would say every label is on the theme
+  /// background when it is not.
+  function paintedFill(el) {
+    var cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden") return null;
+    if (parseFloat(cs.opacity) === 0 || parseFloat(cs.fillOpacity) === 0) return null;
+    var rgb = parseRGB(cs.fill);
+    if (!rgb) return null;
+    var box = el.getBoundingClientRect();
+    if (!(box.width > 0.5 && box.height > 0.5)) return null;
+    return { rgb: rgb, box: box };
+  }
+
+  /// What is behind a label: the nearest painted shape, in an ancestor, that the label sits inside.
+  ///
+  /// Measured in client space rather than with getBBox, because a bbox is in its own element's user
+  /// space and the shape and the label are in different ones -- comparing them there compares two
+  /// unrelated coordinate systems and quietly matches the wrong box.
+  function paperUnder(label) {
+    var box = label.getBoundingClientRect();
+    var authored = false;
+    var cx = box.left + box.width / 2, cy = box.top + box.height / 2;
+    var el = label.parentElement;
+    while (el && el.tagName.toLowerCase() !== "svg") {
+      var found = null;
+      var kids = el.children;
+      for (var i = 0; i < kids.length; i++) {
+        var kid = kids[i];
+        // Painters order: only what is drawn before the label is behind it.
+        if (kid === label || kid.contains(label)) break;
+        if (kid.tagName.toLowerCase() === "g") continue;
+        var paint = paintedFill(kid);
+        if (!paint) continue;
+        var r = paint.box;
+        if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) {
+          found = paint.rgb;
+          // `style N fill:#fdd` and `classDef` reach the shape as an inline fill, the same way a
+          // `color:` reaches the text. So the paper knows whether a person chose it.
+          authored = /(^|;)\s*fill\s*:/i.test(kid.getAttribute("style") || "");
+        }
+      }
+      if (found) return { rgb: found, authored: authored };
+      el = el.parentElement;
+    }
+    return null;   // nothing measurable behind it; the canvas may be glass, so do not guess
+  }
+
+  function authorChoseInk(el, property) {
+    return new RegExp("(^|;)\\s*" + property + "\\s*:", "i").test(el.getAttribute("style") || "");
+  }
+
+  /// Returns how many labels were corrected.
+  function makeLabelsReadable(root, policy) {
+    if (!policy || policy.enabled !== true) return 0;
+    // Two thresholds, because the two cases are not the same mistake. On a fill a person chose,
+    // the palette's ink is simply the wrong ink and the label should clear AA outright. Everywhere
+    // else the colours are the theme's own and worth leaving alone: mermaid's dark edge-label chip
+    // sits at 4.43:1, which is under AA and perfectly legible, and correcting it would repaint
+    // every diagram in the app to fix nothing. So an unauthored label is only touched when it has
+    // fallen below the point where text stops being readable at all.
+    var authoredRatio = Number(policy.ratio) || 4.5;
+    var floorRatio = Number(policy.floor) || 3;
+    var darkInk = hexToRGB(policy.darkInk) || [28, 28, 30];
+    var lightInk = hexToRGB(policy.lightInk) || [255, 255, 255];
+    var corrected = 0;
+    // The element that paints the glyphs, which is not always the <text>. mermaid's sequence
+    // stylesheet gives `.actor` a fill for the actor box and that rule also matches the actor's
+    // <text>, whose computed fill then reads `rgb(236,236,255)` -- the colour of the box behind it.
+    // The name is drawn black by a `text.actor > tspan` rule one level down. Reading the <text>
+    // there measured ink against itself at 1:1 and "corrected" four labels that were perfectly
+    // legible, so the ink is read where it is actually applied: the innermost element with text in
+    // it.
+    function inkLeaves(el) {
+      var leaves = [];
+      el.querySelectorAll("tspan").forEach(function (sp) {
+        if (sp.querySelector("tspan")) return;
+        if (String(sp.textContent || "").trim()) leaves.push(sp);
+      });
+      return leaves.length ? leaves : [el];
+    }
+
+    // SVG labels carry their colour in `fill`; the HTML ones eventmodeling emits carry it in
+    // `color`. Both are handled, and an inline value of either means the author has spoken.
+    var labels = [];
+    root.querySelectorAll("text").forEach(function (t) { labels.push([t, "fill"]); });
+    root.querySelectorAll("foreignObject div, foreignObject span").forEach(function (d) {
+      if (d.querySelector("div, span")) return;   // only the element the glyphs are actually in
+      labels.push([d, "color"]);
+    });
+    for (var i = 0; i < labels.length; i++) {
+      var el = labels[i][0], property = labels[i][1];
+      if (!String(el.textContent || "").trim()) continue;
+      if (authorChoseInk(el, property)) continue;
+      // Read where the colour lands, decide for the label as a whole, write at the top of it.
+      var leaves = property === "fill" ? inkLeaves(el) : [el];
+      var ink = parseRGB(getComputedStyle(leaves[0])[property]);
+      if (!ink) continue;
+      if (authorChoseInk(leaves[0], property)) continue;
+      var paper = paperUnder(el);
+      if (!paper) continue;
+      var wanted = paper.authored ? authoredRatio : floorRatio;
+      if (contrast(ink, paper.rgb) >= wanted) continue;
+      var replacement = contrast(darkInk, paper.rgb) >= contrast(lightInk, paper.rgb)
+        ? policy.darkInk : policy.lightInk;
+      el.style.setProperty(property, replacement, "important");
+      // One inline declaration per label wherever inheritance carries it, which is most diagrams.
+      // Where a rule further down wins anyway -- `text.actor > tspan` is one -- the leaves are told
+      // as well rather than leaving a correction that changes the file and not the picture.
+      var landed = parseRGB(getComputedStyle(leaves[0])[property]);
+      var target = hexToRGB(replacement);
+      if (!landed || !target || landed[0] !== target[0] || landed[1] !== target[1] || landed[2] !== target[2]) {
+        for (var k = 0; k < leaves.length; k++) leaves[k].style.setProperty(property, replacement, "important");
+      }
+      corrected++;
+    }
+    return corrected;
+  }
+
   function classify(message) {
     if (/Edge limit exceeded/.test(message)) return "edge-limit";
     if (/No diagram type detected/.test(message)) return "unknown-type";
@@ -250,6 +417,11 @@
         wipeMeasure();
         return fail("too-large", "mermaid substituted its size-limit placeholder");
       }
+      // Ink that can be read on the paper the author chose, before the drawing is measured or
+      // handed back: the SVG returned here is the one an export is drawn from, so a corrected
+      // label has to be corrected in it too.
+      var labelsCorrected = makeLabelsReadable(live, p.labelContrast);
+
       // Pin the SVG to its natural size and fit it to the stage. The reported width/height are the
       // resolved ones, so a diagram without a viewBox (`info`) is no longer read as "drew nothing".
       bindGestures();
@@ -262,6 +434,7 @@
         width: geometry.width,
         height: geometry.height,
         scrubbed: scrubbed,
+        labelsCorrected: labelsCorrected,
         svg: live.outerHTML,
         durationMS: Math.round(now() - t0),
         engineVersion: engineVersion(),

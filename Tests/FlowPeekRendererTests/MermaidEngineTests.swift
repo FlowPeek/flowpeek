@@ -626,13 +626,168 @@ final class MermaidEngineTests: XCTestCase {
     private static let pool = MermaidWebViewPool()
     private static var counter: UInt64 = 0
 
+    // MARK: - Readable labels
+
+    /// The reported case, kept as the fixture: a flowchart that colours four of its own boxes and
+    /// says nothing about the text on them. Under the dark theme mermaid leaves the labels at the
+    /// palette's `rgb(204,204,204)` over fills as pale as `rgb(255,221,221)`, which measures 1.27:1
+    /// -- text that is present and cannot be read. mermaid.live draws it the same way.
+    static let authoredFillSource = """
+    flowchart TD
+        Q["read the config first"] --> A{"a group per pod?"}
+        A -->|"no, reuse"| B{"share one?"}
+        A -->|"yes"| E["keep it ephemeral"]
+        B -->|"one group"| C1["one partition"]
+        C1 --> X["an empty assignment is not an error"]
+        E --> OK["adopted"]
+        style X fill:#fdd,stroke:#c00
+        style OK fill:#d5f5d5,stroke:#0a0
+    """
+
+    /// Every label in the finished drawing, with the colour it is painted in and the colour of the
+    /// shape behind it, measured in client space the way the glue measures it.
+    private static let labelAudit = """
+    (function () {
+      function rgb(v) {
+        var m = /rgba?\\(([^)]+)\\)/.exec(v || ""); if (!m) return null;
+        var p = m[1].split(","); if (p.length > 3 && parseFloat(p[3]) === 0) return null;
+        return [parseFloat(p[0]), parseFloat(p[1]), parseFloat(p[2])];
+      }
+      function lum(c) {
+        var x = [c[0]/255, c[1]/255, c[2]/255].map(function (v) {
+          return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); });
+        return 0.2126*x[0] + 0.7152*x[1] + 0.0722*x[2];
+      }
+      function ratio(a, b) { var l=lum(a), m=lum(b); return (Math.max(l,m)+0.05)/(Math.min(l,m)+0.05); }
+      function painted(el) {
+        var cs = getComputedStyle(el);
+        if (cs.display === "none" || parseFloat(cs.fillOpacity) === 0) return null;
+        var c = rgb(cs.fill); if (!c) return null;
+        var b = el.getBoundingClientRect();
+        return (b.width > 0.5 && b.height > 0.5) ? { rgb: c, box: b } : null;
+      }
+      var svg = document.querySelector("#diagram svg");
+      var rows = [];
+      svg.querySelectorAll("text").forEach(function (t) {
+        var text = (t.textContent || "").trim(); if (!text) return;
+        var ink = rgb(getComputedStyle(t).fill); if (!ink) return;
+        var box = t.getBoundingClientRect();
+        var cx = box.left + box.width/2, cy = box.top + box.height/2;
+        var paper = null, authored = false, el = t.parentElement;
+        while (el && el.tagName.toLowerCase() !== "svg" && !paper) {
+          for (var i = 0; i < el.children.length; i++) {
+            var kid = el.children[i];
+            if (kid === t || kid.contains(t)) break;
+            if (kid.tagName.toLowerCase() === "g") continue;
+            var pn = painted(kid); if (!pn) continue;
+            var r = pn.box;
+            if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) {
+              paper = pn.rgb;
+              authored = /(^|;)\\s*fill\\s*:/i.test(kid.getAttribute("style") || "");
+            }
+          }
+          el = el.parentElement;
+        }
+        rows.push({ text: text, authored: authored, inkHasInlineStyle: /fill\\s*:/i.test(t.getAttribute("style") || ""),
+                    ratio: paper ? ratio(ink, paper) : null });
+      });
+      return JSON.stringify(rows);
+    })()
+    """
+
+    private struct AuditedLabel: Decodable {
+        let text: String
+        let authored: Bool
+        let inkHasInlineStyle: Bool
+        let ratio: Double?
+    }
+
+    private func audit(_ engine: MermaidEngineView) async throws -> [AuditedLabel] {
+        let raw = try await engine.evaluate("return \(Self.labelAudit);") as? String ?? "[]"
+        return try JSONDecoder().decode([AuditedLabel].self, from: Data(raw.utf8))
+    }
+
+    /// Without the pass, the four authored boxes are the ones that fail; with it, none do.
+    func testLabelsOnAuthoredFillsBecomeReadableAndNothingElseMoves() async throws {
+        let engine = try Self.pool.checkOut()
+        defer { Self.pool.checkIn(engine) }
+
+        let before = try await engine.render(
+            Self.request(Self.authoredFillSource, appearance: .dark, labelContrast: .off))
+        XCTAssertEqual(before.labelsCorrected, 0)
+        let unreadable = try await audit(engine).filter { ($0.ratio ?? 99) < LabelContrast.floorRatio }
+        XCTAssertFalse(
+            unreadable.isEmpty,
+            "the fixture has to still reproduce the bug, or this test proves nothing"
+        )
+        XCTAssertTrue(
+            unreadable.allSatisfy(\.authored),
+            "only labels on a fill the diagram chose should be failing: \(unreadable.map(\.text))"
+        )
+
+        let after = try await engine.render(
+            Self.request(Self.authoredFillSource, appearance: .dark, labelContrast: .on))
+        XCTAssertEqual(after.labelsCorrected, unreadable.count)
+        for label in try await audit(engine) {
+            guard let ratio = label.ratio else { continue }
+            let wanted = label.authored ? LabelContrast.readableRatio : LabelContrast.floorRatio
+            XCTAssertGreaterThanOrEqual(
+                ratio, wanted,
+                "\(label.text) is drawn at \(ratio):1 on the shape behind it"
+            )
+        }
+    }
+
+    /// A diagram that names no colours of its own must come out of the pass untouched, byte for
+    /// byte: the theme is not the thing being corrected.
+    func testADiagramThatChoosesNoColoursIsLeftAlone() async throws {
+        let engine = try Self.pool.checkOut()
+        defer { Self.pool.checkIn(engine) }
+        let plain = "flowchart LR\n  A[Start] --> B{Check}\n  B -->|ok| C[Done]"
+        let off = try await engine.render(Self.request(plain, appearance: .dark, labelContrast: .off))
+        let on = try await engine.render(Self.request(plain, appearance: .dark, labelContrast: .on))
+        XCTAssertEqual(on.labelsCorrected, 0)
+        XCTAssertEqual(
+            Self.normalised(off.svg), Self.normalised(on.svg),
+            "the pass repainted a diagram that had nothing wrong with it"
+        )
+    }
+
+    /// A colour the author did state is the author's, however unreadable FlowPeek thinks it is.
+    func testAnInkTheDiagramChoseIsNeverOverruled() async throws {
+        let engine = try Self.pool.checkOut()
+        defer { Self.pool.checkIn(engine) }
+        let source = """
+        flowchart TD
+            A["left alone"] --> B["chosen by the author"]
+            style A fill:#fdd
+            style B fill:#fdd,color:#ff0000
+        """
+        let result = try await engine.render(
+            Self.request(source, appearance: .dark, labelContrast: .on))
+        XCTAssertEqual(result.labelsCorrected, 1, "only the label with no colour of its own")
+        XCTAssertTrue(
+            result.svg.contains("fill:#ff0000"),
+            "the author's own ink has to survive the pass"
+        )
+    }
+
     private static func request(_ source: String) -> MermaidRenderRequest {
+        request(source, appearance: .light, labelContrast: .on)
+    }
+
+    private static func request(
+        _ source: String,
+        appearance: MacMermaidTheme.Appearance,
+        labelContrast: LabelContrast
+    ) -> MermaidRenderRequest {
         counter += 1
         return MermaidRenderRequest(
             source: source,
-            theme: MermaidThemeFactory.current(.light),
+            theme: MermaidThemeFactory.current(appearance),
             seed: "flowpeek-tests",
-            renderID: MermaidRenderIdentifier.renderID(counter)
+            renderID: MermaidRenderIdentifier.renderID(counter),
+            labelContrast: labelContrast
         )
     }
 

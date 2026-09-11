@@ -164,3 +164,69 @@ private extension Text {
             .fixedSize(horizontal: false, vertical: true)
     }
 }
+
+/// A provider FlowPeek did not write: an application or plugin that registered itself under the
+/// published contract.
+///
+/// It gets a row of its own rather than a row like the others because the decision is a different
+/// one. FlowPeek has nothing to install here and nothing to remove -- the file belongs to whoever
+/// put it there, and a running plugin would write it back the moment it was deleted. What the reader
+/// can decide is whether FlowPeek speaks to it at all, so that is what the switch does.
+struct ForeignIntegrationRow: View {
+    @ObservedObject var center: AppIntegrationCenter
+    let manifest: IntegrationWatch.Manifest
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(nsImage: appIcon)
+                .resizable()
+                .frame(width: 30, height: 30)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(verbatim: manifest.name).font(.headline)
+                    if center.isWatched(manifest) {
+                        badge
+                    }
+                }
+                Text("integration.foreign.reason").localizedCallout()
+                Text(verbatim: center.directory(of: manifest).path)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: Binding(
+                get: { center.isWatched(manifest) },
+                set: { center.setWatched($0, for: manifest) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .accessibilityLabel(Text(verbatim: manifest.name))
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var badge: some View {
+        Text("integration.state.on")
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Color.green.opacity(0.18), in: Capsule())
+            .foregroundStyle(Color.green)
+    }
+
+    /// The icon of whichever application this provider speaks for, when that application is here.
+    private var appIcon: NSImage {
+        for bundleID in manifest.bundleIdentifiers {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                return NSWorkspace.shared.icon(forFile: url.path)
+            }
+        }
+        return NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: nil)
+            ?? NSImage()
+    }
+}

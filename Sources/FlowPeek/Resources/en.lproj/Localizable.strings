@@ -470,3 +470,6 @@
 "integration.payload.show" = "Show what gets written";
 "integration.payload.hide" = "Hide the file";
 "integration.none" = "None of the editors FlowPeek can extend is installed here. If you install one, it will appear in this list.";
+"settings.integrations.others" = "Also registered here";
+"settings.integrations.others.description" = "Providers FlowPeek did not write. Any application can register one by writing a file where FlowPeek looks, which is how anybody adds support for their own editor. Switching one off means FlowPeek never asks it anything; the file stays where its owner put it, because it is not FlowPeek's to delete.";
+"integration.foreign.reason" = "This registered itself. FlowPeek asks it what diagrams are on screen and where, and nothing else.";

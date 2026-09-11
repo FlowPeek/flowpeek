@@ -36,7 +36,8 @@ final class IntegrationWatchMonitor {
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Integrations")
     private let fileManager = FileManager.default
-    private let support: URL
+    /// Who has registered, and who settings says to leave alone.
+    private let registry: IntegrationRegistry
     /// Every provider found on disk, whoever wrote it.
     private var watching: [IntegrationWatch.Manifest] = []
     private var timer: Timer?
@@ -47,20 +48,12 @@ final class IntegrationWatchMonitor {
     private var asking: Set<String> = []
     private var showing = false
 
-    init(support: URL? = nil) {
-        self.support = support ?? FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("FlowPeek", isDirectory: true)
-            ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("FlowPeek")
-    }
-
-    /// Where providers register. Public on purpose: see `docs/INTEGRATIONS.md`.
-    private var providersRoot: URL {
-        support.appendingPathComponent(IntegrationWatch.directoryName, isDirectory: true)
+    init(registry: IntegrationRegistry = IntegrationRegistry()) {
+        self.registry = registry
     }
 
     private func root(of manifest: IntegrationWatch.Manifest) -> URL {
-        providersRoot.appendingPathComponent(manifest.id, isDirectory: true)
+        registry.directory(of: manifest.id)
     }
 
     private func askFile(of manifest: IntegrationWatch.Manifest) -> URL {
@@ -71,34 +64,12 @@ final class IntegrationWatchMonitor {
         root(of: manifest).appendingPathComponent(IntegrationWatch.answerName)
     }
 
-    /// Reads every manifest under the providers directory.
+    /// Everyone registered here who is not switched off in settings.
     ///
     /// Re-read rather than cached across runs of `start`, because a provider can appear at any time
     /// and the whole promise of a published contract is that nobody has to tell FlowPeek first.
     func discover() -> [IntegrationWatch.Manifest] {
-        guard let entries = try? fileManager.contentsOfDirectory(
-            at: providersRoot, includingPropertiesForKeys: [.isDirectoryKey]
-        ) else { return [] }
-        var found: [IntegrationWatch.Manifest] = []
-        for entry in entries {
-            let manifest = entry.appendingPathComponent(IntegrationWatch.manifestName)
-            guard let data = try? Data(contentsOf: manifest),
-                  let decoded = try? JSONDecoder().decode(IntegrationWatch.Manifest.self, from: data) else {
-                continue
-            }
-            guard decoded.isUsable else {
-                logger.debug("a provider manifest was ignored: \(entry.lastPathComponent, privacy: .public)")
-                continue
-            }
-            // The directory is what it is found by, so a manifest claiming another name would be
-            // asking FlowPeek to look somewhere it is not.
-            guard decoded.id == entry.lastPathComponent else {
-                logger.debug("a provider manifest names an id its directory does not")
-                continue
-            }
-            found.append(decoded)
-        }
-        return found
+        registry.watched()
     }
 
     var isRunning: Bool { timer != nil }
@@ -106,7 +77,16 @@ final class IntegrationWatchMonitor {
     /// Starts watching whatever has registered. The caller re-arms this when an integration is
     /// switched on or off, and every start re-reads the directory.
     func start() {
-        watching = discover()
+        let next = discover()
+        // Anybody who was being asked and is no longer on the list -- switched off in settings, or a
+        // provider whose directory has gone -- is told so before the list is replaced. Withdrawing
+        // the question is the contract: a provider that finds its `ask` file still there has been
+        // promised somebody is listening, and leaving one behind makes a liar of the protocol even
+        // when the stale date saves it.
+        for provider in watching where !next.contains(where: { $0.id == provider.id }) {
+            stopAsking(provider)
+        }
+        watching = next
         guard !watching.isEmpty else {
             stop()
             return

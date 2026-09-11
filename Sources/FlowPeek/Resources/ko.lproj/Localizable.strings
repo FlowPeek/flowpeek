@@ -470,3 +470,6 @@
 "integration.payload.show" = "무엇이 쓰이는지 보기";
 "integration.payload.hide" = "파일 숨기기";
 "integration.none" = "FlowPeek이 연동할 수 있는 편집기가 이 Mac에 없습니다. 설치하시면 이 목록에 나타납니다.";
+"settings.integrations.others" = "직접 등록된 연동";
+"settings.integrations.others.description" = "FlowPeek이 쓰지 않은 제공자입니다. 어떤 앱이든 정해진 자리에 파일 하나를 써서 스스로 등록할 수 있고, 누구나 자기 편집기 지원을 그렇게 추가합니다. 끄면 FlowPeek이 아무것도 묻지 않습니다. 파일은 그대로 둡니다 — FlowPeek이 지울 파일이 아닙니다.";
+"integration.foreign.reason" = "스스로 등록한 연동입니다. FlowPeek은 화면에 어떤 다이어그램이 있고 어디 있는지만 묻습니다.";

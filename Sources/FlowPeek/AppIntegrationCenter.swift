@@ -21,6 +21,14 @@ final class AppIntegrationCenter: ObservableObject {
     /// Where each known integration stands, in the order they are declared.
     @Published private(set) var statuses: [(id: String, status: AppIntegrationStatus)] = []
 
+    /// Providers FlowPeek did not write: somebody else's application or plugin that registered
+    /// itself by writing a manifest, exactly as `docs/INTEGRATIONS.md` invites it to.
+    ///
+    /// Listed because they are watched. A published contract means a provider can appear without the
+    /// reader agreeing to anything, so the one place that could show them has to, and the switch
+    /// beside each is the reader's answer.
+    @Published private(set) var others: [IntegrationWatch.Manifest] = []
+
     /// Fired whenever an integration is written or taken away, so the routes that depend on one can
     /// be re-armed without waiting for a relaunch.
     var onChange: (() -> Void)?
@@ -28,11 +36,13 @@ final class AppIntegrationCenter: ObservableObject {
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Integrations")
     private let fileManager = FileManager.default
     private let library: URL
+    private let registry: IntegrationRegistry
 
-    init(library: URL? = nil) {
+    init(library: URL? = nil, registry: IntegrationRegistry = IntegrationRegistry()) {
         self.library = library
             ?? FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library")
+        self.registry = registry
         refresh()
     }
 
@@ -40,6 +50,28 @@ final class AppIntegrationCenter: ObservableObject {
 
     func refresh() {
         statuses = AppIntegration.known.map { (id: $0.id, status: status(of: $0)) }
+        // Anything registered that FlowPeek is not itself responsible for. Read from the disk every
+        // time: an editor installed since launch, or a provider that appeared five seconds ago,
+        // should be in this list the moment somebody looks at it.
+        let ours = Set(AppIntegration.known.map(\.id))
+        others = registry.manifests().filter { !ours.contains($0.id) }
+    }
+
+    /// Whether FlowPeek asks this provider anything. Off means the file stays where its owner put
+    /// it and is never spoken to; FlowPeek does not delete other people's plugins.
+    func isWatched(_ manifest: IntegrationWatch.Manifest) -> Bool {
+        !registry.muted.contains(manifest.id)
+    }
+
+    func setWatched(_ watched: Bool, for manifest: IntegrationWatch.Manifest) {
+        registry.setWatched(watched, id: manifest.id)
+        refreshAndAnnounce()
+    }
+
+    /// Where a provider's three files live, so the row can show the reader the directory before
+    /// they decide anything about it.
+    func directory(of manifest: IntegrationWatch.Manifest) -> URL {
+        registry.directory(of: manifest.id)
     }
 
     /// Re-reads, then tells whoever is listening. Separate from `refresh` so the read that happens
@@ -67,12 +99,7 @@ final class AppIntegrationCenter: ObservableObject {
     /// Where this integration registers itself, which is the same published directory a third
     /// party would use: FlowPeek installing a provider and somebody else shipping one are the same
     /// act, and the watch cannot tell them apart.
-    private var providersRoot: URL {
-        (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? library.appendingPathComponent("Application Support"))
-            .appendingPathComponent("FlowPeek", isDirectory: true)
-            .appendingPathComponent(IntegrationWatch.directoryName, isDirectory: true)
-    }
+    private var providersRoot: URL { registry.root }
 
     private func manifestFile(of integration: AppIntegration) -> URL {
         providersRoot

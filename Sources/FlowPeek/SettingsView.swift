@@ -38,8 +38,9 @@ struct SettingsView: View {
     /// Observed for the same reason: the maximum lives in the history store, and the row showing it
     /// has to redraw when the stepper moves it.
     @ObservedObject private var history = DiagramHistoryStore.shared
-    /// Observed so a switch thrown here redraws the badge beside it, and so the tab notices an
-    /// editor that was installed while the window was open.
+    /// Observed so a switch thrown here redraws the badge beside it. Noticing an editor installed
+    /// since launch is the re-read below, not this: there is no notification for an application
+    /// appearing on the disk, so the tab asks again every time somebody opens it.
     @ObservedObject private var integrations = AppIntegrationCenter.shared
     @State private var selection: SettingsSection
     @State private var relaunchPrompt: RelaunchPrompt?
@@ -202,7 +203,22 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 18) {
             sectionTitle("settings.integrations", description: "settings.integrations.description")
             AppIntegrationList(center: integrations)
+
+            // Whoever else has registered. Hidden when nobody has, because a heading over an empty
+            // box is a question the reader cannot answer.
+            if !integrations.others.isEmpty {
+                subsectionTitle("settings.integrations.others", description: "settings.integrations.others.description")
+                VStack(spacing: 10) {
+                    ForEach(integrations.others) { manifest in
+                        ForeignIntegrationRow(center: integrations, manifest: manifest)
+                    }
+                }
+            }
         }
+        // An editor installed, or a provider registered, since FlowPeek launched. Both are ordinary
+        // -- somebody installs Sublime and comes straight here -- and neither sends a notification,
+        // so the list is re-read every time this tab is looked at rather than once at launch.
+        .onAppear { integrations.refresh() }
     }
 
     private var generalSettings: some View {
@@ -685,6 +701,16 @@ struct SettingsView: View {
             Text(title).font(.system(size: 25, weight: .bold, design: .rounded))
             Text(description).font(.callout).foregroundStyle(.secondary)
         }
+    }
+
+    /// A heading inside a pane rather than for one. Same shape, smaller, because a second heading
+    /// at the pane's own size reads as a second page.
+    private func subsectionTitle(_ title: LocalizedStringKey, description: LocalizedStringKey) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.system(size: 17, weight: .semibold, design: .rounded))
+            Text(description).font(.callout).foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
     }
 
     private var languageBinding: Binding<AppLanguage> {

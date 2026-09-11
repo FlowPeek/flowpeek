@@ -112,7 +112,7 @@ public enum IntegrationWatch {
     /// The bundle identifiers are the point of it: FlowPeek measures an answer against the window
     /// of the application in front, so it has to know which application this provider belongs to.
     /// Everything else is for the reader.
-    public struct Manifest: Codable, Equatable, Sendable {
+    public struct Manifest: Codable, Equatable, Sendable, Identifiable {
         public var version: Int
         public var id: String
         public var name: String
@@ -184,6 +184,31 @@ public enum IntegrationWatch {
         )
         let rect = ScreenGeometry.axToAppKit(topLeftOrigin, flipReference: flipReference)
         return ScreenGeometry.isUsable(rect) ? rect : nil
+    }
+
+    // MARK: - Which providers get spoken to
+
+    /// Where the muted list is kept, so the app and its tests name it once.
+    public static let mutedDefaultsKey = "integrations.muted"
+
+    /// The providers FlowPeek will actually ask, out of everything that has registered.
+    ///
+    /// A provider registers by writing a file, which means somebody else's plugin can appear without
+    /// the reader ever clicking anything. That is the point of a published contract, and it is also
+    /// exactly why there has to be somewhere to say no: nothing about a third party's provider went
+    /// through a wizard, so the settings tab lists it and this is what the switch there means.
+    public static func watched(_ manifests: [Manifest], muted: Set<String>) -> [Manifest] {
+        manifests.filter { !muted.contains($0.id) }
+    }
+
+    /// Muted rather than deleted, on purpose. The directory belongs to whoever wrote it and a
+    /// running plugin would write it straight back, so a switch that deleted it would flick itself
+    /// on again and read as broken. A muted provider is one FlowPeek never asks, and a provider that
+    /// is never asked goes back to a stat a second and is left alone.
+    public static func muting(_ id: String, in muted: Set<String>, watched: Bool) -> Set<String> {
+        var next = muted
+        if watched { next.remove(id) } else { next.insert(id) }
+        return next
     }
 
     /// The blocks worth framing, in the order the plugin found them.

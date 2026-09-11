@@ -159,6 +159,31 @@ final class IntegrationWatchTests: XCTestCase {
         XCTAssertEqual(manifest.name, "Example Editor")
     }
 
+    // MARK: - Saying no to a provider
+
+    /// A provider registers by writing a file, so one can appear without anybody agreeing to it.
+    /// The switch in settings is the reader's answer, and this is what it means.
+    func testAMutedProviderIsNotWatched() {
+        let a = IntegrationWatch.Manifest(id: "a", name: "A", bundleIdentifiers: ["com.a"])
+        let b = IntegrationWatch.Manifest(id: "b", name: "B", bundleIdentifiers: ["com.b"])
+        XCTAssertEqual(IntegrationWatch.watched([a, b], muted: []).map(\.id), ["a", "b"])
+        XCTAssertEqual(IntegrationWatch.watched([a, b], muted: ["a"]).map(\.id), ["b"])
+        XCTAssertEqual(IntegrationWatch.watched([a, b], muted: ["a", "b"]), [])
+    }
+
+    /// Muting is remembered against the identifier, not against a provider FlowPeek happens to have
+    /// seen: switching one off has to survive the editor being reinstalled, and switching it back on
+    /// must leave everybody else's decision alone.
+    func testTheSwitchOnlyMovesItsOwnProvider() {
+        var muted = IntegrationWatch.muting("a", in: [], watched: false)
+        XCTAssertEqual(muted, ["a"])
+        muted = IntegrationWatch.muting("b", in: muted, watched: false)
+        XCTAssertEqual(muted, ["a", "b"])
+        muted = IntegrationWatch.muting("a", in: muted, watched: true)
+        XCTAssertEqual(muted, ["b"])
+        XCTAssertEqual(IntegrationWatch.muting("a", in: muted, watched: true), ["b"], "turning on what is already on changes nothing")
+    }
+
     // MARK: - The answer
 
     /// The field names are somebody else's to write, so they are pinned by a literal rather than by

@@ -12,6 +12,13 @@ You do not need to ask us, register anywhere, or ship anything through us. FlowP
 provider it finds. It does not have a list of approved applications and there is nothing to be added
 to.
 
+The one person who can say no is the reader. Every provider found here is listed in FlowPeek's
+settings, under Integrations, with a switch beside it; yours appears there the moment it registers,
+named by the `name` in your manifest. Switched off, FlowPeek never writes `ask` and never reads your
+answers, and your file is left exactly where you put it — it is yours, not ours to delete. So a
+provider that stops being asked has not failed; somebody has decided, and the right response is the
+idle loop you would run anyway.
+
 ## What you are agreeing to do
 
 Answer one question, only while it is being asked: **which Mermaid blocks are visible in your
@@ -60,7 +67,9 @@ FlowPeek touches `ask` while it wants answers and deletes it when it stops. **It
 is the question.** There is no content.
 
 - Newer than five seconds: FlowPeek is watching. Answer when the picture changes.
-- Older, or absent: FlowPeek is not there. Write nothing and go back to idle.
+- Older, or absent: FlowPeek is not there — it has quit, the reader is in another application, or
+  they have switched you off in settings. All three mean the same thing to you: write nothing and go
+  back to idle.
 
 Poll for it as cheaply as you can — one `stat` a second is plenty, and that is all the reference
 implementation does when nobody is asking. Do not keep a busy loop running for a question that is

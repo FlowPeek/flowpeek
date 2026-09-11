@@ -49,6 +49,12 @@ sits, one for each on screen. Bring the pointer near and that one brightens; hol
 opens on a click. Nothing to select, nothing to copy — and the frame goes when the block scrolls
 off screen.
 
+This is the case the terminal support was written for: a coding agent such as Claude Code or Codex
+printing a diagram into the scrollback. There is no file to open, because nothing was ever written
+to disk, and there is nothing clean to select either, because the terminal has already broken the
+block across its own line wraps. FlowPeek joins those rows back together before it draws. Asking
+the agent to render it instead costs a round trip, a file to open, and a file to delete.
+
 <img src="docs/images/terminal-watch.gif" width="620" alt="A fenced mermaid block printed in Terminal gets a faint frame around it; the pointer arrives and the frame brightens with a label reading flowchart, Option-click, and the diagram opens in its place">
 
 Editors work too. In VS Code the outline follows the caret, because an editor can say where the caret is but not where the pointer is:
@@ -90,6 +96,30 @@ Everything on it works from the keyboard: `↑↓←→` to move, `⏎` to open,
 - **Keep the size** you dragged it to; the next diagram opens the same way.
 - **Ask for one** — describe a diagram and let a model you supply the key for write the Mermaid.
   Off until you switch it on.
+
+## Where this sits
+
+A diagram gets written once and read many times. Three different tools, one for each part of that:
+
+1. **Write it.** [Mermaid](https://mermaid.js.org) is the notation. You type it into a pull
+   request, a README, a design doc.
+2. **Or have it made.** [Archify](https://github.com/tt-a1i/archify) and generators like it turn a
+   codebase or a description into a diagram you can keep and send.
+3. **Then read it, again and again.** That is this app. Writing happens once. Reading happens every
+   time anyone opens that pull request.
+
+|  | Mermaid | Archify and other generators | FlowPeek |
+| --- | --- | --- | --- |
+| **What it is** | a notation | a maker | a viewer |
+| **Reach for it when** | you are writing a diagram | you have no diagram yet | one is already on your screen |
+| **Your agent just printed one** | that is what it printed | ask it for a file, then open the file | it is framed where it printed |
+| **You end up with** | text you can commit | a file to keep and send | a look, then nothing |
+| **What it needs** | nothing | an AI agent | one macOS permission |
+
+None of these substitutes for another. FlowPeek is not a Mermaid alternative in particular: Mermaid
+is what it reads, and a copy of it is bundled in the app. The nearest the three come to touching is
+a Mermaid block an agent has just printed into your terminal, where a generator would build a new
+artifact from it and FlowPeek draws the one already on the screen.
 
 ## Install
 

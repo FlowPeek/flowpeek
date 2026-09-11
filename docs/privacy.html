@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — FlowPeek</title>
+<meta name="description" content="What FlowPeek reads, what it keeps, and what it sends. Short answer: it reads what you point at, keeps the diagrams it drew on your Mac, and sends nothing except a daily update check.">
+<link rel="icon" href="images/flowpeek-avatar.png">
+<meta name="robots" content="index,follow">
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #e6edf3; --dim: #9aa4b2; --faint: #6b7482;
+    --ground: #0d1117; --card: #12161d; --edge: #22262d; --accent: #0a84ff;
+  }
+  * { box-sizing: border-box }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent) }
+  main { max-width: 720px; margin: 0 auto; padding: 0 24px 96px }
+  header { padding: 64px 0 28px }
+  header a.back { font-size: 14px; text-decoration: none }
+  h1 { font-size: 34px; line-height: 1.15; margin: 18px 0 8px; letter-spacing: -.02em }
+  .updated { color: var(--faint); font-size: 14px; margin: 0 }
+  .lede { font-size: 18px; color: var(--dim); margin: 22px 0 0 }
+  h2 { font-size: 15px; letter-spacing: .07em; text-transform: uppercase; color: var(--faint);
+       margin: 52px 0 16px; font-weight: 600 }
+  p { color: var(--dim) }
+  p strong, li strong { color: var(--ink); font-weight: 600 }
+  ul { padding-left: 20px }
+  li { color: var(--dim); margin: 0 0 10px }
+  .card { background: var(--card); border: 1px solid var(--edge); border-radius: 12px;
+          padding: 18px 20px; margin: 22px 0 }
+  .card p:last-child { margin-bottom: 0 }
+  code { font: 13.5px/1.5 "SF Mono", ui-monospace, Menlo, monospace; color: #adbac7 }
+  footer { border-top: 1px solid var(--edge); margin-top: 64px; padding-top: 24px;
+           color: var(--faint); font-size: 14px; display: flex; gap: 18px; flex-wrap: wrap }
+  @media (max-width: 640px) { h1 { font-size: 28px } header { padding-top: 44px } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="back" href="./">← FlowPeek</a>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated 11 September 2026</p>
+    <p class="lede">FlowPeek runs on your Mac and keeps what it reads there. There is no account,
+      no analytics, and no server of ours for anything to be sent to.</p>
+  </header>
+
+  <h2>Who this is about</h2>
+  <p>FlowPeek is a free, open source macOS application published at
+    <a href="https://github.com/FlowPeek/flowpeek">github.com/FlowPeek/flowpeek</a>. This policy
+    covers the application and this website. Because the whole application is open source, every
+    claim below can be checked against the source rather than taken on trust.</p>
+
+  <h2>What the app reads</h2>
+  <ul>
+    <li><strong>Text you point at, select, or copy.</strong> With Accessibility permission granted,
+      FlowPeek reads the text under the pointer while you hold the gesture key, the text you have
+      selected, and the clipboard when it changes. It looks for Mermaid diagram source and ignores
+      everything else.</li>
+    <li><strong>The visible part of a terminal or editor buffer.</strong> When one of the supported
+      terminals or an editor with an integration is in front, FlowPeek reads the text around what is
+      on screen so it can find where a diagram block starts and ends.</li>
+    <li><strong>Nothing while the app is idle.</strong> Reading happens in response to your
+      gesture, your copy, or a window you have in front, and each route can be switched off.</li>
+  </ul>
+  <div class="card">
+    <p><strong>None of it is logged.</strong> Text read this way is held in memory for as long as it
+      takes to decide whether it is a diagram and to draw it. It is not written to a log file, not
+      written to disk, and not transmitted.</p>
+  </div>
+
+  <h2>What the app keeps</h2>
+  <ul>
+    <li><strong>Diagrams it actually drew.</strong> The Mermaid source and a small picture of each
+      are stored in <code>~/Library/Application Support/FlowPeek</code> so the shelf can offer them
+      back to you. Something you selected but never previewed is never stored.</li>
+    <li><strong>Your settings</strong>, in the usual macOS preferences file for the app.</li>
+    <li><strong>An API key, if you supply one</strong> for the optional AI feature. It is stored in
+      the macOS Keychain, not in preferences and not in any file of ours.</li>
+  </ul>
+  <p>All of this lives on your Mac and none of it is sent anywhere. You can cap the history by count
+    or by age, clear it, or switch it off entirely in Settings. Deleting the application and its
+    Application Support folder removes everything it kept.</p>
+
+  <h2>What leaves your Mac</h2>
+  <ul>
+    <li><strong>An update check, once a day.</strong> The app asks
+      <code>github.com</code> for its release feed so it can tell you when a new version exists.
+      GitHub sees that request the same way it sees any download, which means your IP address and
+      the request itself. No identifier of ours is attached and no information about your Mac or
+      your usage is sent with it. You can turn automatic checks off in the app.</li>
+    <li><strong>The optional AI feature, only when you press Generate.</strong> It is off until you
+      switch it on and add your own API key. When you use it, the text of your prompt goes to the
+      provider you chose, under that provider's own privacy policy, using your own account with
+      them. FlowPeek adds nothing to that request and keeps no copy of the response beyond the
+      diagram it draws for you.</li>
+    <li><strong>Nothing else.</strong> Drawing a diagram makes no network request at all, because
+      the Mermaid renderer is bundled inside the application. Searching the shelf by meaning runs
+      on your Mac, using a model macOS already ships.</li>
+  </ul>
+
+  <h2>Permissions</h2>
+  <p>FlowPeek asks for <strong>Accessibility</strong> and nothing else. Not Screen Recording, not
+    Input Monitoring. Accessibility is what lets it read the text you are pointing at; without it,
+    the copy and file routes still work and the app says so rather than appearing broken. You can
+    withdraw the permission at any time in System Settings.</p>
+
+  <h2>This website</h2>
+  <p>These pages are static files hosted on GitHub Pages. They set no cookies, run no analytics and
+    embed no third party trackers. GitHub, as the host, records ordinary server request information;
+    see the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement">GitHub
+    Privacy Statement</a>.</p>
+
+  <h2>Children</h2>
+  <p>FlowPeek is a developer tool and is not directed at children. It collects no personal
+    information from anyone, of any age.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes, the date at the top changes with it, and the edit is visible in the
+    repository's history like every other change to the project.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about privacy, or anything else, are best raised as an issue at
+    <a href="https://github.com/FlowPeek/flowpeek/issues">github.com/FlowPeek/flowpeek/issues</a>,
+    where the answer is public and useful to the next person who asks.</p>
+
+  <footer>
+    <a href="./">FlowPeek</a>
+    <a href="terms.html">Terms of Use</a>
+    <a href="https://github.com/FlowPeek/flowpeek">GitHub</a>
+    <a href="https://github.com/FlowPeek/flowpeek/blob/main/LICENSE">MIT License</a>
+  </footer>
+</main>
+</body>
+</html>

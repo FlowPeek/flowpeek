@@ -171,21 +171,33 @@ the whole document — a 126-line file came back complete, 10,064 characters of 
 This is VS Code's own switch and only you can throw it. Nothing else in FlowPeek is affected: the
 terminal, the clipboard, Finder and every ordinary application read the same either way.
 
-### It draws nothing in Sublime Text
+### Does Sublime Text work?
 
-Sublime draws its own text and puts none of it in the accessibility tree. Measured: the focused
-element is the window itself, the whole window exposes two pieces of static text — the tab title and
-the status line — and `AXSelectedText`, `AXValue` and `AXSelectedTextRange` are all absent. There is
-no setting to turn on, the way VS Code has one; there is nothing there to read.
+Yes, with a small plugin FlowPeek offers to install for you. Setup notices Sublime on your Mac and
+asks; you can read the file before anything is written, and Settings ▸ Integrations turns it off
+again and deletes it.
 
-Copy the diagram instead. That route needs no permission at all and works everywhere, because a copy
-is the one signal every application emits.
+The plugin is there because Sublime draws its own text and puts none of it in the accessibility
+tree. Measured: the focused element is the window itself, the whole window exposes two pieces of
+static text — the tab title and the status line — and `AXSelectedText`, `AXValue` and
+`AXSelectedTextRange` are all absent. There is no setting to turn on, the way VS Code has one. What
+Sublime does have is a plugin API that answers the two questions the accessibility API will not:
+which characters are on screen, and where a range of them sits. So the plugin answers exactly those
+two, only while FlowPeek is asking, and nothing else.
+
+That protocol is published rather than private: any application can speak it and FlowPeek will watch
+it, whether or not FlowPeek has ever heard of the application. See
+[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) if you want your own editor read this way.
+
+If you would rather install nothing, copy the diagram instead. That route needs no permission at all
+and works everywhere, because a copy is the one signal every application emits.
 
 ### It draws nothing in my terminal, or in some other app
 
-Same reason, usually. Terminal, iTerm2 and Ghostty are read directly; a canvas-rendered terminal,
-such as the one inside an Electron app, paints its text and exposes none of it. Copying works
-there too.
+Same reason as Sublime, usually. Terminal, iTerm2 and Ghostty are read directly; a canvas-rendered
+terminal, such as the one inside an Electron app, paints its text and exposes none of it. Copying
+works there too, and an application that wants to be read properly can speak the integration
+protocol in [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
 ## Requirements
 

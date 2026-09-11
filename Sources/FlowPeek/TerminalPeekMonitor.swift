@@ -90,6 +90,10 @@ final class TerminalPeekMonitor {
     /// The last reading taken of each pane. Two readings of one pane solve the grid outright, and a
     /// terminal that is printing produces the second within seconds of the first.
     private var lastSamples: [pid_t: TerminalRowMetrics.Sample] = [:]
+    /// The terminal's own account of its grid, read from the ptys it owns. Asked before anything is
+    /// solved, because it is a reading rather than an inference: it needs no scrollback, no second
+    /// look and no remembered value, which between them are everything a full-screen program denies.
+    private let ptyProbe = TerminalPtyProbe()
     /// Grids that still explain everything this pane has reported. Sieved on every look and used
     /// only once they agree, so a wrong column count cannot place an outline; see
     /// `TerminalGridInference`.
@@ -215,6 +219,7 @@ final class TerminalPeekMonitor {
         let alive = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
         rowHeights = rowHeights.filter { alive.contains($0.key) }
         lastSamples = lastSamples.filter { alive.contains($0.key) }
+        ptyProbe.forgetDeadProcesses(alive: alive)
         gridCandidates = gridCandidates.filter { alive.contains($0.key) }
     }
 
@@ -651,6 +656,58 @@ final class TerminalPeekMonitor {
         let visibleRows: ClosedRange<Int>?
     }
 
+    /// The grid the terminal published for this pane, or nil when nothing published one that can be
+    /// shown to belong to it.
+    ///
+    /// Only Ghostty is asked. `ws_ypixel` is the padding-free height of the grid there, which is
+    /// what makes the arithmetic exact, and that is a convention rather than a standard: a terminal
+    /// that wrote the padded height instead would shift the bracket by a whole pixel once its
+    /// padding passed about a cell and a half, and say nothing about having done so. Terminal.app
+    /// and iTerm2 answer per-range bounds and never reach this code at all.
+    ///
+    /// One process owns every window, tab and split, and a pty for each. When it owns exactly one,
+    /// there is nothing to match and that reading is this pane's. When it owns several, a reading is
+    /// only accepted if the survivors agree about the cell, because two surfaces of one process can
+    /// be at different font sizes and their pixel sizes are then identical while their grids are
+    /// not. A buffer that fits its viewport adds the one discriminator that exists: its value is the
+    /// screen, so its line count must be the terminal's row count.
+    private func ptyCellGrid(
+        viewport: CGRect,
+        lineCount: Int,
+        contentSize: CGSize,
+        before deadline: Date
+    ) -> TerminalCellGrid? {
+        guard readingApp == .ghostty, let pid = reading else { return nil }
+        guard let scale = Self.backingScale(of: viewport) else { return nil }
+        let survey = ptyProbe.survey(of: pid, before: deadline)
+        guard !survey.readings.isEmpty else { return nil }
+
+        // A buffer that fits is the whole screen, so its lines are the terminal's rows. This is what
+        // tells two same-sized surfaces apart, and it is exactly the case -- a full-screen program --
+        // that has no other evidence in it.
+        let fits = contentSize.height <= viewport.height + TerminalPeekPolicy.overflowTolerance
+        let candidates = survey.readings
+            .filter { !fits || $0.winsize.rows == lineCount }
+            .compactMap { $0.winsize.grid(viewportSize: viewport.size, scale: scale) }
+        guard let first = candidates.first else { return nil }
+        // Agreement, not a vote: a disagreement means the pane could be either, and either is a
+        // guess.
+        guard candidates.allSatisfy({ abs($0.rowHeight - first.rowHeight) < 0.001 }) else { return nil }
+        return first
+    }
+
+    /// The backing scale of the screen a pane is on. A window on a second display of a different
+    /// scale has a different cell in pixels for the same font, so the scale is the window's rather
+    /// than the main screen's.
+    private static func backingScale(of viewport: CGRect) -> CGFloat? {
+        guard let flip = ScreenGeometry.flipReference(screenFrames: NSScreen.screens.map(\.frame)) else {
+            return nil
+        }
+        let appKit = ScreenGeometry.axToAppKit(viewport, flipReference: flip)
+        let screen = NSScreen.screens.first { $0.frame.intersects(appKit) } ?? NSScreen.main
+        return screen?.backingScaleFactor
+    }
+
     /// The row height solved for a terminal, kept between runs.
     ///
     /// A row is as tall as the font the reader chose, so it outlives the window, the buffer and the
@@ -724,6 +781,29 @@ final class TerminalPeekMonitor {
                 visible: first...max(first, last),
                 inferred: inferred,
                 visibleRows: rows
+            )
+        }
+
+        // What the terminal itself says, asked before anything is solved. Measured on Ghostty
+        // 1.3.1: one ioctl answered a 16.000-point row where three readings of AXContentSize had
+        // been needed to solve the same number, and it answers in a full-screen program, where
+        // there is nothing to solve from at all.
+        if let cell = ptyCellGrid(viewport: viewport, lineCount: lineCount, contentSize: contentSize, before: deadline) {
+            guard let visible = TerminalPeekPolicy.visibleLines(
+                offset: offset,
+                viewportHeight: viewport.height,
+                rowHeight: cell.rowHeight,
+                lineCount: lineCount
+            ) else { return nil }
+            return Grid(
+                viewport: viewport,
+                rowHeight: cell.rowHeight,
+                offset: offset - cell.topPadding,
+                value: value,
+                lineCount: lineCount,
+                visible: visible,
+                inferred: nil,
+                visibleRows: nil
             )
         }
 

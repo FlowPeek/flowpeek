@@ -43,16 +43,40 @@ public enum IntegrationWatch {
     public struct Answer: Codable, Equatable, Sendable {
         public struct Block: Codable, Equatable, Sendable {
             public var range: [Int]
+            /// Whether any of the block runs off the viewport. Kept as it was so a provider written
+            /// against the first version of this document still says something FlowPeek can use.
             public var clipped: Bool
+            /// Which edge ran off, when the provider knows. Optional because the first version of
+            /// this protocol did not ask, and a provider that only sets `clipped` has its cut edges
+            /// worked out from where its rectangle sits instead.
+            public var clippedTop: Bool?
+            public var clippedBottom: Bool?
             /// Window coordinates, top-left origin, device independent pixels.
             public var x: Double
             public var top: Double
             public var bottom: Double
             public var text: String
 
-            public init(range: [Int], clipped: Bool, x: Double, top: Double, bottom: Double, text: String) {
+            enum CodingKeys: String, CodingKey {
+                case range, clipped, x, top, bottom, text
+                case clippedTop = "clipped_top"
+                case clippedBottom = "clipped_bottom"
+            }
+
+            public init(
+                range: [Int],
+                clipped: Bool,
+                clippedTop: Bool? = nil,
+                clippedBottom: Bool? = nil,
+                x: Double,
+                top: Double,
+                bottom: Double,
+                text: String
+            ) {
                 self.range = range
                 self.clipped = clipped
+                self.clippedTop = clippedTop
+                self.clippedBottom = clippedBottom
                 self.x = x
                 self.top = top
                 self.bottom = bottom
@@ -213,10 +237,38 @@ public enum IntegrationWatch {
 
     /// The blocks worth framing, in the order the plugin found them.
     ///
-    /// A block running off the top or bottom of the viewport is dropped rather than framed at the
-    /// edge: a frame with one side missing reads as a rendering fault, and the block underneath is
-    /// half unreadable anyway.
+    /// A block running off the viewport used to be dropped here, on the grounds that a frame with a
+    /// side missing reads as a rendering fault. That was the wrong trade: a diagram taller than the
+    /// window is exactly the one somebody needs a preview of, and withholding the frame took the
+    /// feature away at the moment it was worth most. Measured in Sublime with a 33-line diagram in a
+    /// 832-point viewport: the block reported 123 to 873, was marked clipped, and nothing was drawn.
+    ///
+    /// They are framed now, with the cut sides left open -- see `AmbientCandidate.OpenEdges`. The
+    /// source a provider sends is the whole block, not the visible part of it, so what opens is the
+    /// whole diagram either way.
     public static func drawable(_ answer: Answer) -> [Answer.Block] {
-        (answer.blocks ?? []).filter { !$0.clipped && $0.bottom > $0.top }
+        (answer.blocks ?? []).filter { $0.bottom > $0.top }
+    }
+
+    /// Which sides of a block are cuts rather than its own edges.
+    ///
+    /// The provider's own answer when it gave one, and otherwise read from the rectangle: a block
+    /// that says it is clipped, with an edge sitting against the viewport's, was clamped there.
+    /// `lineHeight` sets how close counts as against, because clamping lands on a line boundary.
+    public static func openEdges(
+        of block: Answer.Block,
+        rect: CGRect,
+        content: CGRect,
+        lineHeight: Double?
+    ) -> AmbientCandidate.OpenEdges {
+        if let top = block.clippedTop, let bottom = block.clippedBottom {
+            var edges: AmbientCandidate.OpenEdges = []
+            if top { edges.insert(.top) }
+            if bottom { edges.insert(.bottom) }
+            return edges
+        }
+        guard block.clipped else { return [] }
+        let tolerance = CGFloat(lineHeight ?? 0) + 2
+        return AmbientPeekPolicy.flushEdges(of: rect, in: content, tolerance: tolerance)
     }
 }

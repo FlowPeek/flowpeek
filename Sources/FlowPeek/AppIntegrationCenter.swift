@@ -209,6 +209,21 @@ final class AppIntegrationCenter: ObservableObject {
         return true
     }
 
+    /// Brings a plugin FlowPeek already wrote up to the payload this build speaks.
+    ///
+    /// The consent being honoured is the one given when the switch was turned on: an integration
+    /// left at an older payload answers a protocol this build has moved past, and the reader who
+    /// said yes to the feature did not say yes to it quietly rotting. A file with no version stamp
+    /// is somebody else's under our name and is never overwritten -- that one stays a decision.
+    func updateInstalled() {
+        for entry in statuses {
+            guard case .outdated(let installed) = entry.status, installed > 0,
+                  let integration = integration(entry.id) else { continue }
+            logger.info("updating \(integration.id, privacy: .public) from payload \(installed, privacy: .public)")
+            install(integration)
+        }
+    }
+
     @discardableResult
     func remove(_ integration: AppIntegration) -> Bool {
         let file = destination(of: integration)

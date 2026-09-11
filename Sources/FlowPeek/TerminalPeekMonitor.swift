@@ -510,7 +510,11 @@ final class TerminalPeekMonitor {
             detection: found.block.detection,
             bounds: onDisplay,
             applicationName: application.localizedName,
-            anchor: .terminal
+            anchor: .terminal,
+            // Both trims in one comparison: a block scrolled into the scrollback and a window
+            // pushed off the display cut the same rectangle, and either cut means the frame's edge
+            // is the viewport's rather than the diagram's.
+            openEdges: AmbientPeekPolicy.openEdges(trimmed: onDisplay, from: bounds)
         )
     }
 

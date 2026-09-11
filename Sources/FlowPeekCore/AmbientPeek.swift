@@ -38,25 +38,45 @@ public struct AmbientCandidate: Equatable, Sendable {
         }
     }
 
+    /// Which sides of `bounds` are a cut rather than the block's own edge.
+    ///
+    /// A diagram taller than the window it is in, or scrolled half out of one, has a rectangle that
+    /// stops where the viewport does. Drawing a closed frame there says the diagram ends at that
+    /// line, which is a lie about the one thing the frame is for; refusing to draw at all -- which
+    /// is what the integration route used to do -- withholds the outline exactly when the diagram
+    /// is too big to read in place and the preview is worth most. So the frame is drawn with its
+    /// cut sides left open.
+    public struct OpenEdges: OptionSet, Equatable, Sendable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+
+        public static let top = OpenEdges(rawValue: 1 << 0)
+        public static let bottom = OpenEdges(rawValue: 1 << 1)
+    }
+
     public let text: String
     public let detection: MermaidDetection
     /// Screen rectangle in AppKit coordinates, already flipped from the accessibility frame.
     public let bounds: CGRect
     public let applicationName: String?
     public let anchor: Anchor
+    /// The sides where the block continues past what is on screen.
+    public let openEdges: OpenEdges
 
     public init(
         text: String,
         detection: MermaidDetection,
         bounds: CGRect,
         applicationName: String?,
-        anchor: Anchor = .pointer
+        anchor: Anchor = .pointer,
+        openEdges: OpenEdges = []
     ) {
         self.text = text
         self.detection = detection
         self.bounds = bounds
         self.applicationName = applicationName
         self.anchor = anchor
+        self.openEdges = openEdges
     }
 }
 
@@ -111,6 +131,37 @@ public enum AmbientPeekPolicy {
         if let lastRead, now.timeIntervalSince(lastRead) < debounce { return false }
         guard let lastPointer else { return true }
         return hypot(pointer.x - lastPointer.x, pointer.y - lastPointer.y) >= movementThreshold
+    }
+
+    /// Which sides were cut away when a block's rectangle was trimmed to what is on screen.
+    ///
+    /// AppKit coordinates, so the top edge is `maxY`. The tolerance is against float noise in two
+    /// numbers that are equal by construction whenever nothing was trimmed.
+    public static func openEdges(
+        trimmed: CGRect, from full: CGRect, tolerance: CGFloat = 1
+    ) -> AmbientCandidate.OpenEdges {
+        guard ScreenGeometry.isUsable(trimmed), ScreenGeometry.isUsable(full) else { return [] }
+        var edges: AmbientCandidate.OpenEdges = []
+        if full.maxY > trimmed.maxY + tolerance { edges.insert(.top) }
+        if full.minY < trimmed.minY - tolerance { edges.insert(.bottom) }
+        return edges
+    }
+
+    /// Which sides of an already-clamped rectangle are cuts, for a provider that says a block runs
+    /// off the screen but reports coordinates clamped to what it can see.
+    ///
+    /// The integration protocol asks providers to clamp, so the rectangle never overflows and the
+    /// overflow cannot be measured from it. What it can be read from is where the rectangle sits: a
+    /// clamped edge lands against the viewport's own, within the line it was clamped to. A provider
+    /// that says which edge it cut is believed instead; this is the fallback.
+    public static func flushEdges(
+        of block: CGRect, in content: CGRect, tolerance: CGFloat
+    ) -> AmbientCandidate.OpenEdges {
+        guard ScreenGeometry.isUsable(block), ScreenGeometry.isUsable(content) else { return [] }
+        var edges: AmbientCandidate.OpenEdges = []
+        if block.maxY >= content.maxY - tolerance { edges.insert(.top) }
+        if block.minY <= content.minY + tolerance { edges.insert(.bottom) }
+        return edges
     }
 
     /// Whether a rectangle is a plausible outline target on a screen of the given size.

@@ -255,14 +255,76 @@ final class IntegrationWatchTests: XCTestCase {
         )
     }
 
-    /// A frame with one side off the viewport reads as a rendering fault, so a clipped block is not
-    /// drawn at all.
-    func testAClippedBlockIsNotDrawn() {
+    /// A diagram taller than the window is the one most worth previewing, so it is framed rather
+    /// than skipped. This used to assert the opposite, which is the bug: measured in Sublime, a
+    /// 33-line diagram in an 832-point viewport reported 123 to 873, was marked clipped, and got no
+    /// frame at all.
+    func testAClippedBlockIsStillDrawn() {
         let answer = IntegrationWatch.Answer(
             version: 1, ok: true, at: 1, blocks: [block(clipped: true), block()]
         )
-        XCTAssertEqual(IntegrationWatch.drawable(answer).count, 1)
-        XCTAssertFalse(IntegrationWatch.drawable(answer)[0].clipped)
+        XCTAssertEqual(IntegrationWatch.drawable(answer).count, 2)
+    }
+
+    /// A provider that says which edge it cut is believed.
+    func testTheProvidersOwnAnswerNamesTheOpenEdges() {
+        var reported = block(clipped: true)
+        reported.clippedTop = true
+        reported.clippedBottom = false
+        let edges = IntegrationWatch.openEdges(
+            of: reported,
+            // Deliberately nowhere near the content, to prove the geometry was not consulted.
+            rect: CGRect(x: 0, y: 500, width: 100, height: 50),
+            content: CGRect(x: 0, y: 0, width: 100, height: 100),
+            lineHeight: 15
+        )
+        XCTAssertEqual(edges, .top)
+    }
+
+    /// A provider from before those fields existed still gets an open edge, read from where its
+    /// clamped rectangle sits. AppKit coordinates, so the top of the block is `maxY`.
+    func testAnOlderProvidersOpenEdgeIsReadFromTheRectangle() {
+        let content = CGRect(x: 0, y: 0, width: 500, height: 800)
+        // Clamped against the bottom of the content area: the block runs on below the viewport.
+        let atBottom = CGRect(x: 0, y: 0, width: 500, height: 400)
+        XCTAssertEqual(
+            IntegrationWatch.openEdges(of: block(clipped: true), rect: atBottom, content: content, lineHeight: 15),
+            .bottom
+        )
+        // Taller than the window: clamped at both ends, and framed with two open sides.
+        XCTAssertEqual(
+            IntegrationWatch.openEdges(of: block(clipped: true), rect: content, content: content, lineHeight: 15),
+            [.top, .bottom]
+        )
+        // Sitting in the middle of the viewport and not clipped: nothing is open, whatever the
+        // rectangle is flush against.
+        XCTAssertEqual(
+            IntegrationWatch.openEdges(
+                of: block(clipped: false), rect: content, content: content, lineHeight: 15
+            ),
+            []
+        )
+    }
+
+    /// The terminal route trims twice -- to the terminal's content, then to the display -- and both
+    /// cuts mean the same thing to the frame.
+    func testTrimmingAwayAnEdgeOpensIt() {
+        let full = CGRect(x: 0, y: 100, width: 400, height: 600)
+        XCTAssertEqual(
+            AmbientPeekPolicy.openEdges(trimmed: full, from: full), [], "nothing was trimmed"
+        )
+        XCTAssertEqual(
+            AmbientPeekPolicy.openEdges(trimmed: CGRect(x: 0, y: 100, width: 400, height: 300), from: full),
+            .top
+        )
+        XCTAssertEqual(
+            AmbientPeekPolicy.openEdges(trimmed: CGRect(x: 0, y: 300, width: 400, height: 400), from: full),
+            .bottom
+        )
+        XCTAssertEqual(
+            AmbientPeekPolicy.openEdges(trimmed: CGRect(x: 0, y: 300, width: 400, height: 100), from: full),
+            [.top, .bottom]
+        )
     }
 
     func testTheDirectoryNamesAreTheOnesTheDocumentPublishes() {

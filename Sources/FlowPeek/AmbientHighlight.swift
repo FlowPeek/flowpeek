@@ -101,6 +101,11 @@ final class AmbientHighlightCoordinator {
         model.chip = chip
         model.anchor = candidate.anchor
         model.style = style
+        // The block may have been trimmed to the viewport before it got here, and the clip above
+        // trims again for the display. Either way the frame must not claim the cut is an edge.
+        model.openEdges = candidate.openEdges.union(
+            AmbientPeekPolicy.openEdges(trimmed: outline, from: candidate.bounds.insetBy(dx: -Self.inset, dy: -Self.inset))
+        )
 
         // A quiet outline carries its button inside itself, so it needs no room above or below.
         let chrome = style == .quiet ? 0 : Self.hintBarHeight + Self.gap
@@ -316,6 +321,8 @@ final class AmbientHighlightModel: ObservableObject {
     /// letting the outline claim to be drawn around it.
     @Published var anchor: AmbientCandidate.Anchor = .pointer
     @Published var style: AmbientHighlightCoordinator.Style = .declared
+    /// Which sides of the frame are cuts rather than the block's own edges.
+    @Published var openEdges: AmbientCandidate.OpenEdges = []
     /// Whether the button is on screen. Always true for a declared outline; for a quiet one it
     /// follows the pointer.
     @Published var isRevealed = true
@@ -456,8 +463,11 @@ struct AmbientHighlightView: View {
     private var isLoud: Bool { model.style == .declared || model.isRevealed || model.isArmed }
 
     private var outline: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(model.tint.color.opacity(isLoud ? 0.85 : 0.40), lineWidth: isLoud ? 2 : 1)
+        ContinuingFrame(open: model.openEdges, cornerRadius: 10, lineWidth: isLoud ? 2 : 1)
+            .stroke(model.tint.color.opacity(isLoud ? 0.85 : 0.40), lineWidth: isLoud ? 2 : 1)
+            // The two sides running into a cut fade out instead of stopping dead, so the frame
+            // reads as carrying on past the edge rather than as a frame that failed to close.
+            .mask(ContinuingFrame.fade(open: model.openEdges, height: model.outlineHeight))
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     // Barely more fill while armed than while merely approached. The frame is
@@ -532,5 +542,90 @@ struct AmbientHighlightView: View {
         .background(model.tint.color, in: Capsule())
         .foregroundStyle(.white)
         .contentShape(Capsule())
+    }
+}
+
+/// The frame, with its cut sides left open.
+///
+/// A diagram taller than the window it is in has no top or bottom edge on screen to draw, and the
+/// two ways of handling that are both worse than this one: a closed rectangle says the diagram ends
+/// at the viewport's edge, and drawing nothing takes the outline away from the diagrams that most
+/// need a preview. So the cut side carries no line, the corners there stay square, and the sides
+/// run off the edge the way the text does.
+struct ContinuingFrame: Shape {
+    let open: AmbientCandidate.OpenEdges
+    let cornerRadius: CGFloat
+    /// The stroke is centred on the path, so the path is inset by half of it to keep the line
+    /// inside the rectangle the way `strokeBorder` would.
+    let lineWidth: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let frame = rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
+        guard frame.width > 0, frame.height > 0 else { return Path() }
+        guard !open.isEmpty else {
+            return Path(roundedRect: frame, cornerRadius: cornerRadius, style: .continuous)
+        }
+        let radius = min(cornerRadius, min(frame.width, frame.height) / 2)
+        let openTop = open.contains(.top)
+        let openBottom = open.contains(.bottom)
+        // A cut side has no corner to turn, so the vertical runs all the way to the edge there.
+        let top = openTop ? frame.minY : frame.minY + radius
+
+        // One stroke: down the left side, around the bottom if the bottom is the block's own, up
+        // the right side, around the top if the top is. With both cut it is two parallel lines,
+        // which is what a block taller than the window actually looks like.
+        var path = Path()
+        path.move(to: CGPoint(x: frame.minX, y: top))
+        if openBottom {
+            path.addLine(to: CGPoint(x: frame.minX, y: frame.maxY))
+            path.move(to: CGPoint(x: frame.maxX, y: frame.maxY))
+        } else {
+            path.addLine(to: CGPoint(x: frame.minX, y: frame.maxY - radius))
+            path.addQuadCurve(
+                to: CGPoint(x: frame.minX + radius, y: frame.maxY),
+                control: CGPoint(x: frame.minX, y: frame.maxY)
+            )
+            path.addLine(to: CGPoint(x: frame.maxX - radius, y: frame.maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: frame.maxX, y: frame.maxY - radius),
+                control: CGPoint(x: frame.maxX, y: frame.maxY)
+            )
+        }
+        path.addLine(to: CGPoint(x: frame.maxX, y: top))
+        guard !openTop else { return path }
+        path.addQuadCurve(
+            to: CGPoint(x: frame.maxX - radius, y: frame.minY),
+            control: CGPoint(x: frame.maxX, y: frame.minY)
+        )
+        path.addLine(to: CGPoint(x: frame.minX + radius, y: frame.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: frame.minX, y: frame.minY + radius),
+            control: CGPoint(x: frame.minX, y: frame.minY)
+        )
+        return path
+    }
+
+    /// How far the fade reaches in from a cut edge. About a line and a half of terminal text: long
+    /// enough to read as deliberate, short enough that the frame still marks where the block is.
+    static let fadeLength: CGFloat = 26
+
+    /// A mask that thins the stroke out towards each cut edge.
+    @ViewBuilder
+    static func fade(open: AmbientCandidate.OpenEdges, height: CGFloat) -> some View {
+        if open.isEmpty || height <= 0 {
+            Rectangle()
+        } else {
+            let reach = min(0.45, fadeLength / max(height, 1))
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(open.contains(.top) ? 0 : 1), location: 0),
+                    .init(color: .black, location: open.contains(.top) ? reach : 0),
+                    .init(color: .black, location: open.contains(.bottom) ? 1 - reach : 1),
+                    .init(color: .black.opacity(open.contains(.bottom) ? 0 : 1), location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
     }
 }

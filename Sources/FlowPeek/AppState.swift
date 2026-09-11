@@ -432,6 +432,11 @@ final class AppState: ObservableObject {
         // A switch thrown in settings starts or stops the watch there and then; an editor that has
         // just been taught to answer should not need the app relaunched before it does.
         integrations.onChange = { [weak self] in self?.applyEnabledState() }
+        // A plugin FlowPeek wrote is brought up to date here rather than left for the reader to
+        // notice: they turned this on, and an old payload answers a protocol this build has moved
+        // past. Nothing is written for an integration that is off, or for a file FlowPeek did not
+        // write.
+        integrations.updateInstalled()
         shortcuts.handlers = [
             .aiPrompt: { [weak self] in self?.presentAIPrompt() },
             .previewClipboard: { [weak self] in self?.previewCopied() },

@@ -115,8 +115,9 @@ must never see half of one.
 | Field | Meaning |
 | --- | --- |
 | `range` | `[begin, end]` in your own buffer coordinates. FlowPeek does not interpret these; they are yours, for your own debugging. |
-| `clipped` | `true` if the block runs off the top or bottom of the viewport. FlowPeek does not frame a clipped block: a rectangle with one side missing reads as a bug. |
-| `x`, `top`, `bottom` | **Content-area coordinates, top-left origin, in points.** Not screen coordinates — you do not know where your window is, and FlowPeek does. `top` is the top of the block's first line; `bottom` is the bottom of its last, so `bottom - top` is the block's height. |
+| `clipped` | `true` if the block runs off the top or bottom of the viewport. FlowPeek frames it anyway, with the cut side left open, so a diagram taller than the window still gets an outline — that is the case where a preview is worth most. Clamp the coordinates to what you can see and set this. |
+| `clipped_top`, `clipped_bottom` | Optional. Which edge ran off. Say so if you know: FlowPeek otherwise works it out from where your rectangle sits, which is right but less certain than being told. |
+| `x`, `top`, `bottom` | **Content-area coordinates, top-left origin, in points.** Not screen coordinates — you do not know where your window is, and FlowPeek does. `top` is the top of the block's first line; `bottom` is the bottom of its last, so `bottom - top` is the block's height. Clamp `top` and `bottom` to your viewport when the block runs past it, but never `x`: the left edge is the block's own, and taking it from the first visible character instead moves the frame out to the window's edge whenever the diagram is scrolled. |
 | `text` | The Mermaid source, fences included or not. FlowPeek decides for itself whether this is a diagram; send what is between the fences and it will be fine. |
 
 FlowPeek draws the frame from `x` to a little short of the window's right edge. You do not report a
@@ -146,7 +147,9 @@ implementation was verified, and how a 32-point error in it was found.
 ## What FlowPeek does with it
 
 A faint frame around each block, in the reader's chosen colour, the same one the terminal watch
-draws. Bring the pointer near and that frame brightens; hold Option and click, and the diagram opens
+draws. A block you marked `clipped` is framed with its cut sides open — no line along the edge the
+diagram runs past, and the sides fading out as they reach it — so send the whole block's `text` even
+when only part of it is on screen. What opens is the diagram, not the visible half of it. Bring the pointer near and that frame brightens; hold Option and click, and the diagram opens
 in a preview panel. Nothing is drawn while your application is not frontmost, and nothing is drawn
 while a preview is already covering the screen.
 
@@ -168,7 +171,15 @@ example. Note in particular:
 - it writes only when the answer actually changed, so a reader who is reading produces no writes;
 - it finds fenced blocks through the editor's own syntax scopes before falling back to searching for
   the fence itself;
-- it clamps a partly visible block and marks it `clipped` rather than reporting a wrong rectangle.
+- it clamps a partly visible block, marks it `clipped`, and names the edge that ran off, while still
+  sending the whole block's source;
+- it maps buffer points to window coordinates through the editor's *layout* space rather than
+  asking for a window position directly. Sublime answers `text_to_window` with `(0, 0)` for any
+  point outside the viewport -- the x as well as the y -- so a block scrolled off the top reported
+  its left edge as zero and the frame wrapped the whole window. If your toolkit does something
+  similar, measure the offset from a point you can see and apply it to the point you cannot;
+- it searches a window wider than the viewport, so a diagram taller than the window -- which has
+  neither of its fences on screen -- is still found whole.
 
 ## Versioning
 

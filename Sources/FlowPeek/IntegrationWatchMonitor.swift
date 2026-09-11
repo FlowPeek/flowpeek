@@ -45,6 +45,11 @@ final class IntegrationWatchMonitor {
     /// switches between them.
     private var lastAsked: [String: Date] = [:]
     private var lastAnswerDate: [String: Date] = [:]
+    /// The last answer each provider gave, so a frame can be put back where a moved window now is
+    /// without waiting for the text to change.
+    private var lastAnswer: [String: IntegrationWatch.Answer] = [:]
+    /// The window frame the outline on screen was measured against.
+    private var lastWindow: CGRect?
     private var asking: Set<String> = []
     private var showing = false
 
@@ -106,6 +111,8 @@ final class IntegrationWatchMonitor {
         timer = nil
         lastAsked = [:]
         lastAnswerDate = [:]
+        lastAnswer = [:]
+        lastWindow = nil
         watching.forEach(stopAsking)
         watching = []
         dismiss()
@@ -172,13 +179,23 @@ final class IntegrationWatchMonitor {
         guard let modified = try? fileManager.attributesOfItem(atPath: file.path)[.modificationDate] as? Date else {
             return
         }
-        guard modified != lastAnswerDate[provider.id] else { return }
+        guard modified != lastAnswerDate[provider.id] else {
+            // The text has not moved, so the provider has written nothing -- it answers when the
+            // picture changes, and dragging a window does not change the picture. The rectangle it
+            // described is relative to a window that has moved, though, so the frame has to be
+            // measured again or it stays where the window used to be.
+            if let answer = lastAnswer[provider.id], frontWindowFrame() != lastWindow {
+                present(answer, from: provider)
+            }
+            return
+        }
         lastAnswerDate[provider.id] = modified
         guard let data = try? Data(contentsOf: file),
               let answer = try? JSONDecoder().decode(IntegrationWatch.Answer.self, from: data) else {
             logger.debug("the \(provider.id, privacy: .public) answer did not decode")
             return
         }
+        lastAnswer[provider.id] = answer
         guard IntegrationWatch.isUsable(answer, now: Date().timeIntervalSince1970) else {
             dismiss()
             return
@@ -194,10 +211,17 @@ final class IntegrationWatchMonitor {
             dismiss()
             return
         }
+        lastWindow = window
         // What the provider said, or what the system puts above a standard window's content. Asked
         // of AppKit rather than written down, because the number is macOS's and has moved: a titled
         // window's chrome was 28 points and is 32 on this release.
         let inset = answer.contentInsetTop.map { CGFloat($0) } ?? Self.systemTitleBarHeight
+        // The window's content area, which is what a clamped block's edges are measured against.
+        let content = ScreenGeometry.axToAppKit(
+            CGRect(x: window.minX, y: window.minY + inset,
+                   width: window.width, height: max(0, window.height - inset)),
+            flipReference: flip
+        )
         var candidates: [AmbientCandidate] = []
         for block in IntegrationWatch.drawable(answer) {
             guard let rect = IntegrationWatch.screenRect(
@@ -214,7 +238,12 @@ final class IntegrationWatchMonitor {
                     bounds: rect,
                     applicationName: provider.name,
                     // The frame really is around the block, which is the whole point of the plugin.
-                    anchor: .terminal
+                    anchor: .terminal,
+                    // A diagram taller than the window is framed with its cut sides open rather
+                    // than not framed at all.
+                    openEdges: IntegrationWatch.openEdges(
+                        of: block, rect: rect, content: content, lineHeight: answer.lineHeight
+                    )
                 )
             )
         }
@@ -231,6 +260,8 @@ final class IntegrationWatchMonitor {
     private func dismiss() {
         guard showing else { return }
         showing = false
+        // Nothing is on screen to keep in step with a window any more.
+        lastWindow = nil
         onDismiss?()
     }
 

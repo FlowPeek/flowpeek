@@ -56,10 +56,26 @@ public enum TerminalGridInference {
     /// a presentation.
     public static let rowHeightRange: ClosedRange<CGFloat> = 8...60
 
-    /// How much padding a pane may hold, top and bottom together. Ghostty's default measured 6
-    /// points. A window padded more than this drops out of the sieve and the caller falls back,
-    /// which is the intended outcome: a wrong grid is worse than the imprecision it replaces.
+    /// How much padding a pane may hold, top and bottom together, when nothing else is known about
+    /// the grid. Ghostty's 1.2 default measured 6 points. A window padded more than this drops out
+    /// of the sieve and the caller falls back, which is the intended outcome: a wrong grid is worse
+    /// than the imprecision it replaces.
+    ///
+    /// It has to stay tight. Raising it to cover Ghostty 1.3 admitted grids that are not the grid --
+    /// a 15.61-point row with 45 points of padding explains one look as neatly as the true 16 and 34
+    /// -- and a sieve that cannot narrow to one answer draws nothing at all.
     public static let paddingLimit: CGFloat = 12
+
+    /// The same limit for a pane whose row height is already known, in rows.
+    ///
+    /// Knowing the row is what makes a loose limit safe: it is the row height that the extra
+    /// candidates get wrong, and pinning it throws them out before the padding is even looked at.
+    /// Ghostty 1.3.1 leaves two rows over -- measured 34 points against a 16-point row, and 28 and
+    /// 24 at shorter viewports -- where 1.2 left well under one.
+    public static let paddingLimitRows: CGFloat = 4
+
+    /// How far a candidate's row may sit from a height solved elsewhere and still be that height.
+    private static let rowHeightTolerance: CGFloat = 0.01
 
     /// Width over height for one cell. A monospaced face is about half as wide as its line is tall
     /// -- Ghostty measured 8.08 over 16.0, or 0.505 -- and this band is what rules out the families
@@ -133,11 +149,16 @@ public enum TerminalGridInference {
     /// and the viewport then fix the row height and the padding exactly, because
     /// `contentHeight - padding = rows * rowHeight` and `viewportHeight - padding = visibleRows *
     /// rowHeight` share their unknowns. Only the plausibility bands are left to check.
+    /// - Parameter rowHeight: the row height if it is already known, from two readings of this pane
+    ///   (see `TerminalRowMetrics`). Given one, only grids with that row are offered and the padding
+    ///   is allowed to be as large as the pane really makes it; without one, nothing is assumed and
+    ///   the tight padding limit does the narrowing instead.
     public static func candidates(
         contentHeight: CGFloat,
         viewportHeight: CGFloat,
         paneWidth: CGFloat,
-        lineLengths: [Int]
+        lineLengths: [Int],
+        rowHeight known: CGFloat? = nil
     ) -> [TerminalGrid] {
         guard contentHeight > viewportHeight, viewportHeight > 0, paneWidth > 0,
               !lineLengths.isEmpty else { return [] }
@@ -160,10 +181,12 @@ public enum TerminalGridInference {
                 guard rowHeight >= rowHeightRange.lowerBound else { break }
                 defer { difference += 1 }
                 guard rowHeight <= rowHeightRange.upperBound else { continue }
+                if let known, abs(rowHeight - known) > rowHeightTolerance { continue }
                 let visibleRows = total - difference
                 let padding = viewportHeight - CGFloat(visibleRows) * rowHeight
                 if padding < 0 { continue }
-                if padding > paddingLimit { break }
+                let limit = known.map { $0 * paddingLimitRows } ?? paddingLimit
+                if padding > limit { break }
                 guard aspectRange.contains(width / rowHeight) else { continue }
                 grids.append(TerminalGrid(columns: columns, rowHeight: rowHeight, padding: padding))
             }

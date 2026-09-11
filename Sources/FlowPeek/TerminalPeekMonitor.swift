@@ -837,11 +837,15 @@ final class TerminalPeekMonitor {
         // Nothing survived, so either this is the first look or the pane was resized or its font
         // changed. Either way the answer starts again from what is on screen now.
         if candidates.isEmpty {
+            // With the row height already solved for this pane, the sieve only has to find the
+            // column count, and the padding it has to tolerate can be what the pane really leaves:
+            // Ghostty 1.3 leaves two rows of it, which is past what the blind limit allows.
             candidates = TerminalGridInference.candidates(
                 contentHeight: contentHeight,
                 viewportHeight: viewport.height,
                 paneWidth: viewport.width,
-                lineLengths: lengths
+                lineLengths: lengths,
+                rowHeight: rowHeights[pid] ?? readingApp.flatMap(Self.rememberedRowHeight(for:))
             )
         }
         gridCandidates[pid] = candidates

@@ -8,12 +8,14 @@ struct SettingsView: View {
     enum SettingsSection: String, CaseIterable {
         case general
         case shortcuts
+        case integrations
         case ai
 
         var title: LocalizedStringKey {
             switch self {
             case .general: "settings.general"
             case .shortcuts: "settings.shortcuts"
+            case .integrations: "settings.integrations"
             case .ai: "settings.ai"
             }
         }
@@ -22,6 +24,8 @@ struct SettingsView: View {
             switch self {
             case .general: "gearshape"
             case .shortcuts: "keyboard"
+            // An editor being taught to answer is a piece added to something already built.
+            case .integrations: "puzzlepiece.extension"
             case .ai: "sparkles"
             }
         }
@@ -34,6 +38,9 @@ struct SettingsView: View {
     /// Observed for the same reason: the maximum lives in the history store, and the row showing it
     /// has to redraw when the stepper moves it.
     @ObservedObject private var history = DiagramHistoryStore.shared
+    /// Observed so a switch thrown here redraws the badge beside it, and so the tab notices an
+    /// editor that was installed while the window was open.
+    @ObservedObject private var integrations = AppIntegrationCenter.shared
     @State private var selection: SettingsSection
     @State private var relaunchPrompt: RelaunchPrompt?
     let close: () -> Void
@@ -172,6 +179,7 @@ struct SettingsView: View {
                 switch selection {
                 case .general: generalSettings
                 case .shortcuts: shortcutSettings
+                case .integrations: integrationSettings
                 case .ai: aiSettings
                 }
             }
@@ -182,6 +190,19 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.18)))
+    }
+
+    /// The applications FlowPeek can teach to answer it, and the switch for each.
+    ///
+    /// A tab of its own rather than a card on the general pane, because this is the one place in the
+    /// app that writes a file somewhere the user did not ask it to, and a decision like that should
+    /// be somewhere a person can find it again without remembering which card it was under. It is
+    /// also the list that grows: one editor today, and the tab is already a list.
+    private var integrationSettings: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            sectionTitle("settings.integrations", description: "settings.integrations.description")
+            AppIntegrationList(center: integrations)
+        }
     }
 
     private var generalSettings: some View {

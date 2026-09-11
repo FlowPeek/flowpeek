@@ -203,6 +203,11 @@ struct OnboardingView: View {
     private typealias Step = OnboardingStep
 
     @EnvironmentObject private var app: AppState
+    /// Observed so a switch thrown on the integrations card redraws its own badge.
+    @ObservedObject private var integrations = AppIntegrationCenter.shared
+    /// Read once, when the wizard is built. Whether the card exists is a fact about this Mac, and
+    /// re-deciding it mid-flow would move the dots and the Back button under the reader's hand.
+    @State private var integrationOffers = AppIntegrationCenter.shared.hasOffers
     @State private var step: Step
     @State private var permissionFlow = AccessibilityPermissionFlow(isGranted: false)
     @State private var nudge = false
@@ -258,6 +263,7 @@ struct OnboardingView: View {
                     switch step {
                     case .permission: permissionCard
                     case .launch: launchCard
+                    case .integrations: integrationsCard
                     case .tutorial: tutorialCard
                     // Both of these say everything they have to say in the drawing above and the
                     // two lines beside it; a card under them would be a box around nothing.
@@ -316,6 +322,9 @@ struct OnboardingView: View {
         switch step {
         case .welcome: WelcomeScene(size: Skeleton.stepSize)
         case .permission: PermissionScene(size: Skeleton.stepSize)
+        // The rows carry their own application icons, which say more about which editors these are
+        // than any drawing would.
+        case .integrations: EmptyView()
         case .launch: LaunchScene(size: Skeleton.stepSize)
         case .menuBar: MenuBarScene(size: Skeleton.stepSize)
         case .tutorial: EmptyView()
@@ -352,7 +361,7 @@ struct OnboardingView: View {
             // come, and none of them is there.
             if !isRevisit {
                 HStack(spacing: 7) {
-                    ForEach(Step.visible(accessibilityGranted: app.accessibilityGranted, current: step), id: \.rawValue) { candidate in
+                    ForEach(Step.visible(accessibilityGranted: app.accessibilityGranted, hasIntegrationOffers: hasIntegrationOffers, current: step), id: \.rawValue) { candidate in
                         Capsule()
                             .fill(step == candidate ? Color.accentColor : Color.accentColor.opacity(0.28))
                             .frame(width: step == candidate ? 24 : 8, height: 8)
@@ -390,6 +399,20 @@ struct OnboardingView: View {
         .frame(maxWidth: 540, alignment: .leading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22)))
+    }
+
+    /// Whether this Mac has an editor worth offering to teach. Read once when the wizard opens and
+    /// kept, so the dots do not change shape under the reader's hand if an editor is installed or
+    /// removed while the window is up.
+    private var hasIntegrationOffers: Bool { integrationOffers }
+
+
+    /// The editors found here, each with its own switch. The same rows the settings tab shows.
+    private var integrationsCard: some View {
+        VStack(spacing: 10) {
+            AppIntegrationList(center: integrations)
+        }
+        .frame(maxWidth: 540)
     }
 
     private var launchCard: some View {
@@ -726,6 +749,13 @@ struct OnboardingView: View {
                         }
                     }
                 case .launch:
+                    Button("common.continue") { step = step.next(hasIntegrationOffers: hasIntegrationOffers) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                case .integrations:
+                    // "Continue" either way. Every row here is a switch that is already thrown or
+                    // already not; there is nothing to confirm and nothing to refuse, so the footer
+                    // does not ask twice.
                     Button("common.continue") { step = .tutorial }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
@@ -817,7 +847,7 @@ struct OnboardingView: View {
 
     private func back() {
         if isRevisit { step = .tutorial; return }
-        step = step.previous(accessibilityGranted: app.accessibilityGranted)
+        step = step.previous(accessibilityGranted: app.accessibilityGranted, hasIntegrationOffers: hasIntegrationOffers)
     }
 
     /// One opener, because what the page prints depends on which lessons are on offer and whether

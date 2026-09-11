@@ -457,3 +457,16 @@
 "settings.feedback.idea" = "Suggest an Idea";
 "settings.feedback.email" = "Send Feedback by Email";
 "settings.feedback.copy" = "Copy Diagnostics";
+
+/* Integrations: editors FlowPeek can teach to answer it */
+"settings.integrations" = "Integrations";
+"settings.integrations.description" = "Some editors draw their own text and hand none of it to macOS. FlowPeek can write one small file where those editors look for plugins, and read them after that. Nothing is written until you switch it on, and switching it off deletes it.";
+"onboarding.integrations.title" = "One of your editors needs a hand";
+"onboarding.integrations.message" = "It draws its own text and tells macOS nothing about it. A small file, written where it looks for plugins, is all it takes. You can read the file first, and you can take it away again at any time.";
+"integration.sublime.reason" = "Sublime Text has no accessibility support at all, so FlowPeek cannot see a diagram in it. The plugin answers two questions and nothing else: what is on screen, and where.";
+"integration.state.on" = "On";
+"integration.state.outdated" = "Update waiting";
+"integration.state.failed" = "Could not write";
+"integration.payload.show" = "Show what gets written";
+"integration.payload.hide" = "Hide the file";
+"integration.none" = "None of the editors FlowPeek can extend is installed here. If you install one, it will appear in this list.";

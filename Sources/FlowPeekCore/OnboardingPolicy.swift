@@ -43,7 +43,13 @@ public enum OnboardingPolicy {
 /// The wizard's cards, in the order they are offered. Here rather than in the view because which
 /// card comes next is a rule about the user's answers, not about SwiftUI.
 public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
-    case welcome, permission, launch, tutorial
+    case welcome, permission, launch
+    /// The editors on this Mac that FlowPeek can only read with a little help, offered here so the
+    /// answer is given once, in setup, rather than found later by somebody wondering why their
+    /// editor is the one place the app does nothing. Skipped entirely when none of them is
+    /// installed, which is most Macs: see `visible(accessibilityGranted:hasIntegrationOffers:current:)`.
+    case integrations
+    case tutorial
     /// Where the app is, once the user has been shown what it does.
     ///
     /// Last rather than first, and a card of its own rather than a line on the tutorial's. A
@@ -60,6 +66,7 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
         case .welcome: "onboarding.welcome.title"
         case .permission: "onboarding.permission.title"
         case .launch: "onboarding.launch.title"
+        case .integrations: "onboarding.integrations.title"
         case .tutorial: "tutorial.title"
         case .menuBar: "onboarding.menu-bar.title"
         }
@@ -70,6 +77,7 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
         case .welcome: "onboarding.welcome.message"
         case .permission: "onboarding.permission.message"
         case .launch: "onboarding.launch.message"
+        case .integrations: "onboarding.integrations.message"
         case .tutorial: "tutorial.message"
         case .menuBar: "onboarding.menu-bar.message"
         }
@@ -99,12 +107,26 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
     /// one answer a user can give by accident, and Back is the whole of the undo — while a grant has
     /// nothing left to revisit, and the permission card's own poll would push a granted user
     /// straight forward again.
-    public func previous(accessibilityGranted: Bool) -> Self {
+    public func previous(accessibilityGranted: Bool, hasIntegrationOffers: Bool = false) -> Self {
         switch self {
         case .menuBar: .tutorial
-        case .tutorial: .launch
+        case .tutorial: hasIntegrationOffers ? .integrations : .launch
+        case .integrations: .launch
         case .launch: accessibilityGranted ? .welcome : .permission
         case .permission, .welcome: .welcome
+        }
+    }
+
+    /// Forward from the card before the conditional one, so a Mac with none of these editors never
+    /// stops on a card with nothing on it.
+    public func next(hasIntegrationOffers: Bool) -> Self {
+        switch self {
+        case .launch: hasIntegrationOffers ? .integrations : .tutorial
+        case .integrations: .tutorial
+        case .welcome: .permission
+        case .permission: .launch
+        case .tutorial: .menuBar
+        case .menuBar: .menuBar
         }
     }
 
@@ -113,8 +135,20 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
     /// its dot leaves the last card looking like there is still one to come. A refused one keeps its
     /// dot, because `previous` still walks back into it — a row that grows a capsule under the
     /// user's hand as they press Back is worse than a card they were never going to see.
-    public static func visible(accessibilityGranted: Bool, current: Self) -> [Self] {
-        allCases.filter { $0 != .permission || !accessibilityGranted || current == .permission }
+    public static func visible(
+        accessibilityGranted: Bool,
+        hasIntegrationOffers: Bool = false,
+        current: Self
+    ) -> [Self] {
+        allCases.filter { step in
+            switch step {
+            case .permission: !accessibilityGranted || current == .permission
+            // The same rule the permission card follows, for the same reason: a dot for a card this
+            // run will never stop on leaves the last card looking like there is one more to come.
+            case .integrations: hasIntegrationOffers || current == .integrations
+            default: true
+            }
+        }
     }
 }
 

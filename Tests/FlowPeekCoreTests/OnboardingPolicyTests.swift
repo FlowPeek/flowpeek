@@ -180,7 +180,9 @@ final class OnboardingStepTests: XCTestCase {
     }
 
     func testBackWalksTheRestOfTheFlowInOrder() {
-        XCTAssertEqual(OnboardingStep.tutorial.previous(accessibilityGranted: true), .launch)
+        XCTAssertEqual(OnboardingStep.tutorial.previous(accessibilityGranted: true), .holdToPeek)
+        XCTAssertEqual(OnboardingStep.tutorial.previous(accessibilityGranted: false), .launch)
+        XCTAssertEqual(OnboardingStep.holdToPeek.previous(accessibilityGranted: true), .launch)
         XCTAssertEqual(OnboardingStep.permission.previous(accessibilityGranted: false), .welcome)
         XCTAssertEqual(OnboardingStep.welcome.previous(accessibilityGranted: false), .welcome)
     }
@@ -196,14 +198,62 @@ final class OnboardingStepTests: XCTestCase {
     func testTheHeaderDropsTheStepItIsGoingToSkip() {
         XCTAssertEqual(
             OnboardingStep.visible(accessibilityGranted: true, current: .tutorial),
-            [.welcome, .launch, .tutorial, .menuBar]
+            [.welcome, .launch, .holdToPeek, .tutorial, .menuBar]
         )
     }
 
     func testTheSkippedStepGetsItsDotBackWhileTheUserStandsOnIt() {
         XCTAssertEqual(
             OnboardingStep.visible(accessibilityGranted: true, current: .permission),
-            [.welcome, .permission, .launch, .tutorial, .menuBar]
+            [.welcome, .permission, .launch, .holdToPeek, .tutorial, .menuBar]
+        )
+    }
+
+    // MARK: - The gesture
+
+    /// It is offered once, in setup, right after the grant it depends on -- that is the whole point
+    /// of the card: the switch exists, and somebody who never finds it concludes the app does less
+    /// than it does.
+    func testTheGestureIsOfferedOnceThePermissionIsInHand() {
+        XCTAssertEqual(
+            OnboardingStep.launch.next(accessibilityGranted: true, hasIntegrationOffers: false),
+            .holdToPeek
+        )
+    }
+
+    /// And is not offered without it. The switch could not do anything, and a card that asks for a
+    /// permission the user has just refused is the wizard not listening.
+    func testTheGestureIsSkippedWithoutThePermission() {
+        XCTAssertEqual(
+            OnboardingStep.launch.next(accessibilityGranted: false, hasIntegrationOffers: false),
+            .tutorial
+        )
+        XCTAssertEqual(
+            OnboardingStep.launch.next(accessibilityGranted: false, hasIntegrationOffers: true),
+            .integrations
+        )
+        XCTAssertEqual(
+            OnboardingStep.visible(accessibilityGranted: false, current: .launch).contains(.holdToPeek),
+            false
+        )
+    }
+
+    func testTheFlowCarriesOnPastTheGesture() {
+        XCTAssertEqual(
+            OnboardingStep.holdToPeek.next(accessibilityGranted: true, hasIntegrationOffers: true),
+            .integrations
+        )
+        XCTAssertEqual(
+            OnboardingStep.holdToPeek.next(accessibilityGranted: true, hasIntegrationOffers: false),
+            .tutorial
+        )
+        XCTAssertEqual(
+            OnboardingStep.integrations.previous(accessibilityGranted: true, hasIntegrationOffers: true),
+            .holdToPeek
+        )
+        XCTAssertEqual(
+            OnboardingStep.integrations.previous(accessibilityGranted: false, hasIntegrationOffers: true),
+            .launch
         )
     }
 

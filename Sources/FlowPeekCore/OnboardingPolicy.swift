@@ -44,6 +44,11 @@ public enum OnboardingPolicy {
 /// card comes next is a rule about the user's answers, not about SwiftUI.
 public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
     case welcome, permission, launch
+    /// The gesture that needs no shortcut and no selection, offered once the grant it depends on is
+    /// in hand. Skipped when it is not: a switch that cannot do anything until a permission the
+    /// user has just refused is granted is a card asking them to change their mind, and the switch
+    /// is still in settings for when they do.
+    case holdToPeek
     /// The editors on this Mac that FlowPeek can only read with a little help, offered here so the
     /// answer is given once, in setup, rather than found later by somebody wondering why their
     /// editor is the one place the app does nothing. Skipped entirely when none of them is
@@ -66,6 +71,7 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
         case .welcome: "onboarding.welcome.title"
         case .permission: "onboarding.permission.title"
         case .launch: "onboarding.launch.title"
+        case .holdToPeek: "onboarding.hold-to-peek.title"
         case .integrations: "onboarding.integrations.title"
         case .tutorial: "tutorial.title"
         case .menuBar: "onboarding.menu-bar.title"
@@ -77,6 +83,7 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
         case .welcome: "onboarding.welcome.message"
         case .permission: "onboarding.permission.message"
         case .launch: "onboarding.launch.message"
+        case .holdToPeek: "onboarding.hold-to-peek.message"
         case .integrations: "onboarding.integrations.message"
         case .tutorial: "tutorial.message"
         case .menuBar: "onboarding.menu-bar.message"
@@ -110,24 +117,36 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
     public func previous(accessibilityGranted: Bool, hasIntegrationOffers: Bool = false) -> Self {
         switch self {
         case .menuBar: .tutorial
-        case .tutorial: hasIntegrationOffers ? .integrations : .launch
-        case .integrations: .launch
+        case .tutorial:
+            if hasIntegrationOffers { .integrations } else { Self.beforeIntegrations(accessibilityGranted) }
+        case .integrations: Self.beforeIntegrations(accessibilityGranted)
+        case .holdToPeek: .launch
         case .launch: accessibilityGranted ? .welcome : .permission
         case .permission, .welcome: .welcome
         }
     }
 
-    /// Forward from the card before the conditional one, so a Mac with none of these editors never
-    /// stops on a card with nothing on it.
-    public func next(hasIntegrationOffers: Bool) -> Self {
+    /// Forward from the card before a conditional one, so a Mac with none of these editors -- or a
+    /// user who refused the grant -- never stops on a card with nothing it can do on it.
+    public func next(accessibilityGranted: Bool, hasIntegrationOffers: Bool) -> Self {
         switch self {
-        case .launch: hasIntegrationOffers ? .integrations : .tutorial
+        case .launch:
+            if accessibilityGranted { .holdToPeek } else { Self.afterHoldToPeek(hasIntegrationOffers) }
+        case .holdToPeek: Self.afterHoldToPeek(hasIntegrationOffers)
         case .integrations: .tutorial
         case .welcome: .permission
         case .permission: .launch
         case .tutorial: .menuBar
         case .menuBar: .menuBar
         }
+    }
+
+    private static func afterHoldToPeek(_ hasIntegrationOffers: Bool) -> Self {
+        hasIntegrationOffers ? .integrations : .tutorial
+    }
+
+    private static func beforeIntegrations(_ accessibilityGranted: Bool) -> Self {
+        accessibilityGranted ? .holdToPeek : .launch
     }
 
     /// The dots in the header, which have to count the cards this run can actually visit: a granted
@@ -146,6 +165,9 @@ public enum OnboardingStep: Int, CaseIterable, Comparable, Sendable {
             // The same rule the permission card follows, for the same reason: a dot for a card this
             // run will never stop on leaves the last card looking like there is one more to come.
             case .integrations: hasIntegrationOffers || current == .integrations
+            // And again for the gesture: without the grant it is a switch that can do nothing, so
+            // it is not walked into and must not be counted.
+            case .holdToPeek: accessibilityGranted || current == .holdToPeek
             default: true
             }
         }

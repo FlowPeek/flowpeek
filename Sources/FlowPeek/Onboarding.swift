@@ -263,6 +263,7 @@ struct OnboardingView: View {
                     switch step {
                     case .permission: permissionCard
                     case .launch: launchCard
+                    case .holdToPeek: holdToPeekCard
                     case .integrations: integrationsCard
                     case .tutorial: tutorialCard
                     // Both of these say everything they have to say in the drawing above and the
@@ -326,6 +327,9 @@ struct OnboardingView: View {
         // than any drawing would.
         case .integrations: EmptyView()
         case .launch: LaunchScene(size: Skeleton.stepSize)
+        // The same drawing the tutorial's lesson carries, at the size a step's gets: what the
+        // switch does is a gesture, and a gesture is better performed than labelled.
+        case .holdToPeek: HoldToPeekScene(size: Skeleton.stepSize)
         case .menuBar: MenuBarScene(size: Skeleton.stepSize)
         case .tutorial: EmptyView()
         }
@@ -451,6 +455,60 @@ struct OnboardingView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22)))
         .togglesOnTap(launchAtLoginBinding, cornerRadius: 18)
+    }
+
+    /// The gesture, and the one switch that turns it on.
+    ///
+    /// Shaped like the login card because it is the same kind of question -- one switch, its
+    /// consequence spelled out beside it -- and reached only with the grant in hand, so it never
+    /// has to explain a permission as well. The chord is read from the store rather than written
+    /// into the sentence: it is rebindable, and a card that names the wrong key teaches the wrong
+    /// key.
+    private var holdToPeekCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "hand.point.up.left")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 26, height: 26)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("settings.ambient").font(.headline)
+                    Text(holdToPeekDetail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 14)
+                Toggle("settings.ambient", isOn: ambientBinding)
+                    .labelsHidden()
+                    .accessibilityHint(Text(holdToPeekDetail))
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: 540, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.22)))
+        .togglesOnTap(ambientBinding, cornerRadius: 18)
+    }
+
+    private var holdToPeekDetail: String {
+        String(
+            format: String(localized: "settings.ambient.short"),
+            app.shortcuts.shortcuts[.ambientPeek].display
+        )
+    }
+
+    /// Throwing the switch has to start the watch there and then: the card is a place to turn the
+    /// gesture on, and a gesture that does nothing until the next launch is one the user will
+    /// conclude does not work.
+    private var ambientBinding: Binding<Bool> {
+        Binding(
+            get: { app.ambientPeekEnabled },
+            set: { wanted in
+                app.ambientPeekEnabled = wanted
+                app.applyEnabledState()
+            }
+        )
     }
 
     /// Reads the system's answer rather than what was asked for, so the switch cannot claim a state
@@ -748,8 +806,11 @@ struct OnboardingView: View {
                             .controlSize(.large)
                         }
                     }
-                case .launch:
-                    Button("common.continue") { step = step.next(hasIntegrationOffers: hasIntegrationOffers) }
+                case .launch, .holdToPeek:
+                    // "Continue" whichever way the switch is left. The card asks a question whose
+                    // answer is the switch itself, so a second button to confirm it would be
+                    // asking twice.
+                    Button("common.continue") { step = advanced() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
                 case .integrations:
@@ -843,6 +904,11 @@ struct OnboardingView: View {
     /// back to -- walking a returning user into the permission wizard is not what they asked for.
     private var showsBackButton: Bool {
         isRevisit ? step != .tutorial : step > .welcome
+    }
+
+    /// The next card this run can actually stop on.
+    private func advanced() -> Step {
+        step.next(accessibilityGranted: app.accessibilityGranted, hasIntegrationOffers: hasIntegrationOffers)
     }
 
     private func back() {

@@ -60,6 +60,8 @@
 "tutorial.paused.blocked" = "감지가 일시 정지되어 있어서 아직은 아무 일도 일어나지 않습니다. 메뉴 막대 FlowPeek 메뉴의 “%@” 항목을 눌러 다시 켠 뒤 이 페이지를 다시 열어주세요.";
 "tutorial.clipboard.switched-off" = "복사를 지켜보는 기능이 꺼져 있어서 복사해도 알아채지 못합니다. 설정의 일반 탭에서 ‘%@’를 켜주세요.";
 "tutorial.clipboard.blocked" = "복사를 지켜보는 기능이 꺼져 있습니다 — 설정의 일반 탭에서 ‘%@’를 켠 뒤 이 페이지를 다시 열어주세요.";
+"onboarding.hold-to-peek.title" = "하던 일을 벗어나지 않고 다이어그램 읽기";
+"onboarding.hold-to-peek.message" = "쓰던 앱 그대로입니다. Option을 누른 채 다이어그램을 가리키면 FlowPeek이 테두리를 그리고 거기서 바로 엽니다. 선택할 것도 복사할 것도 없습니다. 손을 떼면 Option은 다시 원래대로 돌아갑니다.";
 "onboarding.launch.title" = "언제든 준비되어 있도록";
 "onboarding.launch.message" = "FlowPeek는 메뉴 막대에 머무르며, 다이어그램을 선택하거나 복사하기 전까지는 아무 일도 하지 않습니다. 로그인할 때 함께 켜두면 늘 그 자리에 있습니다.";
 "onboarding.menu-bar.title" = "FlowPeek는 여기 있습니다";

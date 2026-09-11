@@ -35,6 +35,11 @@ public struct AppIntegration: Identifiable, Equatable, Sendable {
     /// for trust it has not earned.
     public let reasonKey: String.LocalizationValue
 
+    /// Where the two sides leave messages for each other, under FlowPeek's own support directory.
+    /// Derived from the identifier rather than declared, so a plugin and the app cannot be pointed
+    /// at different directories by a typo.
+    public var watchDirectoryName: String { id }
+
     public init(
         id: String,
         bundleIDs: [String],

@@ -24,7 +24,7 @@ VERSION = 1
 # nothing to listen on, nothing to reach from off this machine, and nothing left running when
 # FlowPeek is not.
 HOME = os.path.expanduser("~")
-ROOT = os.path.join(HOME, "Library", "Application Support", "FlowPeek", "sublime")
+ROOT = os.path.join(HOME, "Library", "Application Support", "FlowPeek", "integrations", "sublime-text")
 ASK = os.path.join(ROOT, "ask")
 ANSWER = os.path.join(ROOT, "answer.json")
 
@@ -90,12 +90,18 @@ def _report():
     for begin, end in _regions(view):
         # Clamped to what is on screen: a block running off the top has no top edge to draw.
         top_left = view.text_to_window(max(begin, visible.begin()))
-        bottom_left = view.text_to_window(min(end, visible.end()))
+        # The *last character of the block*, not the one after it. A fenced region ends at the
+        # offset following its closing fence, which is the start of the next line, and measuring
+        # there put the frame's bottom edge one whole line below the diagram.
+        last = max(begin, min(end - 1, visible.end()))
+        bottom_left = view.text_to_window(last)
         blocks.append({
             "range": [begin, end],
             "clipped": begin < visible.begin() or end > visible.end(),
-            # Window coordinates, in device independent pixels. Sublime's API has no screen space;
-            # FlowPeek adds the window origin, which it reads without needing any permission.
+            # Content-area coordinates, in device independent pixels, exactly as Sublime reports
+            # them: text_to_window is measured from below the title bar. Nothing is added for the
+            # chrome here on purpose -- FlowPeek asks macOS how tall a title bar is, and that
+            # number has moved between releases.
             "x": top_left[0],
             "top": top_left[1],
             "bottom": bottom_left[1] + view.line_height(),

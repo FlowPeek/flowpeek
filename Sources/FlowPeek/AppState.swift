@@ -150,6 +150,15 @@ final class AppState: ObservableObject {
     let clipboard = ClipboardMonitor()
     let ambient = AmbientPeekMonitor()
     let terminalPeek = TerminalPeekMonitor()
+    /// The same frames, for the one editor that answers through a plugin rather than through the
+    /// accessibility tree. Its candidates go down the terminal watch's path because they are the
+    /// same thing: a block found on screen with nothing held down.
+    /// The same frames again, for editors that answer through a plugin instead of the accessibility
+    /// tree. One monitor for all of them; which editors it watches is whichever ones are installed.
+    let integrationWatch = IntegrationWatchMonitor()
+    /// Which editors have been taught to answer. Read when the routes are re-armed, so switching
+    /// one on in settings starts the watch without a relaunch.
+    let integrations = AppIntegrationCenter.shared
     let doubleTap = DoubleTapMonitor()
     let highlight = AmbientHighlightCoordinator()
     /// Its own panels rather than the one the pointer route uses: the two routes can be raised by
@@ -404,11 +413,25 @@ final class AppState: ObservableObject {
         }
         highlight.onActivate = { [weak self] in self?.previewAmbient() }
         terminalPeek.onCandidates = { [weak self] candidates in self?.receiveTerminal(candidates) }
+        integrationWatch.onCandidates = { [weak self] candidates in self?.receiveTerminal(candidates) }
+        integrationWatch.onDismiss = { [weak self] in
+            self?.terminalHighlight.hide()
+            self?.terminalCandidates = []
+        }
+        // One frame at a time on screen: the pointer route wins where it can read anything at all,
+        // and a preview already up covers whatever is behind it.
+        integrationWatch.isSuppressed = { [weak self] in
+            guard let self else { return true }
+            return ambientCandidate != nil || previews.hasPanel
+        }
         terminalPeek.onDismiss = { [weak self] in
             self?.terminalHighlight.hide()
             self?.terminalCandidates = []
         }
         terminalHighlight.onActivate = { [weak self] index in self?.previewTerminal(at: index) }
+        // A switch thrown in settings starts or stops the watch there and then; an editor that has
+        // just been taught to answer should not need the app relaunched before it does.
+        integrations.onChange = { [weak self] in self?.applyEnabledState() }
         shortcuts.handlers = [
             .aiPrompt: { [weak self] in self?.presentAIPrompt() },
             .previewClipboard: { [weak self] in self?.previewCopied() },
@@ -505,6 +528,14 @@ final class AppState: ObservableObject {
             terminalPeek.start()
         } else {
             terminalPeek.stop()
+        }
+        // These need no accessibility grant, because the applications would answer nothing if they
+        // had one: the provider is the whole of the reading. Which providers exist is a question for
+        // the disk, not for this list — anything that has registered is watched, whoever wrote it.
+        if isEnabled && terminalPeekEnabled {
+            integrationWatch.start()
+        } else {
+            integrationWatch.stop()
         }
         if !isEnabled {
             overlay.hide()

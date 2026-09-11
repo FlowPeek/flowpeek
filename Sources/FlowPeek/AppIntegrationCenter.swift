@@ -21,6 +21,10 @@ final class AppIntegrationCenter: ObservableObject {
     /// Where each known integration stands, in the order they are declared.
     @Published private(set) var statuses: [(id: String, status: AppIntegrationStatus)] = []
 
+    /// Fired whenever an integration is written or taken away, so the routes that depend on one can
+    /// be re-armed without waiting for a relaunch.
+    var onChange: (() -> Void)?
+
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Integrations")
     private let fileManager = FileManager.default
     private let library: URL
@@ -38,6 +42,13 @@ final class AppIntegrationCenter: ObservableObject {
         statuses = AppIntegration.known.map { (id: $0.id, status: status(of: $0)) }
     }
 
+    /// Re-reads, then tells whoever is listening. Separate from `refresh` so the read that happens
+    /// at launch does not re-arm anything that is still being built.
+    private func refreshAndAnnounce() {
+        refresh()
+        onChange?()
+    }
+
     func integration(_ id: String) -> AppIntegration? {
         AppIntegration.known.first { $0.id == id }
     }
@@ -51,6 +62,22 @@ final class AppIntegrationCenter: ObservableObject {
     /// What the settings tab lists.
     var listed: [AppIntegration] {
         AppIntegrationPolicy.settingsRows(statuses).compactMap(integration)
+    }
+
+    /// Where this integration registers itself, which is the same published directory a third
+    /// party would use: FlowPeek installing a provider and somebody else shipping one are the same
+    /// act, and the watch cannot tell them apart.
+    private var providersRoot: URL {
+        (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? library.appendingPathComponent("Application Support"))
+            .appendingPathComponent("FlowPeek", isDirectory: true)
+            .appendingPathComponent(IntegrationWatch.directoryName, isDirectory: true)
+    }
+
+    private func manifestFile(of integration: AppIntegration) -> URL {
+        providersRoot
+            .appendingPathComponent(integration.id, isDirectory: true)
+            .appendingPathComponent(IntegrationWatch.manifestName)
     }
 
     /// The file this integration would write, so a card can show it before anything is written.
@@ -121,7 +148,28 @@ final class AppIntegrationCenter: ObservableObject {
             try fileManager.createDirectory(
                 at: file.deletingLastPathComponent(), withIntermediateDirectories: true
             )
+            // Removed first, then written. Overwriting in place is not enough: measured on
+            // Sublime, a payload replaced under a running editor kept answering from the module it
+            // had already loaded, and only a file that went away and came back was picked up. An
+            // update that does not take is worse than one that fails, because nothing says so.
+            if fileManager.fileExists(atPath: file.path) {
+                try fileManager.removeItem(at: file)
+            }
             try payload.write(to: file, atomically: true, encoding: .utf8)
+            // The manifest is the registration. Written after the plugin, so a provider is never
+            // announced before the thing that answers for it exists.
+            let manifest = IntegrationWatch.Manifest(
+                id: integration.id,
+                name: integration.displayName,
+                bundleIdentifiers: integration.bundleIDs
+            )
+            let manifestFile = manifestFile(of: integration)
+            try fileManager.createDirectory(
+                at: manifestFile.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(manifest).write(to: manifestFile, options: .atomic)
             logger.info("wrote the \(integration.id, privacy: .public) integration")
         } catch {
             logger.error("could not write \(integration.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -130,7 +178,7 @@ final class AppIntegrationCenter: ObservableObject {
             }
             return false
         }
-        refresh()
+        refreshAndAnnounce()
         return true
     }
 
@@ -141,6 +189,11 @@ final class AppIntegrationCenter: ObservableObject {
             if fileManager.fileExists(atPath: file.path) {
                 try fileManager.removeItem(at: file)
             }
+            // And the registration, so the watch stops looking for an answer nothing will write.
+            let directory = manifestFile(of: integration).deletingLastPathComponent()
+            if fileManager.fileExists(atPath: directory.path) {
+                try fileManager.removeItem(at: directory)
+            }
             logger.info("removed the \(integration.id, privacy: .public) integration")
         } catch {
             logger.error("could not remove \(integration.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -149,7 +202,7 @@ final class AppIntegrationCenter: ObservableObject {
             }
             return false
         }
-        refresh()
+        refreshAndAnnounce()
         return true
     }
 

@@ -57,7 +57,7 @@ the agent to render it instead costs a round trip, a file to open, and a file to
 
 <img src="docs/images/terminal-watch.gif" width="620" alt="A fenced mermaid block printed in Terminal gets a faint frame around it; the pointer arrives and the frame brightens with a label reading flowchart, Option-click, and the diagram opens in its place">
 
-Editors work too. In VS Code the outline follows the caret, because an editor can say where the caret is but not where the pointer is:
+Editors work too. In VS Code the outline follows the caret, because an editor can say where the caret is but not where the pointer is. VS Code needs one setting turned on first — see [Questions](#questions):
 
 <img src="docs/images/vscode.gif" width="680" alt="A fenced mermaid block in VS Code outlined by FlowPeek with a hint reading flowchart at the cursor, Option-Space, then drawn in the preview">
 
@@ -153,6 +153,39 @@ Releases are built, signed and notarized by `.github/workflows/release.yml` on e
   loads and no navigation callback ever arrives. It buys the right to launch WebKit's helper
   processes, not the ability to fetch: the preview document carries `default-src 'none'`, Mermaid is
   a local script, and there is no URL in it to load.
+
+## Questions
+
+### FlowPeek sees nothing in VS Code. Why?
+
+Because VS Code does not hand its text to macOS until you ask it to. Turn on **Toggle Screen Reader
+Accessibility Mode** from the Command Palette, or set `editor.accessibilitySupport` to `on` in
+settings, and reload the window.
+
+The setting ships as `auto`, which means "on when a screen reader is running". FlowPeek is not a
+screen reader and cannot answer to that, so on a default install the editor's accessibility node is
+an empty group: measured, the focused element is an `AXGroup` carrying zero characters, and it stays
+that way whatever FlowPeek asks it. With the setting on, the same element is an `AXTextArea` holding
+the whole document — a 126-line file came back complete, 10,064 characters of it.
+
+This is VS Code's own switch and only you can throw it. Nothing else in FlowPeek is affected: the
+terminal, the clipboard, Finder and every ordinary application read the same either way.
+
+### It draws nothing in Sublime Text
+
+Sublime draws its own text and puts none of it in the accessibility tree. Measured: the focused
+element is the window itself, the whole window exposes two pieces of static text — the tab title and
+the status line — and `AXSelectedText`, `AXValue` and `AXSelectedTextRange` are all absent. There is
+no setting to turn on, the way VS Code has one; there is nothing there to read.
+
+Copy the diagram instead. That route needs no permission at all and works everywhere, because a copy
+is the one signal every application emits.
+
+### It draws nothing in my terminal, or in some other app
+
+Same reason, usually. Terminal, iTerm2 and Ghostty are read directly; a canvas-rendered terminal,
+such as the one inside an Electron app, paints its text and exposes none of it. Copying works
+there too.
 
 ## Requirements
 

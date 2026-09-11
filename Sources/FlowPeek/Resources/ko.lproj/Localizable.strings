@@ -106,6 +106,9 @@
 "settings.ai.shortcut" = "단축키: %@";
 "settings.ai.keychain" = "API 키는 macOS 키체인에 저장됩니다.";
 "settings.ai.keys" = "API 키 관리…";
+"notice.editor.title" = "%@이(가) 텍스트를 내주지 않습니다";
+"notice.editor.subtitle" = "편집기에서 설정 하나를 켜고 창을 새로고침하면 됩니다";
+"notice.editor.action" = "방법";
 "clipboard.indicator.title" = "Mermaid 복사됨";
 "clipboard.indicator.subtitle.generic" = "눌러서 미리보기";
 "diagram.clipboard-title" = "복사한 다이어그램";

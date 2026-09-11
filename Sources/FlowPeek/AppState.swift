@@ -159,6 +159,8 @@ final class AppState: ObservableObject {
     /// Which editors have been taught to answer. Read when the routes are re-armed, so switching
     /// one on in settings starts the watch without a relaunch.
     let integrations = AppIntegrationCenter.shared
+    /// Tells the reader when an editor's own switch is why a gesture did nothing.
+    private let editorAdvisor = EditorAccessibilityAdvisor()
     let doubleTap = DoubleTapMonitor()
     let highlight = AmbientHighlightCoordinator()
     /// Its own panels rather than the one the pointer route uses: the two routes can be raised by
@@ -431,6 +433,17 @@ final class AppState: ObservableObject {
         terminalHighlight.onActivate = { [weak self] index in self?.previewTerminal(at: index) }
         // A switch thrown in settings starts or stops the watch there and then; an editor that has
         // just been taught to answer should not need the app relaunched before it does.
+        // A gesture that found nothing in an editor which hands macOS no text: say so, rather than
+        // leave the reader to conclude the app is broken. The advisor is silent for every other
+        // application, and for one of these editors whose switch is already on.
+        ambient.onSilent = { [weak self] application in
+            guard let self, let notice = editorAdvisor.notice(for: application) else { return }
+            indicator.showNotice(
+                editorName: notice.editorName,
+                action: String(localized: "notice.editor.action")
+            )
+        }
+        indicator.onNotice = { [weak self] in self?.openEditorAccessibilityHelp() }
         integrations.onChange = { [weak self] in self?.applyEnabledState() }
         // A plugin FlowPeek wrote is brought up to date here rather than left for the reader to
         // notice: they turned this on, and an old payload answers a protocol this build has moved
@@ -1135,6 +1148,14 @@ final class AppState: ObservableObject {
 
     private func openRepository() {
         guard let url = URL(string: StarNudgePolicy.repository) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// The written answer to the notice: which setting, where, and that the window has to be
+    /// reloaded afterwards. A page rather than a dialog, because the steps belong to the editor and
+    /// change with it, and because the same page answers the next question the reader will have.
+    private func openEditorAccessibilityHelp() {
+        guard let url = URL(string: EditorAccessibilityAdvisor.helpURL) else { return }
         NSWorkspace.shared.open(url)
     }
 

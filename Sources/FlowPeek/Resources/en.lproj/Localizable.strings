@@ -106,6 +106,9 @@
 "settings.ai.shortcut" = "Shortcut: %@";
 "settings.ai.keychain" = "API keys are stored in the macOS Keychain.";
 "settings.ai.keys" = "Manage API Keys…";
+"notice.editor.title" = "%@ is not sharing its text";
+"notice.editor.subtitle" = "One setting in the editor, then reload its window";
+"notice.editor.action" = "How";
 "clipboard.indicator.title" = "Mermaid copied";
 "clipboard.indicator.subtitle.generic" = "Press to preview";
 "diagram.clipboard-title" = "Copied Diagram";

@@ -16,6 +16,11 @@ import OSLog
 final class AmbientPeekMonitor {
     var onCandidate: ((AmbientCandidate) -> Void)?
     var onDismiss: (() -> Void)?
+    /// A gesture that read an application and found no diagram. Not an error in itself: most of the
+    /// time it is a document with no diagram in it. It matters because one of the applications it
+    /// happens in is an editor that hands macOS nothing, where the same silence means something the
+    /// reader can fix in one setting.
+    var onSilent: ((NSRunningApplication) -> Void)?
     /// Fired when the peek key is pressed while an outline is showing.
     var onActivate: (() -> Void)?
     /// Whether the terminal watch is already handling this application, in which case this route
@@ -216,6 +221,7 @@ final class AmbientPeekMonitor {
         case .nothing:
             backoff.noteCompleted(pid: pid)
             retire()
+            onSilent?(application)
         case .abandoned:
             // Deliberately neither retiring nor showing: an unfinished read is not the answer "no
             // diagram here". Retiring would fire onDismiss, drop the candidate an activation needs,

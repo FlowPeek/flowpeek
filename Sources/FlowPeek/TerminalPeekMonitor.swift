@@ -87,10 +87,15 @@ final class TerminalPeekMonitor {
     /// leaving exactly the fresh-window case with nothing to fall back on. A font change while no
     /// buffer overflows is the price, and it corrects itself on the next read that does.
     private var rowHeights: [pid_t: CGFloat] = [:]
+    /// The last reading taken of each pane. Two readings of one pane solve the grid outright, and a
+    /// terminal that is printing produces the second within seconds of the first.
+    private var lastSamples: [pid_t: TerminalRowMetrics.Sample] = [:]
     /// Grids that still explain everything this pane has reported. Sieved on every look and used
     /// only once they agree, so a wrong column count cannot place an outline; see
     /// `TerminalGridInference`.
     private var gridCandidates: [pid_t: [TerminalGrid]] = [:]
+    /// Which terminal the read in flight is looking at, for the row height kept between runs.
+    private var readingApp: TerminalApp?
     /// Whose buffer the read in flight is looking at, for `rowHeights`.
     private var reading: pid_t?
     /// How many polls in a row have been answered from `lastLook` without reading the buffer.
@@ -209,6 +214,7 @@ final class TerminalPeekMonitor {
         guard rowHeights.count > 1 || gridCandidates.count > 1 else { return }
         let alive = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
         rowHeights = rowHeights.filter { alive.contains($0.key) }
+        lastSamples = lastSamples.filter { alive.contains($0.key) }
         gridCandidates = gridCandidates.filter { alive.contains($0.key) }
     }
 
@@ -327,6 +333,7 @@ final class TerminalPeekMonitor {
 
     private func read(_ terminal: TerminalApp, in application: NSRunningApplication, deadline: Date) -> Read {
         reading = application.processIdentifier
+        readingApp = terminal
         // A web-view terminal publishes nothing until an assistive client announces itself, and on
         // this route nothing else does the announcing: the pointer route warms the app it is about
         // to read, but it defers to this watch over a terminal and so never gets that far. Without
@@ -644,6 +651,27 @@ final class TerminalPeekMonitor {
         let visibleRows: ClosedRange<Int>?
     }
 
+    /// The row height solved for a terminal, kept between runs.
+    ///
+    /// A row is as tall as the font the reader chose, so it outlives the window, the buffer and the
+    /// process: measured unchanged across three viewport heights and every buffer length tried. Kept
+    /// so the first diagram of a session is framed correctly rather than after whatever output
+    /// happens to arrive next, and re-solved and overwritten whenever two readings say otherwise.
+    private static func rememberedRowHeight(for terminal: TerminalApp) -> CGFloat? {
+        let stored = UserDefaults.standard.double(forKey: rowHeightKey(terminal))
+        guard stored > 0, TerminalPeekPolicy.rowHeightRange.contains(CGFloat(stored)) else { return nil }
+        return CGFloat(stored)
+    }
+
+    private static func remember(_ rowHeight: CGFloat, for terminal: TerminalApp) {
+        guard TerminalPeekPolicy.rowHeightRange.contains(rowHeight) else { return }
+        UserDefaults.standard.set(Double(rowHeight), forKey: rowHeightKey(terminal))
+    }
+
+    private static func rowHeightKey(_ terminal: TerminalApp) -> String {
+        "flowpeek.terminal.rowHeight.\(terminal.rawValue)"
+    }
+
     private func grid(_ pane: Pane, characters: Int, before deadline: Date) -> Grid? {
         guard let scroll = pane.scroll,
               let contentSize = AccessibilityRead.size(scroll, "AXContentSize", before: deadline),
@@ -699,14 +727,51 @@ final class TerminalPeekMonitor {
             )
         }
 
-        guard let measurement = TerminalPeekPolicy.rowHeight(
-            contentHeight: contentSize.height,
-            viewportHeight: viewport.height,
+        // Two readings of the same pane solve the row height exactly, because the residual is the
+        // same in both and cancels. Dividing the content height by the line count instead counts
+        // that residual as rows: measured on Ghostty 1.3.1, half a point too tall per row, which is
+        // a row and a half of error by the bottom of a full screen.
+        let sample = TerminalRowMetrics.Sample(
             lineCount: lineCount,
-            remembered: reading.flatMap { rowHeights[$0] }
-        ) else { return nil }
-        let rowHeight = measurement.height
-        if measurement.isMeasured, let reading { rowHeights[reading] = rowHeight }
+            contentHeight: contentSize.height,
+            viewportHeight: viewport.height
+        )
+        var solved: CGFloat?
+        if let reading {
+            if let previous = lastSamples[reading],
+               let height = TerminalRowMetrics.rowHeight(previous, sample) {
+                rowHeights[reading] = height
+                if let app = readingApp { Self.remember(height, for: app) }
+            }
+            if sample.isUsable { lastSamples[reading] = sample }
+            // A height solved for this pane, or one solved for this terminal in an earlier run. The
+            // row is a property of the font rather than of the window: measured unchanged at three
+            // viewport heights, so it is worth keeping and the residual is not.
+            solved = rowHeights[reading] ?? readingApp.flatMap(Self.rememberedRowHeight(for:))
+        }
+
+        let rowHeight: CGFloat
+        let topPadding: CGFloat
+        if let solved, let residual = TerminalRowMetrics.residual(of: sample, rowHeight: solved) {
+            rowHeight = solved
+            topPadding = TerminalRowMetrics.topPadding(residual: residual)
+        } else {
+            // Nothing solved yet, and nothing remembered. The old division, which is right for a
+            // pane whose residual is small and is the only answer available for the first reading
+            // of a new one.
+            // `solved` rather than this pane's own history: a buffer that fits its viewport says
+            // nothing about the grid, and without the height carried over from an earlier window or
+            // an earlier run there is nothing to draw from at all. That is the case the reader
+            // meets most often -- a short diagram printed into a fresh window -- and it was silent.
+            guard let measurement = TerminalPeekPolicy.rowHeight(
+                contentHeight: contentSize.height,
+                viewportHeight: viewport.height,
+                lineCount: lineCount,
+                remembered: solved
+            ) else { return nil }
+            rowHeight = measurement.height
+            topPadding = 0
+        }
         guard let visible = TerminalPeekPolicy.visibleLines(
             offset: offset,
             viewportHeight: viewport.height,
@@ -716,7 +781,9 @@ final class TerminalPeekMonitor {
         return Grid(
             viewport: viewport,
             rowHeight: rowHeight,
-            offset: offset,
+            // The rows start below whatever the pane puts above them, the same correction the
+            // solved path above applies.
+            offset: offset - topPadding,
             value: value,
             lineCount: lineCount,
             visible: visible,

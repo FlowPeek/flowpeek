@@ -50,6 +50,38 @@ final class AppState: ObservableObject {
             applyEnabledState()
         }
     }
+    /// Whether FlowPeek may read the file an editor in a terminal has open.
+    ///
+    /// Off, and off is the point. Every other route reads what is on screen; this one reads a
+    /// document off disk, which is a different thing to ask for and is asked for separately.
+    ///
+    /// It exists because a full-screen editor paints on the terminal's alternate screen, and the
+    /// alternate screen has no scrollback: measured on Ghostty, a 200-line file in a 19-row pane
+    /// answers 19 lines, and one character past them is an error. A diagram taller than the window
+    /// is not in accessibility at all, so there is nothing to read further into. The file is the
+    /// only copy, and the editor's own process is what names it.
+    @Published var editorFilePeekEnabled = Defaults.bool(.editorFileEnabled, default: false) {
+        didSet {
+            Defaults.set(editorFilePeekEnabled, .editorFileEnabled)
+            applyEnabledState()
+        }
+    }
+    /// Whether FlowPeek may read a coding agent's session file.
+    ///
+    /// Off, for the same reason and a stronger one: this is the agent's own record of the
+    /// conversation, and only part of it is ever a diagram.
+    ///
+    /// It exists because Codex lays out its own output and its wrap cannot be undone. Measured: an
+    /// exact forward model of that wrap, inverted exactly, recovers 186 of 200 blocks -- and none of
+    /// the 14 failures can be detected, because each wrong reading lays back out to the rows that
+    /// are on screen, character for character. Roughly seven per cent silent corruption is the floor
+    /// for anything that works from the screen, which is why the screen is not where this reads.
+    @Published var agentSessionPeekEnabled = Defaults.bool(.agentSessionEnabled, default: false) {
+        didSet {
+            Defaults.set(agentSessionPeekEnabled, .agentSessionEnabled)
+            applyEnabledState()
+        }
+    }
     /// What colour the hint box is drawn in.
     ///
     /// Follows the system accent unless the user says otherwise. The override is not a theming
@@ -299,6 +331,8 @@ final class AppState: ObservableObject {
             case starFirstDiagram = "flowpeek.star.firstDiagram"
             case starAsked = "flowpeek.star.asked"
             case hintTint = "flowpeek.hint.tint"
+            case editorFileEnabled = "flowpeek.editorFile.enabled"
+            case agentSessionEnabled = "flowpeek.agentSession.enabled"
         }
 
         static func bool(_ key: Key, default fallback: Bool) -> Bool {
@@ -542,6 +576,8 @@ final class AppState: ObservableObject {
         }
         // The terminal watch reads the accessibility tree too, and polls only while one of the
         // terminals it can read is frontmost.
+        terminalPeek.mayReadEditorFiles = editorFilePeekEnabled
+        terminalPeek.mayReadAgentSessions = agentSessionPeekEnabled
         if isEnabled && terminalPeekEnabled && accessibilityGranted {
             terminalPeek.start()
         } else {

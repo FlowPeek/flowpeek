@@ -478,3 +478,14 @@
 "settings.integrations.others" = "Also registered here";
 "settings.integrations.others.description" = "Providers FlowPeek did not write. Any application can register one by writing a file where FlowPeek looks, which is how anybody adds support for their own editor. Switching one off means FlowPeek never asks it anything; the file stays where its owner put it, because it is not FlowPeek's to delete.";
 "integration.foreign.reason" = "This registered itself. FlowPeek asks it what diagrams are on screen and where, and nothing else.";
+
+/* The file an editor has open. A different thing to ask for from the terminal watch, so it is
+   asked for on its own and it is off. */
+"settings.editor-file" = "Read the file an editor has open";
+"settings.editor-file.short" = "So a diagram in vim can be opened whole, even the part scrolled past the top of the window.";
+"settings.editor-file.description" = "An editor taking over the whole terminal shows FlowPeek nothing above or below the window \U2014 the terminal keeps no record of it. The file does. With this on, FlowPeek asks the editor's own process which file it has open, reads that file, and uses it only when its lines are the ones on your screen. Nothing is written, and nothing is read while no editor is in front.";
+
+/* A coding agent's session file. */
+"settings.agent-session" = "Read a coding agent's session file";
+"settings.agent-session.short" = "For Codex, whose output cannot be turned back into the diagram from the screen alone.";
+"settings.agent-session.description" = "Codex lays out its own output and breaks lines in a way that cannot be undone: about one diagram in fourteen comes back subtly wrong, and nothing on screen says which one. With this on, FlowPeek takes the diagram from the file Codex is already writing, reads only the fenced diagrams in it, and uses them only to replace what it had already found on your screen.";

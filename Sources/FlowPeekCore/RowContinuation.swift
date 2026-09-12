@@ -20,6 +20,16 @@
 /// the first and breaks a diagram that was rendering perfectly well. Syntax cannot make that
 /// mistake -- both of those rows close their quotes.
 public enum RowContinuation {
+    /// What a row of a terminal window is.
+    public enum Role: Equatable, Sendable {
+        /// A line of the text, as its author wrote it.
+        case line
+        /// The rest of the line above it, broken across rows by whatever printed it.
+        case tail
+        /// A row the wrapping program printed that is not in the text at all.
+        case padding
+    }
+
     /// How many rows one logical line may be spread over.
     ///
     /// A cap rather than a limit anyone should reach: a 400-character label wraps to five rows in a
@@ -112,6 +122,37 @@ public enum RowContinuation {
         return width + 1 + displayWidth(firstToken(of: next)) > columns
     }
 
+    /// Whether a blank row is the wrapping program's layout rather than a blank line in the text.
+    ///
+    /// A wrapping program that cannot fit the first word of a line after that line's indentation
+    /// does not shrink the indentation -- it prints the row blank and starts the word at the margin
+    /// on the next one. Measured against Claude Code 2.1.269 at a hundred columns, an identifier of
+    /// 97 characters under eight spaces of indentation:
+    ///
+    ///     '      subgraph S["a scope"]'
+    ///     ''
+    ///     '  VeryLongSubgraphScopedIdentifier...'
+    ///     '  --> B'
+    ///
+    /// Nothing in the text is blank there. But a blank row ends a block -- deliberately, because a
+    /// prompt follows a diagram far more often than a gap does -- so the six-line diagram above came
+    /// back as two lines, at a confidence that passes, framed and previewed as if that were all of
+    /// it. With the grid known the row can be recognised for what it is: put the next row back under
+    /// the indentation of the row above, and ask whether it would have fitted. If it would not, the
+    /// blank row is the reason, and it is not in the diagram.
+    public static func isPadding(_ row: String, after previous: String, before next: String, columns: Int) -> Bool {
+        guard columnRange.contains(columns) else { return false }
+        guard row.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        guard !next.trimmingCharacters(in: .whitespaces).isEmpty,
+              !previous.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        // The word was moved left to make room for it. A row that kept its indentation was not.
+        let below = indent(of: next)
+        let above = indent(of: previous)
+        guard below < above else { return false }
+        let restored = displayWidth(next) - below + above
+        return restored > columns
+    }
+
     /// Whether the wrap that broke `row` before `next` destroyed the space between them.
     ///
     /// A wrapping program breaks at a space and consumes it, which is why the naive join reads
@@ -160,12 +201,42 @@ public enum RowContinuation {
     /// tail when the row above it is unterminated. With it, a join has to be possible as well as
     /// plausible, and a row the width plainly broke is a tail whether or not the syntax can see it.
     public static func flags(in rows: [String], columns: Int? = nil) -> [Bool] {
+        roles(in: rows, columns: columns).map { $0 == .tail }
+    }
+
+    /// What each row of a window is, which is three things rather than two.
+    ///
+    /// A row is a line of the text, the tail of the line above it, or nothing at all -- a row the
+    /// wrapping program printed to make its layout work, which no one typed. The third kind exists
+    /// only once the grid is known, because it cannot be told from a real blank line without it.
+    public static func roles(in rows: [String], columns: Int? = nil) -> [Role] {
         let grid = columns.flatMap { columnRange.contains($0) ? $0 : nil }
-        var flags = [Bool](repeating: false, count: rows.count)
+        var roles = [Role](repeating: .line, count: rows.count)
         var joined = ""
         var run = 0
+        // Set by a padding row: what follows it is a line the width demonstrably broke, so its own
+        // tails join on the geometry alone. They cannot be recognised any other way -- both rows
+        // sit at the margin, so neither the syntax nor the indentation can see the join.
+        var brokenByTheWidth = false
         for index in rows.indices {
             let row = rows[index]
+            if let grid, index > 0, index + 1 < rows.count,
+               isPadding(row, after: rows[index - 1], before: rows[index + 1], columns: grid) {
+                roles[index] = .padding
+                brokenByTheWidth = true
+                joined = ""
+                run = 0
+                continue
+            }
+            // The row a padding row made room for starts a line of its own, and asking whether it
+            // could have fitted on the blank above it answers nothing. It is the beginning of a
+            // line the width demonstrably broke, so the flag stands rather than being re-tested.
+            if index > 0, roles[index - 1] == .padding {
+                roles[index] = .line
+                joined = row
+                run = 0
+                continue
+            }
             var continues = index > 0
                 && run < maximumRows
                 && !row.trimmingCharacters(in: .whitespaces).isEmpty
@@ -177,11 +248,15 @@ public enum RowContinuation {
                 // does not: it is indented like its siblings. That is what keeps the width from
                 // joining two short lines that happen to sit near the edge.
                 let lostItsIndent = indent(of: row) < indent(of: previous)
-                continues = broken && (isUnterminated(joined) || lostItsIndent)
+                continues = broken && (isUnterminated(joined) || lostItsIndent || brokenByTheWidth)
+                if !broken { brokenByTheWidth = false }
             } else if continues {
                 continues = isUnterminated(joined)
+                brokenByTheWidth = false
+            } else {
+                brokenByTheWidth = false
             }
-            flags[index] = continues
+            roles[index] = continues ? .tail : .line
             if continues {
                 joined += row
                 run += 1
@@ -190,7 +265,7 @@ public enum RowContinuation {
                 run = 0
             }
         }
-        return flags
+        return roles
     }
 
     private static func indent(of row: String) -> Int {

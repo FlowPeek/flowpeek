@@ -232,6 +232,29 @@ against Claude Code 2.1.269 driven in a pty — 50 agent-written diagrams at 80,
 columns, 200 screens fed back through the scanner — the source came back exactly as printed 132
 times without the column count and 200 times with it.
 
+### The diagram is taller than my terminal window
+
+It is framed and opened whole, and how depends on what printed it.
+
+**A coding agent printing inline** — Claude Code, Codex — leaves the whole thing in the terminal's
+scrollback, so FlowPeek reads further when the window it scanned cut the diagram at either end. It
+notices the cut from the scan it has already run, at no extra cost, and opens both ends rather than
+the one that announced itself: measured on a 351-line diagram over the 380 scroll positions that
+show any part of it, the old window recovered it whole 0 times, a fragment 150 times and nothing at
+all 230 times. Reading further recovers it 380 times, with no fragments and no silence.
+
+**A full-screen editor** — vim — leaves nothing at all. It paints on what a terminal calls the
+alternate screen, which keeps no scrollback: a 200-line file in a 19-row window shows nineteen
+lines, and one character past them is an error. There is nothing to read further into, so the whole
+source has to come from the file, and that is a separate switch in Settings, off until you turn it
+on. With it on FlowPeek asks the editor's own process which file it has open, and uses it only when
+its lines are the ones on your screen.
+
+**Codex** is on screen in full and still cannot be rebuilt from it: it lays out its own wrap, and an
+exact inverse of an exact model of that wrap gets about one diagram in fourteen wrong, undetectably
+— each misreading lays back out to the rows that are there. Its own session file has the text, and
+that is the second switch, also off until you turn it on.
+
 Otherwise the reason is Sublime's, usually. A terminal that paints its text into a canvas, such as
 the one inside VS Code, exposes none of it and there is nothing FlowPeek can do there. Copying works
 there all the same, and an application that wants to be read properly can speak the integration

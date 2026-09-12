@@ -286,3 +286,88 @@ final class TerminalGridRejoinTests: XCTestCase {
         XCTAssertFalse(RowContinuation.wrapDestroyedASpace(before: "  tail", after: long, columns: 100))
     }
 }
+
+
+/// The blank row a wrapping program prints when a word will not fit under its own indentation.
+///
+/// Every row here came off Claude Code 2.1.269 driven in a pty at a hundred columns, with a
+/// 97-character identifier eight spaces deep. What the renderer produced is a blank row in the
+/// middle of the diagram followed by the word at the margin -- and a blank row ends an unfenced
+/// block, so a six-line diagram came back as two lines at a confidence that passes, framed and
+/// previewed as though that were all of it.
+final class WrapPaddingTests: XCTestCase {
+    /// The measured rows, verbatim.
+    private static let rows = [
+        "  flowchart TD",
+        "      subgraph S[\"a scope\"]",
+        "",
+        "  VeryLongSubgraphScopedIdentifierThatNobodyWouldTypeButAnAgentHappilyGeneratesXXXXXXXXXXXXXXXXXXXX",
+        "  --> B",
+        "          B --> C",
+        "      end",
+        "      C --> D[Done]",
+    ]
+
+    func testTheBlankRowIsRecognisedAsLayout() {
+        XCTAssertTrue(
+            RowContinuation.isPadding(Self.rows[2], after: Self.rows[1], before: Self.rows[3], columns: 100)
+        )
+        XCTAssertEqual(
+            RowContinuation.roles(in: Self.rows, columns: 100)[2], .padding
+        )
+    }
+
+    /// The whole diagram, not the two lines above the blank row.
+    func testTheWholeDiagramSurvivesTheBlankRow() throws {
+        let window = Self.rows.joined(separator: "\n")
+        let block = try XCTUnwrap(TerminalBufferScanner.blocks(in: window, columns: 100).first)
+        let source = block.detection.extractedSource
+        XCTAssertEqual(source.split(separator: "\n").count, 6, "six lines in, six lines out: \(source)")
+        XCTAssertTrue(
+            source.contains("XXXXXXXXXXXXXXXXXXXX --> B"),
+            "the line the padding broke has to come back whole: \(source)"
+        )
+        XCTAssertTrue(source.contains("C --> D[Done]"), "and the block must not end at the blank row")
+        XCTAssertFalse(source.contains("\n\n"), "the row nobody typed must not be in the text")
+    }
+
+    /// And the bug, still there when nothing says how wide the grid is, because a blank row cannot
+    /// be told from a blank line without it.
+    func testWithoutTheWidthItIsStillTwoLines() throws {
+        let window = Self.rows.joined(separator: "\n")
+        let block = try XCTUnwrap(TerminalBufferScanner.blocks(in: window).first)
+        XCTAssertEqual(block.detection.extractedSource.split(separator: "\n").count, 2)
+    }
+
+    // MARK: - What must not be mistaken for it
+
+    /// A blank line an author wrote, which is ordinary between a diagram's statements and its
+    /// styling section. Nothing here is near the width and the indentation did not move.
+    func testAnOrdinaryBlankLineIsLeftAlone() {
+        let rows = [
+            "  flowchart TD",
+            "      A --> B",
+            "",
+            "      style A fill:#0a84ff",
+        ]
+        XCTAssertFalse(RowContinuation.isPadding(rows[2], after: rows[1], before: rows[3], columns: 100))
+        XCTAssertEqual(RowContinuation.roles(in: rows, columns: 100)[2], .line)
+    }
+
+    /// A row that kept its indentation was not moved left to make room, whatever its length.
+    func testARowThatKeptItsIndentationIsNotPadding() {
+        let deep = "        " + String(repeating: "x", count: 90)
+        XCTAssertFalse(RowContinuation.isPadding("", after: "        A --> B", before: deep, columns: 100))
+    }
+
+    /// A row that would have fitted where it was does not need a blank row to explain it.
+    func testARowThatWouldHaveFittedIsNotPadding() {
+        XCTAssertFalse(
+            RowContinuation.isPadding("", after: "      A --> B", before: "  C --> D", columns: 100)
+        )
+    }
+
+    func testWithoutAColumnCountNothingIsPadding() {
+        XCTAssertEqual(RowContinuation.roles(in: Self.rows).filter { $0 == .padding }.count, 0)
+    }
+}

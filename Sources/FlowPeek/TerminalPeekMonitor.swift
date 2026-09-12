@@ -69,6 +69,18 @@ final class TerminalPeekMonitor {
     private var showing = false
     private var settle = TerminalPeekPolicy.Settle()
     private var backoff = AmbientPeekPolicy.ReadBackoff()
+    /// Whether the reader has said FlowPeek may read the file an editor has open. Off unless they
+    /// have, and asked for separately from the terminal watch itself, because it is a different
+    /// thing to ask for: every other route here reads what is on screen.
+    var mayReadEditorFiles = false
+    /// Whether the reader has said FlowPeek may read a coding agent's session file. Off unless they
+    /// have, and separate again, because it is the agent's own record of a conversation.
+    var mayReadAgentSessions = false
+    private let editorFiles = TerminalEditorFile()
+    private let agentSessions = CodexSessionSources()
+    /// The last file read, kept so a poll four times a second does not read it again for nothing.
+    private var editorCache: (path: String, modified: Date, size: Int, lines: [String], text: String)?
+
     private var isRunning = false
     /// The window the cached pane was found under, and the pane itself. Descending to the text area
     /// costs 0.6-0.8 ms of accessibility messages, which is most of what a poll that finds nothing
@@ -513,7 +525,8 @@ final class TerminalPeekMonitor {
         application: NSRunningApplication
     ) -> AmbientCandidate? {
         // A block bigger than this is not one diagram, and the preview would refuse it anyway.
-        guard found.block.detection.extractedSource.count <= AmbientPeekPolicy.maximumCharacters else { return nil }
+        guard found.block.detection.extractedSource.count <= AmbientPeekPolicy.maximumTerminalCharacters
+        else { return nil }
         let frames = NSScreen.screens.map(\.frame)
         guard let flip = ScreenGeometry.flipReference(screenFrames: frames) else { return nil }
         let bounds = ScreenGeometry.axToAppKit(found.rectangle, flipReference: flip)
@@ -551,10 +564,16 @@ final class TerminalPeekMonitor {
               let text = string(pane.text, in: window, before: deadline) else { return [] }
         let local = NSRange(location: visible.location - window.location, length: visible.length)
         guard let span = TerminalPeekPolicy.lineSpan(of: local, in: text) else { return [] }
-        let blocks = TerminalBufferScanner.blocks(in: text, visible: span)
-        guard !blocks.isEmpty, let width = textWidth(of: pane.text, within: content, before: deadline) else {
-            return []
-        }
+        // The width first, because the scan needs it: a coding agent breaks its own lines at the
+        // terminal's width and eats the space it broke at, and without the number the rejoin cannot
+        // tell that from a line that ended. Measured on a whole transcript, forty diagrams: 24 came
+        // back exactly as printed without it and 38 with it.
+        guard let width = textWidth(of: pane.text, within: content, before: deadline) else { return [] }
+        let columns = self.columns(
+            of: pane, window: window, text: text, width: width, before: deadline
+        )
+        let blocks = TerminalBufferScanner.blocks(in: text, visible: span, columns: columns)
+        guard !blocks.isEmpty else { return [] }
         return blocks.compactMap { block in
             // One row at a time, because a six-row range measured 21 points wide in iTerm2. A
             // single character is enough to place a row: the rectangle that comes back is the row's.
@@ -596,6 +615,50 @@ final class TerminalPeekMonitor {
         let right = min(frame.maxX, content.maxX)
         guard right > left else { return nil }
         return left...right
+    }
+
+    /// How many columns wide the pane is, measured off two characters on one row.
+    ///
+    /// The grid path asks the pty for this number; a ranged terminal cannot be asked the same way.
+    /// Terminal.app's shell is its own child and could be walked, but iTerm2's sessions belong to
+    /// `iTermServer` and its application process has no children at all, so there is no pty under
+    /// the window to find. What both of them do answer is where a character is drawn -- that is why
+    /// they take this path -- so the cell is measured instead: two characters a known distance
+    /// apart on one row, and the width of the text divided by the distance between them.
+    ///
+    /// Worth the two messages because the alternative is not "a worse column count" but none, and
+    /// without one the rejoin below cannot tell a line a program broke at the width from a line
+    /// that ended. Measured at 0.6 to 0.7 ms for the pair.
+    ///
+    /// Refuses rather than guesses whenever the row it picked cannot answer for a cell: a row with
+    /// anything but plain ASCII in the sampled span, because a Hangul syllable is two cells wide and
+    /// would halve the answer; a pair of rectangles that are not on the same line; and any result
+    /// outside the band a terminal could actually be.
+    private func columns(
+        of pane: Pane,
+        window: NSRange,
+        text: String,
+        width: ClosedRange<CGFloat>,
+        before deadline: Date
+    ) -> Int? {
+        let sample = 8
+        var offset = window.location
+        for line in text.components(separatedBy: "\n") {
+            defer { offset += line.utf16.count + 1 }
+            let units = Array(line.utf16)
+            guard units.count > sample else { continue }
+            // Only where every cell in the span is one cell wide, and none of it is a tab the
+            // terminal has already expanded to somewhere we cannot predict.
+            guard units[0..<(sample + 1)].allSatisfy({ $0 >= 0x21 && $0 < 0x7F }) else { continue }
+            guard let near = rowRectangle(at: offset, in: pane.text, before: deadline),
+                  let far = rowRectangle(at: offset + sample, in: pane.text, before: deadline),
+                  abs(near.minY - far.minY) < 1 else { continue }
+            let cell = (far.minX - near.minX) / CGFloat(sample)
+            guard cell > 1, cell.isFinite else { return nil }
+            let columns = Int(((width.upperBound - width.lowerBound) / cell).rounded())
+            return RowContinuation.columnRange.contains(columns) ? columns : nil
+        }
+        return nil
     }
 
     /// Which characters the viewport is showing.
@@ -642,10 +705,14 @@ final class TerminalPeekMonitor {
     /// viewport is worked out from the scroll area: total content height over line count is one
     /// row, and the scroll bar's value is the fraction of the overflow above the viewport.
     ///
-    /// The buffer is never copied whole. `AXLineForIndex` maps a character offset to a row, and a
-    /// binary search over it finds where the window's first and last rows begin -- fourteen
-    /// messages each at 0.03 ms, constant however long the scrollback has grown. Reading `AXValue`
-    /// instead would copy the entire scrollback on every poll.
+    /// The buffer is copied whole where the terminal will hand it over, and the window is cut out
+    /// of the copy. That is the opposite of what this said before, and the reason is measured:
+    /// `AXLineForIndex` is not constant on Ghostty but linear in the buffer -- 0.306 ms at 34,000
+    /// characters, 1.699 ms at 203,000, 3.45 ms at 391,000 -- and the binary search below makes
+    /// about thirty of them. Copying the value costs 0.053 to 0.737 ms across the same range. The
+    /// 0.03 ms this used to claim reproduces only when the offset is passed as a `CFRange`, which
+    /// Ghostty refuses outright; what the app passes is an `NSNumber`, and it pays the linear cost.
+    /// Where the copy cannot be had, the binary search is still here and still correct.
     /// Where the viewport sits in the buffer, measured off the scroll area. The cheap half of the
     /// grid path, and the half the fingerprint is taken from.
     private struct Grid {
@@ -662,6 +729,28 @@ final class TerminalPeekMonitor {
         let inferred: (grid: TerminalGrid, lineLengths: [Int])?
         /// Which rows the viewport shows. Rows, not lines, so only present alongside `inferred`.
         let visibleRows: ClosedRange<Int>?
+        /// Whether the pane has nothing above or below what is on screen.
+        ///
+        /// True of an editor painting on the alternate screen, which has no scrollback at all, and
+        /// equally true of a window that has simply not filled up yet -- the two are the same to
+        /// accessibility, measured: a vim pane and a three-line shell both report a content height
+        /// equal to their viewport's and a scroll bar that is disabled and hidden. Which is the
+        /// right shape for what it is used for, because both mean the same thing to a reader that
+        /// wants more text: there is none.
+        let fillsViewport: Bool
+        /// The pane's whole value, when it was worth copying.
+        ///
+        /// Ghostty hands over its entire scrollback here -- measured, 5,001 lines and 380,040
+        /// characters out of a 39-row window, and 8,501 lines read in 0.82 ms -- so the window this
+        /// path scans can be cut out of a string that is already in memory instead of being asked
+        /// for a row at a time. That is not a saving at the margin: `AXLineForIndex` is linear in
+        /// the buffer on Ghostty, 0.306 ms at 34,000 characters and 3.45 ms at 391,000, and the
+        /// binary search below makes about thirty of them per poll. Copying the value costs 0.053
+        /// to 0.737 ms across the same range and replaces all of it.
+        ///
+        /// Nil when the value could not be read or was implausibly large, and then everything below
+        /// asks the terminal exactly as it did before.
+        let buffer: String?
         /// How many columns wide the grid is, when the terminal said so.
         ///
         /// The scanner needs it for a different job from the row arithmetic above: a program that
@@ -799,6 +888,8 @@ final class TerminalPeekMonitor {
             contentHeight: contentSize.height,
             viewportHeight: viewport.height
         )
+        let buffer = self.buffer(of: pane, characters: characters, before: deadline)
+        let fills = contentSize.height <= viewport.height + TerminalPeekPolicy.overflowTolerance
 
         if let inferred = inferredGrid(
             pane,
@@ -835,6 +926,8 @@ final class TerminalPeekMonitor {
                 visible: first...max(first, last),
                 inferred: inferred,
                 visibleRows: rows,
+                fillsViewport: fills,
+                buffer: buffer,
                 columns: inferred.grid.columns
             )
         }
@@ -859,6 +952,8 @@ final class TerminalPeekMonitor {
                 visible: visible,
                 inferred: nil,
                 visibleRows: nil,
+                fillsViewport: fills,
+                buffer: buffer,
                 // Straight from `ioctl(TIOCGWINSZ)`: the number the program in the terminal was
                 // given to wrap against, rather than one divided out of a measurement.
                 columns: cell.columns
@@ -927,10 +1022,31 @@ final class TerminalPeekMonitor {
             visible: visible,
             inferred: nil,
             visibleRows: nil,
+            fillsViewport: fills,
+            buffer: buffer,
             // Nothing here published a column count: this is the height solved from two readings of
             // a scrolling buffer, and that arithmetic says nothing about how wide the grid is.
             columns: nil
         )
+    }
+
+    /// The pane's whole value, when copying it is the cheaper way to read it.
+    ///
+    /// Only the grid path asks, and only Ghostty takes that path, so this is not a copy every
+    /// terminal pays for. The cap is a backstop rather than a limit anyone should reach: Ghostty's
+    /// own ceiling measured near half a megabyte, and a value past this size is one the terminal
+    /// should not have handed over, so the poll falls back to asking for a row at a time.
+    private static let maximumBufferCharacters = 2_000_000
+
+    private func buffer(of pane: Pane, characters: Int, before deadline: Date) -> String? {
+        guard characters > 0, characters <= Self.maximumBufferCharacters else { return nil }
+        guard let value = AccessibilityRead.string(pane.text, kAXValueAttribute as String, before: deadline)
+        else { return nil }
+        // The two have to name the same text. A value that disagrees with the count every other
+        // number on this path was derived from is not this pane's buffer, and slicing it would put
+        // an outline over the wrong rows.
+        guard value.utf16.count == characters else { return nil }
+        return value
     }
 
     /// The pane's grid, once its own numbers have narrowed to one answer.
@@ -941,10 +1057,12 @@ final class TerminalPeekMonitor {
     /// as the right one does), so candidates are kept and sieved against every later look, and
     /// nothing is drawn from them until the survivors agree. See `TerminalGridInference`.
     ///
-    /// The line lengths come from `AXValue`. Ghostty caps what it exposes at about 32,000
-    /// characters and answered in 0.07 to 0.21 ms at every buffer size measured, up to 20,000 lines
-    /// printed; the cap here is the same one the scanner refuses to look past, so a terminal that
-    /// hands over an unbounded buffer is left to the path below rather than copied every poll.
+    /// The line lengths come from `AXValue`, which the caller has already read. Ghostty does not cap
+    /// what it exposes anywhere near as low as this once claimed: measured, 5,000 printed lines came
+    /// back as 380,040 characters with the first line still in them, and 8,500 lines as 416,040
+    /// characters read in 0.82 ms. Its own ceiling sits somewhere near half a megabyte. The guard
+    /// below is the scanner's limit rather than the terminal's, and it bounds the sieve alone --
+    /// the window this path scans is cut from the value whatever its size.
     private func inferredGrid(
         _ pane: Pane,
         characters: Int,
@@ -994,7 +1112,252 @@ final class TerminalPeekMonitor {
         return (grid, lengths)
     }
 
+    /// The grid path, with the pane's whole value already in hand.
+    ///
+    /// Two things change and they are the same change. The window is cut out of a string rather
+    /// than asked for a row at a time, which removes about thirty `AXLineForIndex` calls from every
+    /// poll; and because the rest of the buffer is right there, a window that cut a diagram in half
+    /// can be widened and rescanned for the price of the rescan.
+    ///
+    /// Which is worth doing, because a cut is neither rare nor visible. Measured on a real Ghostty
+    /// buffer, a 120-line diagram inside a 90-turn transcript, over the 182 scroll positions that
+    /// show any part of it: the window this path has always cut recovers the whole diagram 106
+    /// times, a fragment 38 times and nothing 38 times. Every one of the 38 fragments came back at
+    /// full confidence with a closed frame around it, and they parse -- so the reader is shown a
+    /// well-formed picture that is not the one on their screen. Widening takes the same 182
+    /// positions to 182 whole, 0 fragments, 0 nothing.
+    private func gridRead(_ pane: Pane, grid: Grid, buffer: String, deadline: Date) -> [Located] {
+        let rows = buffer.components(separatedBy: "\n")
+        guard !rows.isEmpty, grid.visible.lowerBound < rows.count else { return [] }
+        // An editor painting on the alternate screen keeps nothing above or below the screen, so
+        // there is no window to widen and no further text to reach. What the reader is looking at is
+        // a file, and the file is where the rest of the diagram is.
+        if mayReadEditorFiles, grid.fillsViewport, let found = editorRead(rows: rows, grid: grid) {
+            return found
+        }
+        let visible = max(0, grid.visible.lowerBound)...min(rows.count - 1, grid.visible.upperBound)
+
+        let narrow = window(rows, around: visible)
+        var blocks = TerminalBufferScanner.blocks(
+            in: rows[narrow].joined(separator: "\n"),
+            columns: grid.columns
+        )
+        var firstRow = narrow.lowerBound
+
+        // What the window cut, asked of the scan that has already run. Both answers cost nothing
+        // but integers the scanner returned; neither adds an accessibility message.
+        let onScreen = blocks.filter { visible.overlaps(firstRow + $0.lines.lowerBound...firstRow + $0.lines.upperBound) }
+        let runsOffTheBottom = narrow.upperBound < rows.count - 1 && onScreen.contains { $0.reachedWindowEnd }
+        // A block cut at its head is not emitted at all, so the only evidence is a declaration
+        // above the window with nothing of its own on screen.
+        let back = onScreen.isEmpty && narrow.lowerBound > 0
+            ? TerminalBufferScanner.rowsBackToDeclaration(Array(rows[0..<narrow.lowerBound]))
+            : nil
+
+        if runsOffTheBottom || back != nil {
+            // Both ends, whichever end fired. A block taller than the whole window is cut twice,
+            // and the head cut suppresses every block -- so nothing is left to carry
+            // `reachedWindowEnd` and the foot cut underneath it cannot be seen at all. Opening only
+            // the end that announced itself leaves the other one: measured on a 351-line diagram
+            // over the 380 scroll positions that show part of it, head-only gives 300 whole and 80
+            // fragments, and both ends gives 380 and none.
+            let wide = widened(narrow, in: rows, back: back, down: true)
+            let wider = TerminalBufferScanner.blocks(
+                in: rows[wide].joined(separator: "\n"),
+                columns: grid.columns
+            )
+            // The wide scan wins only when it found something. A window big enough to be refused
+            // outright answers nothing, and the narrow result is still the reader's outline.
+            if !wider.isEmpty {
+                blocks = wider
+                firstRow = wide.lowerBound
+            }
+        }
+
+        return place(
+            exact(blocks), firstRow: firstRow, grid: grid, pane: pane, deadline: deadline
+        )
+    }
+
+    /// Each block with its source replaced by the agent's own copy, where there is one.
+    ///
+    /// Only Codex needs this and only because its wrap cannot be undone: the rows are all on screen
+    /// and all read, but an exact inverse of an exact forward model of that wrap still gets about
+    /// one block in fourteen wrong, and gets it wrong invisibly -- the misread lays back out to the
+    /// same rows. So the geometry stays the screen's, which is what the frame is drawn from, and
+    /// only the text is taken from the file.
+    ///
+    /// A block whose source matches nothing is left exactly as it was, which is also what happens
+    /// for every terminal that is not running an agent and for every reader who has not turned this
+    /// on.
+    private func exact(_ blocks: [TerminalDiagramBlock]) -> [TerminalDiagramBlock] {
+        guard mayReadAgentSessions, !blocks.isEmpty, let terminal = reading else { return blocks }
+        let candidates = agentSessions.sources(under: terminal)
+        guard !candidates.isEmpty else { return blocks }
+        return blocks.map { block in
+            guard let source = MermaidFences.matching(block.detection.extractedSource, in: candidates)
+            else { return block }
+            let detection = MermaidDetector.detect(source)
+            guard detection.confidence >= TerminalPeekPolicy.minimumConfidence else { return block }
+            return TerminalDiagramBlock(
+                detection: detection,
+                text: block.text,
+                lines: block.lines,
+                range: block.range,
+                lastRow: block.lastRow,
+                isFenced: block.isFenced,
+                reachedWindowEnd: block.reachedWindowEnd
+            )
+        }
+    }
+
+    /// The diagrams in the file an editor under this terminal has open, framed over the rows that
+    /// are showing them.
+    ///
+    /// Every candidate is checked rather than trusted. Nothing says which pane an editor belongs to
+    /// -- one terminal process owns every split and tab -- so a file is accepted only when its lines
+    /// are the rows on screen, and then only when the part of the block the reader can see matches
+    /// the file exactly. An editor with unwritten changes fails that second test on the rows it has
+    /// changed, which is the whole of what keeps a saved file from being shown as though it were
+    /// what is on screen.
+    private func editorRead(rows: [String], grid: Grid) -> [Located]? {
+        guard let terminal = reading else { return nil }
+        for candidate in editorFiles.candidates(under: terminal) {
+            guard let file = contents(of: candidate.path) else { continue }
+            guard let placed = EditorViewportAlignment.placement(ofRows: rows, in: file.lines)
+            else { continue }
+            let firstLine = placed.firstLine
+            let located = TerminalBufferScanner.blocks(in: file.text).compactMap { block -> Located? in
+                guard let span = EditorViewportAlignment.rowsOnScreen(
+                    // The editor's own furniture is not the file and is not the diagram: only the
+                    // rows that matched are rows a frame may be drawn over.
+                    ofLines: block.lines, firstLine: firstLine, rowCount: placed.matchedRows
+                ), showsExactly(block, at: span, firstLine: firstLine, rows: rows, file: file.lines),
+                    let rectangle = TerminalPeekPolicy.rowsRectangle(
+                        lines: span,
+                        viewport: grid.viewport,
+                        rowHeight: grid.rowHeight,
+                        // The alternate screen does not scroll: row zero is the top of the pane.
+                        offset: 0
+                    ) else { return nil }
+                return Located(block: block, rectangle: rectangle, content: grid.viewport)
+            }
+            if !located.isEmpty { return located }
+        }
+        return nil
+    }
+
+    /// Whether the rows the reader can see of this block are the file's, character for character.
+    private func showsExactly(
+        _ block: TerminalDiagramBlock,
+        at span: ClosedRange<Int>,
+        firstLine: Int,
+        rows: [String],
+        file: [String]
+    ) -> Bool {
+        for row in span {
+            let line = firstLine + row
+            guard line >= 0, line < file.count, row < rows.count else { return false }
+            guard EditorViewportAlignment.normalise(rows[row]) == EditorViewportAlignment.normalise(file[line])
+            else { return false }
+        }
+        return true
+    }
+
+    /// The file, read again only when it has changed.
+    private func contents(of path: String) -> (text: String, lines: [String])? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        let modified = attributes?[.modificationDate] as? Date ?? .distantPast
+        let size = (attributes?[.size] as? NSNumber)?.intValue ?? -1
+        if let cached = editorCache, cached.path == path, cached.modified == modified, cached.size == size {
+            return (cached.text, cached.lines)
+        }
+        // The same size a window is held to. A file past it is one the scanner would refuse anyway.
+        guard size >= 0, size <= TerminalBufferScanner.maximumWindowCharacters,
+              let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let lines = text.components(separatedBy: "\n")
+        editorCache = (path, modified, size, lines, text)
+        return (text, lines)
+    }
+
+    /// The window this path has always scanned: the visible lines and `lineMargin` either side.
+    private func window(_ rows: [String], around visible: ClosedRange<Int>) -> ClosedRange<Int> {
+        let first = max(0, visible.lowerBound - Self.lineMargin)
+        let last = min(rows.count - 1, visible.upperBound + Self.lineMargin)
+        return first...max(first, last)
+    }
+
+    /// The same window with the cut ends opened, as far as the scanner will still look.
+    ///
+    /// Bounded by `maximumWindowCharacters`, and bounded tightly: over that size `blocks(in:)`
+    /// returns nothing at all rather than less, so a window grown one character too far is a
+    /// silent failure rather than a partial answer.
+    private func widened(
+        _ window: ClosedRange<Int>,
+        in rows: [String],
+        back: Int?,
+        down: Bool
+    ) -> ClosedRange<Int> {
+        // Up to the declaration the trigger found, and no further. Reading past it would be reading
+        // scrollback that belongs to nothing this block needs.
+        var first = max(0, window.lowerBound - (back ?? 0))
+        var last = down
+            ? min(rows.count - 1, window.upperBound + TerminalBufferScanner.maximumUnfencedLines)
+            : window.upperBound
+        var size = rows[first...last].reduce(0) { $0 + $1.utf16.count + 1 }
+        // Give the ends back in the order they were taken, so what is trimmed is the speculative
+        // margin rather than the rows the trigger actually asked for.
+        while size > TerminalBufferScanner.maximumWindowCharacters, last > window.upperBound {
+            size -= rows[last].utf16.count + 1
+            last -= 1
+        }
+        while size > TerminalBufferScanner.maximumWindowCharacters, first < window.lowerBound {
+            size -= rows[first].utf16.count + 1
+            first += 1
+        }
+        return first...last
+    }
+
+    /// Puts each block on screen, or drops it when it is not.
+    ///
+    /// The block's line numbers and the terminal's are the same numbers here, because both are
+    /// counted off the value this window was cut from -- which is the mixing the older branch below
+    /// had to ask the terminal to avoid.
+    private func place(
+        _ blocks: [TerminalDiagramBlock],
+        firstRow: Int,
+        grid: Grid,
+        pane: Pane,
+        deadline: Date
+    ) -> [Located] {
+        blocks.compactMap { block in
+            let lines = (firstRow + block.lines.lowerBound)...(firstRow + block.lines.upperBound)
+            let span: ClosedRange<Int>
+            if let inferred = grid.inferred, let visibleRows = grid.visibleRows {
+                guard let rows = TerminalGridInference.rowSpan(
+                    ofLines: lines,
+                    lineLengths: inferred.lineLengths,
+                    columns: inferred.grid.columns
+                ), rows.overlaps(visibleRows) else { return nil }
+                span = rows
+            } else {
+                guard lines.overlaps(grid.visible) else { return nil }
+                span = lines
+            }
+            guard let rectangle = TerminalPeekPolicy.rowsRectangle(
+                lines: span,
+                viewport: grid.viewport,
+                rowHeight: grid.rowHeight,
+                offset: grid.offset
+            ) else { return nil }
+            return Located(block: block, rectangle: rectangle, content: grid.viewport)
+        }
+    }
+
     private func gridRead(_ pane: Pane, grid: Grid, characters: Int, deadline: Date) -> [Located] {
+        if let buffer = grid.buffer {
+            return gridRead(pane, grid: grid, buffer: buffer, deadline: deadline)
+        }
         let first = max(0, grid.visible.lowerBound - Self.lineMargin)
         let last = min(grid.lineCount - 1, grid.visible.upperBound + Self.lineMargin)
         guard let start = index(ofLine: first, in: pane.text, characters: characters, before: deadline) else {

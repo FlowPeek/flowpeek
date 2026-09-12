@@ -381,6 +381,58 @@ struct SettingsView: View {
             }
             .togglesOnTap($app.terminalPeekEnabled)
 
+            // Two switches that are not the terminal watch and must not be folded into it. The
+            // watch reads what is on screen; these read a file off disk and a coding agent's own
+            // record of a conversation. Both are off, both are asked for on their own, and both say
+            // plainly what they read.
+            settingsCard {
+                HStack(alignment: .top, spacing: 14) {
+                    settingIcon("doc.text.magnifyingglass", color: .indigo)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("settings.editor-file")
+                            .font(.headline)
+                            .foregroundStyle(app.terminalPeekEnabled ? .primary : .secondary)
+                        Text("settings.editor-file.short")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 14)
+                    Toggle("settings.editor-file", isOn: $app.editorFilePeekEnabled)
+                        .labelsHidden()
+                        .disabled(!app.terminalPeekEnabled)
+                        .accessibilityHint(Text("settings.editor-file.description"))
+                }
+                Text("settings.editor-file.description")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            settingsCard {
+                HStack(alignment: .top, spacing: 14) {
+                    settingIcon("bubble.left.and.text.bubble.right", color: .teal)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("settings.agent-session")
+                            .font(.headline)
+                            .foregroundStyle(app.terminalPeekEnabled ? .primary : .secondary)
+                        Text("settings.agent-session.short")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 14)
+                    Toggle("settings.agent-session", isOn: $app.agentSessionPeekEnabled)
+                        .labelsHidden()
+                        .disabled(!app.terminalPeekEnabled)
+                        .accessibilityHint(Text("settings.agent-session.description"))
+                }
+                Text("settings.agent-session.description")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             settingsCard {
                 HStack(alignment: .top, spacing: 14) {
                     settingIcon("eyedropper.halffull", color: .pink)

@@ -337,10 +337,17 @@ final class TerminalPtyProbe {
             heightInPixels: Int(size.ws_ypixel),
             widthInPixels: Int(size.ws_xpixel)
         )
-        // A terminal that never sets a pixel size answers zeroes, and zero rows is a pty
-        // nobody has sized. `grid` refuses those too; this only saves carrying them around.
-        guard winsize.rows > 0, winsize.columns > 0,
-              winsize.heightInPixels > 0, winsize.widthInPixels > 0 else { return nil }
+        // Zero rows or zero columns is a pty nobody has sized, and there is nothing in it.
+        //
+        // A zero PIXEL size is a different thing and is kept. Terminals that set the cell geometry
+        // set it on the surface's own pty, but a shell in between -- `login`, a `sh -c`, a wrapper
+        // -- can be carrying a pty that was sized in cells and never in pixels: measured,
+        // `ws_row=24 ws_col=97 ws_ypixel=0 ws_xpixel=0`. Throwing those away cost the column count
+        // on exactly the terminals that need it, and the column count alone is worth having: it is
+        // what tells a rejoin where a program broke its own line. `TerminalWinsize.grid` still
+        // refuses a pixel-free reading, so nothing downstream can mistake one for a measurement of
+        // where a row is drawn.
+        guard winsize.rows > 0, winsize.columns > 0 else { return nil }
         return TerminalPtyReading(
             device: name,
             minor: Int(dev & 0xff_ffff),

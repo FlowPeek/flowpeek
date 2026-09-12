@@ -22,6 +22,21 @@ public struct TerminalDiagramBlock: Equatable, Sendable {
     /// exactly where it ends; an unfenced one is bounded by a guess about blank lines.
     public let isFenced: Bool
 
+    /// Whether the block stopped because the window did, rather than because the diagram did.
+    ///
+    /// The difference is the whole of what a caller can act on. A block that ended on its own --
+    /// a closing fence, a blank line, a row that continues nothing -- is the diagram. A block whose
+    /// last row is the last row that was read is a diagram with an unknown amount of itself past
+    /// the edge, and it is emitted anyway, at whatever confidence it earned, because refusing it
+    /// would take away the outline the reader can already see. Measured against Claude Code's own
+    /// renderer: a window cut below a diagram returns 8 to 15 lines of 31 at `.certain`, and 56 to
+    /// 80 per cent of those fragments parse cleanly -- a well-formed, wrong picture with nothing to
+    /// say it is wrong. This flag is what says it.
+    ///
+    /// False when the block stopped at `maximumUnfencedLines` instead: that is a limit of its own
+    /// and reading further would never reach the end, so a caller must not keep asking.
+    public let reachedWindowEnd: Bool
+
     /// The offset of the block's last character, for measuring where the block ends on screen.
     ///
     /// The last *character*, not the start of the last row, because a row longer than the terminal
@@ -39,7 +54,8 @@ public struct TerminalDiagramBlock: Equatable, Sendable {
         lines: ClosedRange<Int>,
         range: NSRange,
         lastRow: NSRange,
-        isFenced: Bool
+        isFenced: Bool,
+        reachedWindowEnd: Bool = false
     ) {
         self.detection = detection
         self.text = text
@@ -47,6 +63,7 @@ public struct TerminalDiagramBlock: Equatable, Sendable {
         self.range = range
         self.lastRow = lastRow
         self.isFenced = isFenced
+        self.reachedWindowEnd = reachedWindowEnd
     }
 }
 
@@ -85,24 +102,29 @@ public enum TerminalBufferScanner {
 
         // Which rows are the tail of the row above them, so a line the terminal or a program broke
         // across rows is read as the one line it is.
-        let continuations = RowContinuation.flags(in: lines.map(\.text), columns: columns)
+        let roles = RowContinuation.roles(in: lines.map(\.text), columns: columns)
 
         var blocks: [TerminalDiagramBlock] = []
         var index = 0
         while index < lines.count {
             // A row that is the middle of somebody else's line starts nothing: the fence or the
-            // declaration it appears to carry is text inside a label.
-            if continuations[index] {
+            // declaration it appears to carry is text inside a label. Neither does a row the
+            // wrapping program printed for its own layout, which is in nobody's text.
+            if roles[index] != .line {
                 index += 1
                 continue
             }
             if let open = MarkdownFence.open(lines[index].text) {
-                let close = closingFence(lines, after: index, marker: open.marker, continuations)
+                let close = closingFence(lines, after: index, marker: open.marker, roles)
                 let last = close ?? lines.count - 1
                 let held = open.mayHoldMermaid
                     && append(
-                        &blocks, lines, from: index, to: last, fenced: true, continuations,
-                        columns, minimumConfidence
+                        &blocks, lines, from: index, to: last, fenced: true,
+                        // No partner found: the block runs to the last row that was read, and
+                        // whether the fence is past the edge or was never printed is not
+                        // answerable from here.
+                        reachedWindowEnd: close == nil,
+                        roles, columns, minimumConfidence
                     )
                 if held {
                     // Past the whole block, closing fence included: a fence inside a fence is
@@ -122,12 +144,12 @@ public enum TerminalBufferScanner {
                 continue
             }
             if MermaidDetector.declaresDiagram(lines[index].text) {
-                let last = unfencedEnd(lines, from: index, continuations)
+                let stop = unfencedEnd(lines, from: index, roles)
                 append(
-                    &blocks, lines, from: index, to: last, fenced: false, continuations,
-                    columns, minimumConfidence
+                    &blocks, lines, from: index, to: stop.end, fenced: false,
+                    reachedWindowEnd: stop.hitWindowEnd, roles, columns, minimumConfidence
                 )
-                index = last + 1
+                index = stop.end + 1
                 continue
             }
             index += 1
@@ -155,6 +177,44 @@ public enum TerminalBufferScanner {
         }
     }
 
+    // MARK: - What the window cut
+
+    /// How far above a window the nearest diagram declaration sits, in rows, or nil when there is
+    /// none close enough to matter.
+    ///
+    /// The other half of `reachedWindowEnd`, and it cannot be answered the same way. A block cut at
+    /// its foot is still a block and can carry a flag; a block cut at its head is not emitted at
+    /// all, because `blocks(in:)` only ever starts one at a fence or a declaration and a body row
+    /// is neither. So there is nothing to put a flag on, and the question has to be asked of the
+    /// rows the window did not include.
+    ///
+    /// The test is the declaration itself rather than "does a visible row look like diagram body".
+    /// That alternative was measured and refused: against a `flowchart` ending in a 34-line
+    /// `classDef` tail it missed 33 of 66 scroll positions, a 150-task `gantt` 43 of 86, a
+    /// `mindmap` 31 of 62 -- every one of them in the silent class, and the failing band starting
+    /// at the resting position, which is the frame the reader sees the moment the diagram stops
+    /// printing. Looking for the declaration finds all three.
+    ///
+    /// - Parameter rowsAbove: the rows between the start of the buffer and the window, in buffer
+    ///   order, so the last element is the row immediately above it.
+    /// - Returns: the distance in rows from the window's first row back to the declaration, which
+    ///   is how much further a caller has to read to take the whole block in.
+    public static func rowsBackToDeclaration(_ rowsAbove: [String]) -> Int? {
+        guard !rowsAbove.isEmpty else { return nil }
+        // Only as far back as a block could run anyway. Past that the declaration cannot be this
+        // block's, and reading to it would be reading somebody else's scrollback for nothing.
+        let reach = max(0, rowsAbove.count - maximumUnfencedLines)
+        var index = rowsAbove.count - 1
+        while index >= reach {
+            let row = rowsAbove[index]
+            if MermaidDetector.declaresDiagram(row) || MarkdownFence.open(row)?.mayHoldMermaid == true {
+                return rowsAbove.count - index
+            }
+            index -= 1
+        }
+        return nil
+    }
+
     // MARK: - Blocks
 
     /// Appends the block those lines make, and reports whether they made one.
@@ -165,7 +225,8 @@ public enum TerminalBufferScanner {
         from first: Int,
         to last: Int,
         fenced: Bool,
-        _ continuations: [Bool],
+        reachedWindowEnd: Bool,
+        _ roles: [RowContinuation.Role],
         _ columns: Int?,
         _ minimumConfidence: MermaidDetection.Confidence
     ) -> Bool {
@@ -173,7 +234,7 @@ public enum TerminalBufferScanner {
         // diagram does not occupy, and the outline is drawn around exactly these rows.
         var end = last
         while end > first, lines[end].text.trimmingCharacters(in: .whitespaces).isEmpty { end -= 1 }
-        let text = source(lines, from: first, to: end, continuations, columns)
+        let text = source(lines, from: first, to: end, roles, columns)
         let detection = MermaidDetector.detect(text)
         guard detection.confidence >= minimumConfidence else { return false }
         blocks.append(
@@ -189,7 +250,8 @@ public enum TerminalBufferScanner {
                     location: lines[end].start,
                     length: lines[end].contentEnd - lines[end].start
                 ),
-                isFenced: fenced
+                isFenced: fenced,
+                reachedWindowEnd: reachedWindowEnd
             )
         )
         return true
@@ -199,10 +261,10 @@ public enum TerminalBufferScanner {
         _ lines: [Line],
         after index: Int,
         marker: Character,
-        _ continuations: [Bool]
+        _ roles: [RowContinuation.Role]
     ) -> Int? {
         lines.indices.dropFirst(index + 1).first {
-            !continuations[$0] && MarkdownFence.closes(lines[$0].text, marker: marker)
+            roles[$0] == .line && MarkdownFence.closes(lines[$0].text, marker: marker)
         }
     }
 
@@ -218,15 +280,18 @@ public enum TerminalBufferScanner {
         _ lines: [Line],
         from first: Int,
         to end: Int,
-        _ continuations: [Bool],
+        _ roles: [RowContinuation.Role],
         _ columns: Int?
     ) -> String {
         let margin = lines[first].text.prefix { $0 == " " || $0 == "\t" }
         var pieces: [String] = []
         for index in first...end {
             let text = lines[index].text
+            // A row the wrapping program printed to make its own layout work is in nobody's text,
+            // and putting it back would end the block on a blank line the author never wrote.
+            if roles[index] == .padding { continue }
             // The block's own first row starts it, whatever it continues above.
-            guard index > first, continuations[index], !pieces.isEmpty else {
+            guard index > first, roles[index] == .tail, !pieces.isEmpty else {
                 pieces.append(text)
                 continue
             }
@@ -263,16 +328,29 @@ public enum TerminalBufferScanner {
     /// The cost of being wrong is asymmetric, which is why the rule leans towards stopping early:
     /// too short means the detector turns the block down and no outline appears, while too long
     /// means an outline around a prompt and a preview of somebody's shell session.
-    private static func unfencedEnd(_ lines: [Line], from first: Int, _ continuations: [Bool]) -> Int {
+    private static func unfencedEnd(
+        _ lines: [Line],
+        from first: Int,
+        _ roles: [RowContinuation.Role]
+    ) -> (end: Int, hitWindowEnd: Bool) {
         var index = first
-        let limit = min(lines.count - 1, first + maximumUnfencedLines - 1)
+        let capped = first + maximumUnfencedLines - 1
+        let limit = min(lines.count - 1, capped)
         let base = indentWidth(lines[first].text)
         while index < limit {
             // The tail of the row above is the same line, and a line cannot end the block it is
             // part of. Without this the block stopped at the first row a wrap had broken: the tail
             // carries the wrapping program's margin rather than the diagram's indentation, so it
             // read as un-indented, and it holds a fragment of a label rather than an arrow.
-            if continuations[index + 1] {
+            if roles[index + 1] != .line {
+                index += 1
+                continue
+            }
+            // The row a padding row made room for is this block's by construction: the wrapping
+            // program printed the blank precisely because that row's first word did not fit above
+            // it. It carries the margin rather than the diagram's indentation and it need not hold
+            // an arrow, so nothing below would recognise it.
+            if roles[index] == .padding {
                 index += 1
                 continue
             }
@@ -286,7 +364,10 @@ public enum TerminalBufferScanner {
             }
             index += 1
         }
-        return index
+        // Ran out of window rather than out of diagram. Stopping at the line cap instead is not
+        // the same thing and must not be reported as one: nothing a caller reads next would get
+        // past it, so asking again would be asking forever.
+        return (index, index == lines.count - 1 && index < capped)
     }
 
     /// Whether a line is still part of the diagram above it.

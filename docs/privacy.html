@@ -74,8 +74,8 @@
       is in pixels, and closes it. The column count is also what tells FlowPeek where a program
       broke a long line across two rows, so it can put the line back together as it was written. <strong>No byte of what is on that terminal is ever read through it.</strong>
       There is no read of that device anywhere in the app, and nothing is written to it. Only Ghostty
-      is asked this; Terminal.app and iTerm2 answer where a character is drawn directly and never
-      reach that code.</li>
+      is asked this; Terminal.app and iTerm2 answer where a character is drawn directly, so FlowPeek
+      works their column count out from two of those answers instead and never reaches that code.</li>
     <li><strong>Two files belonging to a VS Code-family editor.</strong> When a gesture in VS Code,
       Cursor, or another build of that editor finds nothing, FlowPeek reads the
       <code>product.json</code> inside the editor's application bundle, which names the editor and
@@ -84,6 +84,24 @@
       between "there is no diagram here" and "this editor is not handing its text to macOS", and
       saying which is the only use either file is put to. Nothing is written to either one, and when
       the setting is already on nothing is said at all.</li>
+    <li><strong>The file an editor in a terminal has open, if you switch that on.</strong> It is
+      off until you do, and it is a separate switch from the terminal watch because it is a
+      different thing to ask for. An editor that takes over the whole terminal paints on what a
+      terminal calls its alternate screen, and that screen keeps no scrollback at all: measured,
+      a 200-line file in a 19-row window shows FlowPeek nineteen lines and nothing else exists to
+      read. So a diagram taller than the window cannot be recovered from the terminal at any price.
+      The file can. With the switch on, FlowPeek asks the editor's own process which file it has
+      open — from the command it was started with, and from the temporary file the editor keeps
+      beside it — reads that file, and uses it only when its lines are the ones on your screen.
+      Nothing is written to either file, and nothing is read while no editor is in front.</li>
+    <li><strong>A coding agent's session file, if you switch that on.</strong> Also off until you
+      do, and also its own switch. It exists for one program: Codex lays out its own output and
+      breaks lines in a way that cannot be undone, so about one diagram in fourteen would be
+      rebuilt subtly wrong with nothing on screen to say which one. With the switch on, FlowPeek
+      reads the file Codex is already writing — only the lines of it that contain a fenced Mermaid
+      diagram, which it finds by scanning bytes rather than by reading the rest — and uses what it
+      finds only to replace a diagram it had already found on your screen. A diagram that matches
+      nothing on screen is never used.</li>
     <li><strong>Nothing while the app is idle.</strong> Reading happens in response to your
       gesture, your copy, or a window you have in front, and each route can be switched off.</li>
   </ul>

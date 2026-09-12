@@ -112,6 +112,20 @@ public enum AmbientPeekPolicy {
     /// outlining it would frame the entire page.
     public static let maximumCharacters = 8_000
 
+    /// The same limit for a block found in a terminal, where it means something different.
+    ///
+    /// In a document the pointer is somewhere inside a page and a huge block is the page. In a
+    /// terminal the block was printed by a program, bounded already by `maximumUnfencedLines` and
+    /// by a fence where there is one, and its size is the diagram's size rather than a symptom of
+    /// having swallowed something. The document limit was refusing real answers: a 260-line
+    /// dependency graph recovers whole at 17,076 characters and a 380-line one at 25,102, and both
+    /// were found, rebuilt and then thrown away at the last step. 8,000 characters is about 200
+    /// printed rows at a hundred columns, which is a perfectly ordinary "map this repo".
+    ///
+    /// Still well inside `MermaidSource.maximumCharacters`, which is what the preview would refuse
+    /// at, so nothing is admitted here that the renderer would then turn down.
+    public static let maximumTerminalCharacters = 40_000
+
     /// The most document a caret read will slice, in UTF-16 code units.
     ///
     /// Slicing is the one part of a read that is not an accessibility message, and a deadline can

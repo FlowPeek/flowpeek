@@ -478,3 +478,11 @@
 "settings.integrations.others" = "직접 등록된 연동";
 "settings.integrations.others.description" = "FlowPeek이 쓰지 않은 제공자입니다. 어떤 앱이든 정해진 자리에 파일 하나를 써서 스스로 등록할 수 있고, 누구나 자기 편집기 지원을 그렇게 추가합니다. 끄면 FlowPeek이 아무것도 묻지 않습니다. 파일은 그대로 둡니다 — FlowPeek이 지울 파일이 아닙니다.";
 "integration.foreign.reason" = "스스로 등록한 연동입니다. FlowPeek은 화면에 어떤 다이어그램이 있고 어디 있는지만 묻습니다.";
+
+/* The file an editor has open. */
+"settings.editor-file" = "\uC5D0\uB514\uD130\uAC00 \uC5F4\uC5B4\uB454 \uD30C\uC77C \uC77D\uAE30";
+"settings.editor-file.short" = "vim\uC758 \uB2E4\uC774\uC5B4\uADF8\uB7A8\uC744 \uCC3D \uC704\uB85C \uC62C\uB77C\uAC04 \uBD80\uBD84\uAE4C\uC9C0 \uD1B5\uC9F8\uB85C \uC5F4 \uC218 \uC788\uAC8C \uD569\uB2C8\uB2E4.";
+"settings.agent-session" = "\uCF54\uB529 \uC5D0\uC774\uC804\uD2B8 \uC138\uC158 \uD30C\uC77C \uC77D\uAE30";
+"settings.agent-session.short" = "\uD654\uBA74\uB9CC\uC73C\uB85C\uB294 \uB2E4\uC774\uC5B4\uADF8\uB7A8\uC744 \uBCF5\uC6D0\uD560 \uC218 \uC5C6\uB294 Codex\uC6A9\uC785\uB2C8\uB2E4.";
+"settings.editor-file.description" = "터미널 전체를 차지하는 에디터는 창 위아래를 FlowPeek에 전혀 보여주지 않습니다 — 터미널이 그 내용을 갖고 있지 않기 때문입니다. 파일은 갖고 있습니다. 이 설정을 켜면 FlowPeek이 에디터 프로세스에 어떤 파일을 열었는지 묻고, 그 파일을 읽어, 파일의 줄이 화면의 줄과 일치할 때만 사용합니다. 아무것도 쓰지 않으며, 에디터가 앞에 없으면 읽지도 않습니다.";
+"settings.agent-session.description" = "Codex는 출력을 스스로 배치하면서 되돌릴 수 없는 방식으로 줄을 끊습니다. 열네 개 중 하나꼴로 미묘하게 다른 다이어그램이 나오고, 화면에는 어느 것이 그런지 나타나지 않습니다. 이 설정을 켜면 FlowPeek이 Codex가 이미 기록하고 있는 파일에서 다이어그램을 가져오되, 그 안의 펜스로 감싼 다이어그램만 읽고, 화면에서 이미 찾아둔 것을 대체하는 데에만 씁니다.";

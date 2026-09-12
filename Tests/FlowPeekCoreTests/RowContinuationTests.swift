@@ -371,3 +371,76 @@ final class WrapPaddingTests: XCTestCase {
         XCTAssertEqual(RowContinuation.roles(in: Self.rows).filter { $0 == .padding }.count, 0)
     }
 }
+
+
+/// What happens when the column count is a little wrong, which is the state a measured one is
+/// always in.
+///
+/// The two directions the width is used in are not equally safe. Making a join the syntax cannot
+/// see needs the width to be right. Refusing a join the syntax asked for needs it to be right *and*
+/// destroys a block when it is not: measured on rows a terminal really printed at 80 columns, read
+/// as 85, an eight-row block came back as three -- worse than having no column count at all,
+/// because the refused join leaves a tail row carrying no arrow and no indentation and the block
+/// ends there.
+final class WidthToleranceTests: XCTestCase {
+    /// Printed by a program wrapping its own output at 80 columns, with no margin on the tails.
+    private static let rows = [
+        "  mermaid",
+        "  flowchart TD",
+        "      A[\"FlowPeek reads the terminal pane through the accessibility API and",
+        "rejoins the wrapped rows\"] --> B[\"RowContinuation decides which rows are tails",
+        "of the row above them\"]",
+        "      B --> C[\"The detector scores the reconstructed source for confidence",
+        "before anything is drawn\"]",
+    ]
+
+    private func block(_ columns: Int?) throws -> TerminalDiagramBlock {
+        try XCTUnwrap(
+            TerminalBufferScanner.blocks(in: Self.rows.joined(separator: "\n"), columns: columns).first
+        )
+    }
+
+    func testTheWholeBlockSurvivesAColumnCountThatIsOff() throws {
+        for columns in [70, 75, 78, 79, 80, 81, 85] {
+            let found = try block(columns)
+            XCTAssertEqual(found.lines, 1...6, "at \(columns) columns the block was cut")
+        }
+    }
+
+    /// And at the right width it is also correct, which is the point of having the number at all.
+    func testTheSpacesComeBackAtTheRightWidth() throws {
+        let source = try block(80).detection.extractedSource
+        XCTAssertTrue(source.contains("API and rejoins"), source)
+        XCTAssertTrue(source.contains("tails of the row"), source)
+        XCTAssertTrue(source.contains("confidence before anything"), source)
+    }
+
+    /// Without it the rows still join -- the syntax can see these -- but the spaces are gone.
+    func testWithoutTheWidthTheSpacesAreLost() throws {
+        let source = try block(nil).detection.extractedSource
+        XCTAssertTrue(source.contains("API andrejoins"), "the ate space is still gone: \(source)")
+    }
+
+    /// The refusal still does its job where it was needed: an `erDiagram` whose first statement
+    /// opens a brace is unterminated for the rest of the diagram, and nothing here is near the edge.
+    func testAJoinWithRoomToSpareIsStillRefused() throws {
+        let rows = [
+            "  erDiagram",
+            "      SURFACE ||--o{ READING : accumulates",
+            "      SURFACE {",
+            "          int processIdentifier",
+            "      }",
+        ]
+        let found = try XCTUnwrap(
+            TerminalBufferScanner.blocks(in: rows.joined(separator: "\n"), columns: 160).first
+        )
+        XCTAssertEqual(found.detection.extractedSource.split(separator: "\n").count, 5)
+    }
+
+    func testWhatCountsAsRoomToSpare() {
+        // 20 wide at 80 columns, next row starting with a 5-letter word: plainly room.
+        XCTAssertTrue(RowContinuation.hadRoomToSpare(after: String(repeating: "x", count: 20), next: "hello", columns: 80))
+        // 70 wide, same word: 70 + 1 + 5 + 8 is past 80, so the grid does not get to overrule.
+        XCTAssertFalse(RowContinuation.hadRoomToSpare(after: String(repeating: "x", count: 70), next: "hello", columns: 80))
+    }
+}

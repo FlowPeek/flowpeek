@@ -153,6 +153,30 @@ public enum RowContinuation {
         return restored > columns
     }
 
+    /// How much room a row has to have left before the grid is allowed to overrule the syntax.
+    ///
+    /// The two directions the width is used in are not equally safe, and this is what separates
+    /// them. Making a join the syntax could not see needs the width to be right, and it is; refusing
+    /// a join the syntax asked for needs the width to be right *and* is destructive when it is not.
+    /// Measured: an 80-column pane read as 85 turned an eight-row block into a three-row one --
+    /// worse than having no column count at all, because the refused join leaves a tail row that
+    /// carries no arrow and no indentation, and the block ends there.
+    ///
+    /// So a refusal needs room to spare rather than a hair's breadth. Eight columns is more than any
+    /// plausible error in a measured cell and far less than the gap in the case the refusal exists
+    /// for -- an `erDiagram` whose first statement opens a brace, measured at 160 columns with 49
+    /// used, where the syntax says "unterminated" for the whole diagram and the grid says the rows
+    /// are simply rows.
+    public static let refusalSlack = 8
+
+    /// Whether `next` would plainly have fitted on the end of `row`, with room left over.
+    public static func hadRoomToSpare(after row: String, next: String, columns: Int) -> Bool {
+        guard columnRange.contains(columns) else { return false }
+        let width = displayWidth(row)
+        guard width <= columns else { return false }
+        return width + 1 + displayWidth(firstToken(of: next)) + refusalSlack <= columns
+    }
+
     /// Whether the wrap that broke `row` before `next` destroyed the space between them.
     ///
     /// A wrapping program breaks at a space and consumes it, which is why the naive join reads
@@ -248,7 +272,11 @@ public enum RowContinuation {
                 // does not: it is indented like its siblings. That is what keeps the width from
                 // joining two short lines that happen to sit near the edge.
                 let lostItsIndent = indent(of: row) < indent(of: previous)
-                continues = broken && (isUnterminated(joined) || lostItsIndent || brokenByTheWidth)
+                // Syntax alone still makes a join, unless the grid can show there was room for the
+                // next row on the one above it -- with room to spare, so that a column count off by
+                // a little cannot take a join away.
+                let syntax = isUnterminated(joined) && !hadRoomToSpare(after: previous, next: row, columns: grid)
+                continues = syntax || (broken && (lostItsIndent || brokenByTheWidth))
                 if !broken { brokenByTheWidth = false }
             } else if continues {
                 continues = isUnterminated(joined)

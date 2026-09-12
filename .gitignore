@@ -14,4 +14,6 @@ vendor/bundle/
 # Built on demand by the frame sweep
 Scripts/framesweep/bands
 Scripts/framesweep/overlay
+Scripts/framesweep/point
 Scripts/framesweep/case.png
+Scripts/framesweep/case-hover.png

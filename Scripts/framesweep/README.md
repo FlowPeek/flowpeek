@@ -35,6 +35,13 @@ Where the diagram is taller than the window, the top marker has scrolled away; t
 checked for not claiming rows above the window rather than against a marker, and the yellow band
 carries the pitch.
 
+The hint box is the frame **and** the chip that names the diagram and says which key opens it, so
+the chip is checked too. It only appears once the pointer is near, so a second capture is taken
+with the pointer in the middle of the frame, and the chip is found by the hint tint: the tallest
+block of tinted pixels that is wider than a glyph and narrower than half the window. Both of those
+bounds are load-bearing -- without the upper one the finder picks the frame's own hairline, which
+runs the whole width of the terminal, and reports the chip a diagram away from where it is.
+
 ## Running it
 
 Needs a Debug build installed and granted Accessibility — `zsh Scripts/install_debug_app.sh` — and
@@ -57,3 +64,18 @@ zsh Scripts/framesweep/sweep.sh agent alt 20 0   # one case
 - Every join refused after a window was resized, because the pty reported the new width while the
   rows on screen still carried the old one.
 - An `erDiagram` joined into two lines, because `||--o{` was read as an opened bracket.
+
+## What it has got wrong itself
+
+Worth recording, because each of these would have passed a broken build or failed a working one, and
+all four were found by looking at the capture rather than at the number:
+
+- Measuring a band by its edges rather than its centre made the row pitch wander by a third between
+  captures, because the edges are anti-aliased.
+- FlowPeek's own hairline crossing a band split it in two, and the first half read as a row half
+  again too tall. Runs closer than ten pixels are one band now, and the tallest band wins.
+- A large font left the top marker off screen. The window is grown to 1180x880 and the printer
+  repaints on `SIGWINCH`.
+- The chip finder took the longest run of tint, which is the frame's edge, not the chip; then
+  grouping rows by where their run started split the pill into slivers, because the white text
+  through its middle moves the run. Height is what tells a pill from a hairline.

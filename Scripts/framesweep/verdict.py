@@ -12,8 +12,8 @@ import sys
 
 INSET = 5.0
 # How many printed rows sit between the top marker and the block itself, and below it.
-BEFORE = {"agent": 1, "korean": 1, "long": 1, "fenced": 0, "plain": 0}
-AFTER = {"agent": 0, "korean": 0, "long": 0, "fenced": 0, "plain": 0}
+BEFORE = {"agent": 1, "korean": 1, "long": 1, "two": 1, "fenced": 0, "plain": 0}
+AFTER = {"agent": 0, "korean": 0, "long": 0, "two": 0, "fenced": 0, "plain": 0}
 
 def band(text, key):
     """The centre of the tallest band of this colour, which is the marker row; anything smaller is
@@ -74,6 +74,25 @@ if want_bottom is not None:
 else:
     ok = ok and (oy + oh) <= wy + wh + row
     parts.append("bottom=clipped")
+# And the chip, which is the other half of the hint box: the pill that names the diagram and says
+# which key opens it. It has to sit on the frame, not float near it.
+chip = None
+for line in bands.split("\n"):
+    if line.startswith("chip ") and "none" not in line:
+        left, top, right, bottom = [float(v) for v in line[5:].split(",")]
+        chip = (wx + left, wy + top, wx + right, wy + bottom)
+if chip is None:
+    parts.append("chip=absent")
+    ok = False
+else:
+    cl, ct, cr, cb = chip
+    on_top_edge = abs(ct - oy) <= row
+    inside = cl >= ox - 2 and cr <= ox + ow + 2
+    right_aligned = cr >= ox + ow - 6 * row
+    ok = ok and on_top_edge and inside and right_aligned
+    parts.append(f"chip={'on' if on_top_edge and inside and right_aligned else 'OFF'}"
+                 f"({ct - oy:+.0f} from the top, right edge {ox + ow - cr:+.0f})")
+
 print(f"  {'PASS' if ok else 'FAIL'}  row={row:.1f} rows={printed} {' '.join(parts)} "
       f"(outline {oy:.0f}..{oy + oh:.0f})")
 sys.exit(0 if ok else 1)

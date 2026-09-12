@@ -48,9 +48,25 @@ def wrap(line, width):
     out.append(rest)
     return out
 
+SECOND = """sequenceDiagram
+    participant A as Reader
+    participant B as FlowPeek
+    A->>B: points at a diagram
+    B-->>A: draws a frame around it
+    A->>B: holds Option and clicks
+    B-->>A: opens the picture"""
+
 def body(shape, width):
     source = {"korean": KOREAN, "long": LONG}.get(shape, DIAGRAM)
     rows = []
+    if shape == "two":
+        # Two blocks on one screen: each must get its own frame, and neither may swallow the other.
+        for block in (DIAGRAM, SECOND):
+            rows.append(MARGIN + "mermaid")
+            for line in block.split("\n"):
+                rows.extend(wrap(MARGIN + line, width))
+            rows.append("")
+        return rows
     if shape in ("agent", "korean", "long"):
         rows.append(MARGIN + "mermaid")
         for line in source.split("\n"):

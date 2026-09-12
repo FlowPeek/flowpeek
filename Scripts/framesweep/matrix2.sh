@@ -18,5 +18,7 @@ for font in 14 20; do run korean alt $font 0; done
 for lead in 0 10 30; do run long no 14 $lead; done
 # Pushed down the screen until the top of the block is above the viewport.
 for lead in 20 34 40; do run agent no 14 $lead; done
+# Two blocks on one screen: two frames, not one around both.
+for font in 12 16 20; do run two no $font 0; done
 print ""
 print "PASS $pass  FAIL $fail  SKIP $skip"

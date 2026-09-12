@@ -11,6 +11,13 @@ struct TerminalPtyReading: Hashable, Sendable {
     /// surface reports the same minor in `vst_rdev`. Measured: Ghostty pid 1510 held one master of
     /// rdev 251658240, minor 0, against a slave of `/dev/ttys000`.
     let minor: Int
+    /// The slave's devfs inode. A minor alone is not an identity: /dev/ttys004 was measured being
+    /// recycled through six Ghostty instances in twenty minutes, and anything remembered against it
+    /// would be inherited by the next surface to take that number. The devfs node is created when
+    /// the pty is cloned and destroyed when it is released, so it does tell them apart. It costs
+    /// nothing: it is taken from the descriptor already open for the ioctl, which also closes the
+    /// race between naming the device and opening it.
+    let inode: UInt64
     let winsize: TerminalWinsize
 }
 
@@ -178,6 +185,17 @@ final class TerminalPtyProbe {
         surveys = surveys.filter { alive.contains($0.key) }
     }
 
+    /// When a process started, in seconds since the epoch, or zero when it cannot be asked.
+    ///
+    /// Part of a surface's identity. A process identifier is recycled, and anything remembered
+    /// against a bare one is inherited by whatever takes the number next.
+    func startTime(of pid: pid_t) -> UInt64 {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(Int32(pid), PROC_PIDTBSDINFO, 0, &info, size) == size else { return 0 }
+        return UInt64(info.pbi_start_tvsec)
+    }
+
     // MARK: - The surface set
 
     /// The minor number of each pty master the process holds open -- one per live surface.
@@ -311,6 +329,8 @@ final class TerminalPtyProbe {
         defer { close(fd) }
         var size = winsize()
         guard ioctl(fd, TIOCGWINSZ, &size) == 0 else { return nil }
+        var node = stat()
+        guard fstat(fd, &node) == 0 else { return nil }
         let winsize = TerminalWinsize(
             rows: Int(size.ws_row),
             columns: Int(size.ws_col),
@@ -321,7 +341,12 @@ final class TerminalPtyProbe {
         // nobody has sized. `grid` refuses those too; this only saves carrying them around.
         guard winsize.rows > 0, winsize.columns > 0,
               winsize.heightInPixels > 0, winsize.widthInPixels > 0 else { return nil }
-        return TerminalPtyReading(device: name, minor: Int(dev & 0xff_ffff), winsize: winsize)
+        return TerminalPtyReading(
+            device: name,
+            minor: Int(dev & 0xff_ffff),
+            inode: UInt64(node.st_ino),
+            winsize: winsize
+        )
     }
 
     /// The path of a character device, cached for the life of the process.

@@ -94,6 +94,13 @@ final class TerminalPeekMonitor {
     /// solved, because it is a reading rather than an inference: it needs no scrollback, no second
     /// look and no remembered value, which between them are everything a full-screen program denies.
     private let ptyProbe = TerminalPtyProbe()
+    /// What every reading of a surface has said about its grid, folded together.
+    ///
+    /// Kept here rather than inside the probe on purpose: the probe's survey is dropped whenever the
+    /// pane or its rectangle changes, which is exactly the moment a resize is producing the readings
+    /// that narrow a stubborn bracket. Dropping the history with the survey would erase it during
+    /// the one gesture that builds it.
+    private var gridEvidence = TerminalGridEvidenceStore()
     /// Grids that still explain everything this pane has reported. Sieved on every look and used
     /// only once they agree, so a wrong column count cannot place an outline; see
     /// `TerminalGridInference`.
@@ -220,6 +227,7 @@ final class TerminalPeekMonitor {
         rowHeights = rowHeights.filter { alive.contains($0.key) }
         lastSamples = lastSamples.filter { alive.contains($0.key) }
         ptyProbe.forgetDeadProcesses(alive: alive)
+        gridEvidence.forgetProcesses(notIn: Set(alive.map { Int32($0) }))
         gridCandidates = gridCandidates.filter { alive.contains($0.key) }
     }
 
@@ -682,13 +690,52 @@ final class TerminalPeekMonitor {
         let survey = ptyProbe.survey(of: pid, before: deadline)
         guard !survey.readings.isEmpty else { return nil }
 
+        // Every reading is folded into what this surface has already said. One reading on its own
+        // brackets the cell to about cell/rows candidates, which closes at once in a tall pane and
+        // does not in a short one; the readings a resize produces close it. Measured: a ten-row pane
+        // at a forty-two pixel cell went from four candidates to one across twelve points of drag.
+        let now = Date()
+        for reading in survey.readings {
+            gridEvidence.record(
+                reading.winsize,
+                from: TerminalSurfaceKey(
+                    processIdentifier: Int32(pid),
+                    processStartedAt: ptyProbe.startTime(of: pid),
+                    ptyMinor: Int32(reading.minor),
+                    ptyInode: reading.inode,
+                    backingScale: scale
+                ),
+                at: now
+            )
+        }
+
         // A buffer that fits is the whole screen, so its lines are the terminal's rows. This is what
         // tells two same-sized surfaces apart, and it is exactly the case -- a full-screen program --
         // that has no other evidence in it.
+        // A buffer that fits is at most the screen, so its lines cannot outnumber the terminal's
+        // rows. Fewer is ordinary -- a shell that has printed five lines into a nineteen-row window
+        // exposes five -- and only a full-screen program makes the two equal, so this is a bound
+        // rather than an equality. It still rules out a surface whose grid is too small to hold
+        // what is on this pane, which is what two tabs at different font sizes look like.
         let fits = contentSize.height <= viewport.height + TerminalPeekPolicy.overflowTolerance
+        let started = ptyProbe.startTime(of: pid)
         let candidates = survey.readings
-            .filter { !fits || $0.winsize.rows == lineCount }
-            .compactMap { $0.winsize.grid(viewportSize: viewport.size, scale: scale) }
+            .filter { !fits || $0.winsize.rows >= lineCount }
+            .compactMap { reading -> TerminalCellGrid? in
+                // What every reading of this surface admits, which is never wider than what this
+                // one does on its own and is often narrower.
+                let key = TerminalSurfaceKey(
+                    processIdentifier: Int32(pid),
+                    processStartedAt: started,
+                    ptyMinor: Int32(reading.minor),
+                    ptyInode: reading.inode,
+                    backingScale: scale
+                )
+                if let answer = gridEvidence.grid(for: key, viewportSize: viewport.size) {
+                    return answer.grid
+                }
+                return reading.winsize.grid(viewportSize: viewport.size, scale: scale)
+            }
         guard let first = candidates.first else { return nil }
         // Agreement, not a vote: a disagreement means the pane could be either, and either is a
         // guess.

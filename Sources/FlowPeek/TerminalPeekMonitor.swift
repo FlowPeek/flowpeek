@@ -1126,9 +1126,17 @@ final class TerminalPeekMonitor {
     /// full confidence with a closed frame around it, and they parse -- so the reader is shown a
     /// well-formed picture that is not the one on their screen. Widening takes the same 182
     /// positions to 182 whole, 0 fragments, 0 nothing.
-    private func gridRead(_ pane: Pane, grid: Grid, buffer: String, deadline: Date) -> [Located] {
+    /// - Returns: the diagrams on screen, or nil when this pane's value cannot be used to place
+    ///   them and the caller should ask the terminal instead.
+    private func gridRead(_ pane: Pane, grid: Grid, buffer: String, deadline: Date) -> [Located]? {
         let rows = buffer.components(separatedBy: "\n")
-        guard !rows.isEmpty, grid.visible.lowerBound < rows.count else { return [] }
+        guard !rows.isEmpty, grid.visible.lowerBound < rows.count else { return nil }
+        // The block's line numbers and the terminal's are only the same numbers while the value
+        // splits into the same lines the terminal counted. Ghostty counts whole lines in both and
+        // its buffer ends on a prompt rather than a newline, so they agree to within that one; a
+        // pane where they do not is one where placing a frame from these numbers would put it over
+        // the wrong rows, and it is left to the older path instead.
+        guard abs(rows.count - grid.lineCount) <= 1 else { return nil }
         // An editor painting on the alternate screen keeps nothing above or below the screen, so
         // there is no window to widen and no further text to reach. What the reader is looking at is
         // a file, and the file is where the rest of the diagram is.
@@ -1355,8 +1363,10 @@ final class TerminalPeekMonitor {
     }
 
     private func gridRead(_ pane: Pane, grid: Grid, characters: Int, deadline: Date) -> [Located] {
-        if let buffer = grid.buffer {
-            return gridRead(pane, grid: grid, buffer: buffer, deadline: deadline)
+        // The copy where it can serve this pane, and the binary searches below where it cannot.
+        if let buffer = grid.buffer,
+           let found = gridRead(pane, grid: grid, buffer: buffer, deadline: deadline) {
+            return found
         }
         let first = max(0, grid.visible.lowerBound - Self.lineMargin)
         let last = min(grid.lineCount - 1, grid.visible.upperBound + Self.lineMargin)

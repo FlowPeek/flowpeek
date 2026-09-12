@@ -88,34 +88,31 @@ final class CodexSessionSources {
     private func refresh(_ path: String) {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
               let size = (attributes[.size] as? NSNumber)?.uint64Value else { return }
-        let from = offsets[path] ?? (size > Self.firstLookBytes ? size - UInt64(Self.firstLookBytes) : 0)
-        guard size > from else {
+        // A first look at a file already bigger than the window worth reading starts part-way in,
+        // and only that read starts mid-line. Every later one starts where the last one stopped.
+        let known = offsets[path]
+        let startsMidLine = known == nil && size > UInt64(Self.firstLookBytes)
+        var from = known ?? (startsMidLine ? size - UInt64(Self.firstLookBytes) : 0)
+        if size < from {
             // Truncated or replaced: start again rather than reading from a stale offset.
-            if size < from { offsets[path] = 0; sources[path] = [] }
-            return
+            from = 0
+            sources[path] = []
         }
-        guard let handle = FileHandle(forReadingAtPath: path) else { return }
+        offsets[path] = from
+        guard size > from, let handle = FileHandle(forReadingAtPath: path) else { return }
         defer { try? handle.close() }
         try? handle.seek(toOffset: from)
-        guard var data = try? handle.readToEnd(), !data.isEmpty else { return }
-        // Whole lines only: the last one may still be being written, and a half-written JSON object
-        // is not one. Its bytes are read again next time.
-        guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return }
-        let consumed = data.distance(from: data.startIndex, to: lastNewline) + 1
-        data = data[data.startIndex..<(lastNewline + 1)]
-        offsets[path] = from + UInt64(consumed)
-        // The first look may have landed mid-line, and half a line is not a line.
-        if from > 0 || offsets[path] == UInt64(consumed) {
-            if let firstNewline = data.firstIndex(of: UInt8(ascii: "\n")), from > 0 {
-                data = data[(firstNewline + 1)...]
-            }
-        }
+        guard let chunk = try? handle.readToEnd(), !chunk.isEmpty else { return }
+        let take = AppendedLines.take(chunk, startsMidLine: startsMidLine)
+        offsets[path] = from + UInt64(take.consumed)
+        guard !take.lines.isEmpty else { return }
+
         var kept = sources[path] ?? []
-        for line in data.split(separator: UInt8(ascii: "\n")) {
+        for line in take.lines {
             // The prefilter, and it is what makes this affordable: a session file is overwhelmingly
             // tool calls and their results, and none of that is ever decoded.
             guard line.range(of: Data("```mermaid".utf8)) != nil else { continue }
-            guard let object = try? JSONSerialization.jsonObject(with: Data(line)) else { continue }
+            guard let object = try? JSONSerialization.jsonObject(with: line) else { continue }
             for text in Self.strings(in: object) {
                 for block in MermaidFences.blocks(in: text) where !kept.contains(block) {
                     kept.append(block)

@@ -10,3 +10,8 @@ vendor/bundle/
 
 # Agent worktrees
 .claude/worktrees/
+
+# Built on demand by the frame sweep
+Scripts/framesweep/bands
+Scripts/framesweep/overlay
+Scripts/framesweep/case.png

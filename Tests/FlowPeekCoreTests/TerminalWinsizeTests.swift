@@ -266,14 +266,37 @@ final class TerminalWinsizeBracketTests: XCTestCase {
         XCTAssertNil(blind.approximateGrid(viewportSize: viewport, scale: 2))
     }
 
-    /// And a bracket too wide to have a middle worth using still refuses, because past a couple of
-    /// pixels the drift is visible by the bottom of a diagram.
-    func testAWideBracketHasNoUsableMiddle() {
-        // Seven rows in 228 pixels: (28.5, 32.571], four candidates.
-        let short = TerminalWinsize(rows: 7, columns: 140, heightInPixels: 228, widthInPixels: 2250)
-        let bracket = try? XCTUnwrap(short.cellHeightBracket)
-        XCTAssertEqual(bracket?.count, 4)
-        XCTAssertNil(short.approximateGrid(viewportSize: CGSize(width: 1125, height: 114), scale: 2))
+    /// A wide bracket is still answered, and the reason is that a wide bracket only happens on a
+    /// pane with few rows: the width is about `cell / rows`, so the middle is out by at most half a
+    /// row at the bottom of the screen whatever the numbers are. That bound is the promise, so it
+    /// is the thing to test.
+    func testTheDriftIsAtMostHalfARowHoweverWideTheBracketIs() throws {
+        let panes = [
+            TerminalWinsize(rows: 22, columns: 80, heightInPixels: 1280, widthInPixels: 2250),
+            TerminalWinsize(rows: 16, columns: 53, heightInPixels: 968, widthInPixels: 1608),
+            TerminalWinsize(rows: 7, columns: 140, heightInPixels: 228, widthInPixels: 2250),
+            TerminalWinsize(rows: 40, columns: 140, heightInPixels: 1280, widthInPixels: 2250),
+        ]
+        for pane in panes {
+            let bracket = try XCTUnwrap(pane.cellHeightBracket, "\(pane.rows) rows")
+            let drift = try XCTUnwrap(pane.approximateDrift(scale: 2))
+            let row = CGFloat(bracket.upperBound) / 2
+            XCTAssertLessThanOrEqual(
+                drift, row / 2 + 0.5,
+                "\(pane.rows) rows, bracket \(bracket): drifts \(drift) against a \(row)-point row"
+            )
+        }
+    }
+
+    /// And a short pane that used to be refused outright is now answered.
+    func testAShortPaneIsAnsweredRatherThanRefused() throws {
+        // 16 rows in 968 pixels: (56.9, 60.5], four candidates, and the case a 24-point font makes.
+        let short = TerminalWinsize(rows: 16, columns: 53, heightInPixels: 968, widthInPixels: 1608)
+        XCTAssertNil(short.cellHeightInPixels)
+        XCTAssertEqual(short.cellHeightBracket, 57...60)
+        let grid = try XCTUnwrap(short.approximateGrid(viewportSize: CGSize(width: 804, height: 488), scale: 2))
+        XCTAssertEqual(grid.rowHeight, 29, accuracy: 0.001)
+        XCTAssertEqual(grid.rows, 16)
     }
 
     /// A pane that can pin its cell exactly still does, and the approximate route agrees with it.

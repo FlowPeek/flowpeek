@@ -143,6 +143,13 @@ final class RowContinuationTests: XCTestCase {
         // Open quote, then open bracket: the row cannot be a statement on its own.
         XCTAssertTrue(RowContinuation.isUnterminated("    FE --> FE1[\"back-office-front<br/>hauler"))
         XCTAssertTrue(RowContinuation.isUnterminated("    subgraph one ("))
+        // A brace that opens a block is not a label a wrap has broken, and neither is the brace in
+        // an erDiagram's cardinality mark.
+        XCTAssertFalse(RowContinuation.isUnterminated("      SURFACE {"))
+        XCTAssertFalse(RowContinuation.isUnterminated("      SURFACE ||--o{ READING : accumulates"))
+        XCTAssertFalse(RowContinuation.isUnterminated("      A }o--|| B : has"))
+        // But a real open brace still is.
+        XCTAssertTrue(RowContinuation.isUnterminated("    A --> B{\"is it cach"))
         // A pipe is the same character at both ends, so an odd one says nothing.
         XCTAssertFalse(RowContinuation.isUnterminated("    FE1 -.->|workspace:^| UI"))
         XCTAssertFalse(RowContinuation.isUnterminated("    A -->|half"))
@@ -241,9 +248,11 @@ final class TerminalGridRejoinTests: XCTestCase {
             block.detection.extractedSource.split(separator: "\n").count, 5,
             "five rows in, five lines out: \(block.detection.extractedSource)"
         )
-        // And the bug, still there when nothing says how wide the grid is.
+        // And it is fixed without the grid too, because the fault was never the width: a brace
+        // that opens a block, and the brace inside an `erDiagram` cardinality mark, are not labels
+        // a wrap has broken.
         let blind = try XCTUnwrap(TerminalBufferScanner.blocks(in: window).first)
-        XCTAssertEqual(blind.detection.extractedSource.split(separator: "\n").count, 2)
+        XCTAssertEqual(blind.detection.extractedSource.split(separator: "\n").count, 5)
     }
 
     /// The regression the syntax rule was written to avoid, now with the width known as well. Two

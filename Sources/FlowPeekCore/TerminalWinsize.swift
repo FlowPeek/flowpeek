@@ -137,13 +137,6 @@ public struct TerminalWinsize: Hashable, Sendable {
         return low...high
     }
 
-    /// How wide a bracket may be before its middle stops being an answer, in device pixels.
-    ///
-    /// Two, so the middle is at most one pixel out -- half a point at a Retina scale, which is a
-    /// fifth of a row over a forty-row screen. Wider than that and the drift is visible by the
-    /// bottom of a diagram, which is the mistake the bracket was built to avoid.
-    public static let widestUsableBracket = 2
-
     /// Whether a row height worked out some other way is one this reading could have produced.
     ///
     /// This is the half that matters most. A pane where the bracket cannot be closed used to fall
@@ -199,20 +192,38 @@ public struct TerminalWinsize: Hashable, Sendable {
     /// Known limitation: the top padding is half the total, which is what Ghostty does while
     /// `window-padding-balance` is off, its default. With it on, the top is capped and the excess
     /// pushed to the bottom, and nothing in `ws_*` says so.
-    /// The grid, allowing the cell height to be the middle of a narrow bracket.
+    /// The grid, taking the middle of the bracket rather than insisting it hold one integer.
     ///
     /// `grid` refuses anything it cannot pin exactly, which is right when there is another way to
     /// find out -- and there is, for a pane whose buffer overflows its viewport, or one the reader
     /// resizes. A full-screen program on the alternate screen offers neither: its buffer is exactly
     /// its viewport for ever, so nothing is ever solved and nothing narrows. Measured on such a pane
-    /// -- 22 rows in 1280 pixels -- the bracket is 56 to 58 and closes only at about 57 rows. That
-    /// is the case this exists for, and a row within half a point beats no frame and beats a
-    /// remembered one from another font.
+    /// -- 22 rows in 1280 pixels -- the bracket is 56 to 58 and closes only at about 57 rows.
+    ///
+    /// The middle is safe however wide the bracket is, and the reason is worth stating because it
+    /// is not obvious. The bracket's width is about `cell / rows`: it is wide exactly when the pane
+    /// has few rows. Picking the middle is at most half the width out per row, so the error at the
+    /// bottom of the screen is at most `(cell / rows) / 2 * rows`, which is **half a row, whatever
+    /// the numbers are**. Measured against the two panes that fail to close here -- 22 rows of a
+    /// 57-pixel cell, and 16 rows of a 58-pixel one -- the drift at the last row is 0 and 16 device
+    /// pixels against rows of 57 and 58.
+    ///
+    /// Half a row is a frame nobody reads as wrong, and it is bounded. The alternative on these
+    /// panes was a row height remembered from another font, which was out by nearly half and drew a
+    /// frame over the wrong rows.
     public func approximateGrid(viewportSize: CGSize, scale: CGFloat) -> TerminalCellGrid? {
-        guard let bracket = cellHeightBracket,
-              bracket.upperBound - bracket.lowerBound <= Self.widestUsableBracket else { return nil }
+        guard let bracket = cellHeightBracket else { return nil }
         let middle = (bracket.lowerBound + bracket.upperBound) / 2
         return grid(viewportSize: viewportSize, scale: scale, cellHeightInPixels: middle)
+    }
+
+    /// The worst the middle of the bracket can be out by, at the last row of the pane, in points.
+    ///
+    /// Carried so a caller can say what it is drawing from rather than only that it drew.
+    public func approximateDrift(scale: CGFloat) -> CGFloat? {
+        guard let bracket = cellHeightBracket, scale > 0 else { return nil }
+        let half = CGFloat(bracket.upperBound - bracket.lowerBound) / 2
+        return half * CGFloat(rows) / scale
     }
 
     public func grid(viewportSize: CGSize, scale: CGFloat) -> TerminalCellGrid? {

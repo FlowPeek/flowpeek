@@ -50,19 +50,37 @@ public enum RowContinuation {
         guard !trimmed.isEmpty, !trimmed.hasPrefix("%%") else { return false }
         var quote: Character?
         var depth = 0
-        for character in row {
+        let characters = Array(row)
+        for index in characters.indices {
+            let character = characters[index]
             if let open = quote {
                 if character == open { quote = nil }
                 continue
             }
             switch character {
             case "\"", "'": quote = character
-            case "[", "(", "{": depth += 1
-            case "]", ")", "}": depth = max(0, depth - 1)
+            case "[", "(": depth += 1
+            case "]", ")": depth = max(0, depth - 1)
+            case "{":
+                // `||--o{` is one token in an `erDiagram`, and its brace is a cardinality mark
+                // rather than a bracket. Counting it left the first relationship in every such
+                // diagram looking unterminated, and the rest of the diagram was joined onto it.
+                let before = index > 0 ? characters[index - 1] : " "
+                if before != "o", before != "|" { depth += 1 }
+            case "}":
+                let after = index + 1 < characters.count ? characters[index + 1] : " "
+                if after != "o", after != "|" { depth = max(0, depth - 1) }
             default: break
             }
         }
-        return quote != nil || depth > 0
+        guard quote == nil else { return true }
+        guard depth > 0 else { return false }
+        // A row that ends on the brace it opened is opening a block, not breaking a label. That is
+        // how `erDiagram`, `classDiagram` and `stateDiagram` all write one -- `SURFACE {`,
+        // `class Foo {`, `state Bar {` -- and reading it as unterminated joined the rest of the
+        // diagram onto it. Only a brace: a trailing `[` or `(` really can be the start of a label a
+        // wrap has broken.
+        return trimmed.last != "{"
     }
 
     // MARK: - What the grid says
@@ -235,6 +253,12 @@ public enum RowContinuation {
     /// only once the grid is known, because it cannot be told from a real blank line without it.
     public static func roles(in rows: [String], columns: Int? = nil) -> [Role] {
         let grid = columns.flatMap { columnRange.contains($0) ? $0 : nil }
+        // Whether these rows look like they were broken at this width at all. A pane whose widest
+        // row is nowhere near the grid was either laid out narrower -- a window grown since it was
+        // printed -- or holds nothing long enough to have wrapped, and in both cases the width has
+        // nothing to say about which rows are tails.
+        let widest = rows.reduce(0) { max($0, displayWidth($1)) }
+        let laidOutAtThisWidth = grid.map { widest + refusalSlack >= $0 } ?? false
         var roles = [Role](repeating: .line, count: rows.count)
         var joined = ""
         var run = 0
@@ -275,7 +299,14 @@ public enum RowContinuation {
                 // Syntax alone still makes a join, unless the grid can show there was room for the
                 // next row on the one above it -- with room to spare, so that a column count off by
                 // a little cannot take a join away.
-                let syntax = isUnterminated(joined) && !hadRoomToSpare(after: previous, next: row, columns: grid)
+                // Syntax alone makes the join, unless the grid can show there was room to spare on
+                // the row above -- and only where the text was laid out at *this* width. A window
+                // resized after its output was printed reports the new width while the rows keep
+                // the old one: measured, a pane printed at 52 columns and read at 107 refused every
+                // join and returned two lines of a ten-line diagram. Where no row comes near the
+                // width, the width says nothing about how the text was broken.
+                let syntax = isUnterminated(joined)
+                    && !(laidOutAtThisWidth && hadRoomToSpare(after: previous, next: row, columns: grid))
                 continues = syntax || (broken && (lostItsIndent || brokenByTheWidth))
                 if !broken { brokenByTheWidth = false }
             } else if continues {

@@ -662,6 +662,13 @@ final class TerminalPeekMonitor {
         let inferred: (grid: TerminalGrid, lineLengths: [Int])?
         /// Which rows the viewport shows. Rows, not lines, so only present alongside `inferred`.
         let visibleRows: ClosedRange<Int>?
+        /// How many columns wide the grid is, when the terminal said so.
+        ///
+        /// The scanner needs it for a different job from the row arithmetic above: a program that
+        /// lays out its own output breaks a line at this column and eats the space it broke at, and
+        /// only this number says which rows were broken and where the space went. Absent, the
+        /// scanner falls back to deciding on syntax alone, which is what it did before.
+        let columns: Int?
     }
 
     /// The grid the terminal published for this pane, or nil when nothing published one that can be
@@ -827,7 +834,8 @@ final class TerminalPeekMonitor {
                 lineCount: inferred.lineLengths.count,
                 visible: first...max(first, last),
                 inferred: inferred,
-                visibleRows: rows
+                visibleRows: rows,
+                columns: inferred.grid.columns
             )
         }
 
@@ -850,7 +858,10 @@ final class TerminalPeekMonitor {
                 lineCount: lineCount,
                 visible: visible,
                 inferred: nil,
-                visibleRows: nil
+                visibleRows: nil,
+                // Straight from `ioctl(TIOCGWINSZ)`: the number the program in the terminal was
+                // given to wrap against, rather than one divided out of a measurement.
+                columns: cell.columns
             )
         }
 
@@ -915,7 +926,10 @@ final class TerminalPeekMonitor {
             lineCount: lineCount,
             visible: visible,
             inferred: nil,
-            visibleRows: nil
+            visibleRows: nil,
+            // Nothing here published a column count: this is the height solved from two readings of
+            // a scrolling buffer, and that arithmetic says nothing about how wide the grid is.
+            columns: nil
         )
     }
 
@@ -996,7 +1010,7 @@ final class TerminalPeekMonitor {
         // than the pane occupies as many rows as it wraps to -- and the on-screen test is rows
         // against rows.
         if let inferred = grid.inferred, let visibleRows = grid.visibleRows {
-            return TerminalBufferScanner.blocks(in: text).compactMap { block in
+            return TerminalBufferScanner.blocks(in: text, columns: grid.columns).compactMap { block in
                 guard let rows = TerminalGridInference.rowSpan(
                     ofLines: (first + block.lines.lowerBound)...(first + block.lines.upperBound),
                     lineLengths: inferred.lineLengths,
@@ -1015,7 +1029,7 @@ final class TerminalPeekMonitor {
         // `AXLineForIndex` counts, and adding `first` -- a number from the terminal -- to the
         // scanner's own line numbers mixed the two. The terminal is asked about the block's ends
         // directly instead, and the on-screen test compares its answers with its own visible range.
-        return TerminalBufferScanner.blocks(in: text).compactMap { block in
+        return TerminalBufferScanner.blocks(in: text, columns: grid.columns).compactMap { block in
             guard let rows = TerminalPeekPolicy.rows(
                 ofBlockFrom: start + block.range.location,
                 to: start + block.lastCharacter,

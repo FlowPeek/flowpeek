@@ -216,11 +216,20 @@ and works everywhere, because a copy is the one signal every application emits.
 
 Terminal, iTerm2 and Ghostty are read directly, a program that has taken the whole screen included.
 That last one is not solved out of the scrollback but asked for: FlowPeek opens Ghostty's pty
-read-only and issues one `ioctl(TIOCGWINSZ)` to ask how many rows and pixels it has — measured, 40
-rows in 1280 pixels, which is 32 device pixels a row and 16.000 points at a backing scale of 2. No
-byte is ever read from the device, and only Ghostty is asked; Terminal.app and iTerm2 answer
-per-character geometry directly and never reach that code. So vim, `less` or a coding agent's
+read-only and issues one `ioctl(TIOCGWINSZ)` to ask how many rows, columns and pixels it has —
+measured, 40 rows in 1280 pixels, which is 32 device pixels a row and 16.000 points at a backing
+scale of 2. No byte is ever read from the device, and only Ghostty is asked; Terminal.app and iTerm2
+answer per-character geometry directly and never reach that code. So vim, `less` or a coding agent's
 interface is framed on the first look, with nothing printed beforehand.
+
+The column count does a second job. A coding agent lays out its own output: it breaks a long line at
+the width, eats the space it broke at, and prints each piece as its own row with a two-space margin
+and no fence. Rejoining those rows on mermaid syntax alone cuts the block where the break closes
+every bracket, and runs `…source for` into `confidence` where it does not. With the width known,
+FlowPeek can tell a break from a line ending and a break at a space from a split word. Measured
+against Claude Code 2.1.269 driven in a pty — 50 agent-written diagrams at 80, 100, 120 and 160
+columns, 200 screens fed back through the scanner — the source came back exactly as printed 132
+times without the column count and 200 times with it.
 
 Otherwise the reason is Sublime's, usually. A terminal that paints its text into a canvas, such as
 the one inside VS Code, exposes none of it and there is nothing FlowPeek can do there. Copying works

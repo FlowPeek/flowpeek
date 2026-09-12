@@ -70,8 +70,9 @@
       the whole terminal, vim or a coding agent's interface, leaves nothing on screen that says where
       one row ends and the next begins, so FlowPeek asks the terminal itself. It looks through the
       terminal's child processes for the pty device behind the window, opens it read only, issues one
-      <code>ioctl(TIOCGWINSZ)</code> to ask how many rows it has and how tall the grid is in pixels,
-      and closes it. <strong>No byte of what is on that terminal is ever read through it.</strong>
+      <code>ioctl(TIOCGWINSZ)</code> to ask how many rows and columns it has and how tall the grid
+      is in pixels, and closes it. The column count is also what tells FlowPeek where a program
+      broke a long line across two rows, so it can put the line back together as it was written. <strong>No byte of what is on that terminal is ever read through it.</strong>
       There is no read of that device anywhere in the app, and nothing is written to it. Only Ghostty
       is asked this; Terminal.app and iTerm2 answer where a character is drawn directly and never
       reach that code.</li>

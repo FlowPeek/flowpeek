@@ -70,8 +70,13 @@ public enum TerminalBufferScanner {
     public static let maximumUnfencedLines = 400
 
     /// Every diagram in `window`, in the order they appear.
+    /// - Parameter columns: the terminal's own column count, when it is known. It is what the
+    ///   width of a row can be compared against, which decides both which rows were broken by the
+    ///   width and whether the break destroyed a space. Absent, every rule below is exactly what it
+    ///   was before the grid was ever read.
     public static func blocks(
         in window: String,
+        columns: Int? = nil,
         minimumConfidence: MermaidDetection.Confidence = TerminalPeekPolicy.minimumConfidence
     ) -> [TerminalDiagramBlock] {
         guard !window.isEmpty, window.utf16.count <= maximumWindowCharacters else { return [] }
@@ -80,7 +85,7 @@ public enum TerminalBufferScanner {
 
         // Which rows are the tail of the row above them, so a line the terminal or a program broke
         // across rows is read as the one line it is.
-        let continuations = RowContinuation.flags(in: lines.map(\.text))
+        let continuations = RowContinuation.flags(in: lines.map(\.text), columns: columns)
 
         var blocks: [TerminalDiagramBlock] = []
         var index = 0
@@ -95,7 +100,10 @@ public enum TerminalBufferScanner {
                 let close = closingFence(lines, after: index, marker: open.marker, continuations)
                 let last = close ?? lines.count - 1
                 let held = open.mayHoldMermaid
-                    && append(&blocks, lines, from: index, to: last, fenced: true, continuations, minimumConfidence)
+                    && append(
+                        &blocks, lines, from: index, to: last, fenced: true, continuations,
+                        columns, minimumConfidence
+                    )
                 if held {
                     // Past the whole block, closing fence included: a fence inside a fence is
                     // content, and treating it as an opener would start a block in the middle of a
@@ -115,7 +123,10 @@ public enum TerminalBufferScanner {
             }
             if MermaidDetector.declaresDiagram(lines[index].text) {
                 let last = unfencedEnd(lines, from: index, continuations)
-                append(&blocks, lines, from: index, to: last, fenced: false, continuations, minimumConfidence)
+                append(
+                    &blocks, lines, from: index, to: last, fenced: false, continuations,
+                    columns, minimumConfidence
+                )
                 index = last + 1
                 continue
             }
@@ -136,9 +147,10 @@ public enum TerminalBufferScanner {
     public static func blocks(
         in window: String,
         visible: ClosedRange<Int>,
+        columns: Int? = nil,
         minimumConfidence: MermaidDetection.Confidence = TerminalPeekPolicy.minimumConfidence
     ) -> [TerminalDiagramBlock] {
-        blocks(in: window, minimumConfidence: minimumConfidence).filter {
+        blocks(in: window, columns: columns, minimumConfidence: minimumConfidence).filter {
             $0.lines.upperBound >= visible.lowerBound && $0.lines.lowerBound <= visible.upperBound
         }
     }
@@ -154,13 +166,14 @@ public enum TerminalBufferScanner {
         to last: Int,
         fenced: Bool,
         _ continuations: [Bool],
+        _ columns: Int?,
         _ minimumConfidence: MermaidDetection.Confidence
     ) -> Bool {
         // Trailing blank lines are dropped: a block that ends in whitespace would claim rows the
         // diagram does not occupy, and the outline is drawn around exactly these rows.
         var end = last
         while end > first, lines[end].text.trimmingCharacters(in: .whitespaces).isEmpty { end -= 1 }
-        let text = source(lines, from: first, to: end, continuations)
+        let text = source(lines, from: first, to: end, continuations, columns)
         let detection = MermaidDetector.detect(text)
         guard detection.confidence >= minimumConfidence else { return false }
         blocks.append(
@@ -205,7 +218,8 @@ public enum TerminalBufferScanner {
         _ lines: [Line],
         from first: Int,
         to end: Int,
-        _ continuations: [Bool]
+        _ continuations: [Bool],
+        _ columns: Int?
     ) -> String {
         let margin = lines[first].text.prefix { $0 == " " || $0 == "\t" }
         var pieces: [String] = []
@@ -219,7 +233,16 @@ public enum TerminalBufferScanner {
             let tail = !margin.isEmpty && text.hasPrefix(margin)
                 ? String(text.dropFirst(margin.count))
                 : text
-            pieces[pieces.count - 1] += tail
+            // The space the wrap ate. A program that breaks a line at a space does not keep it, so
+            // joining the pieces back together with nothing between them runs the last word of one
+            // row into the first word of the next -- `...source for` and `confidence` become
+            // `forconfidence`, which mermaid draws without complaint and which is not what anybody
+            // wrote. Only the grid can say whether there was a space there, so without it the join
+            // stays exactly as tight as it has always been.
+            let separator = columns.map {
+                RowContinuation.wrapDestroyedASpace(before: text, after: lines[index - 1].text, columns: $0)
+            } ?? false
+            pieces[pieces.count - 1] += (separator ? " " : "") + tail
         }
         return pieces.joined(separator: "\n")
     }

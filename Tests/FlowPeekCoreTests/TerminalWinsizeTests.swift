@@ -212,3 +212,78 @@ final class TerminalWinsizeTests: XCTestCase {
         XCTAssertNotNil(measured.grid(viewportSize: viewport, scale: 2), "the pty answers where none of that can")
     }
 }
+import XCTest
+@testable import FlowPeekCore
+
+/// A pane whose bracket never closes, and what may be done about it.
+///
+/// Measured on a real Ghostty window running a full-screen coding agent: `ws_row 22`,
+/// `ws_col 80`, `ws_ypixel 1280`, `ws_xpixel 2250`, in a 1129x676 point window at backing scale 2.
+/// The bracket there is 56 to 58 pixels and closes only at about 57 rows, and a program on the
+/// alternate screen never gives the evidence store a second reading to intersect with, because its
+/// buffer is exactly its viewport for ever. What used to happen was that the pane fell through to
+/// the row height remembered for the terminal -- 16 points, 32 pixels, from a different font -- and
+/// drew a frame a little over half the diagram's height, starting a row above it.
+final class TerminalWinsizeBracketTests: XCTestCase {
+    private let pane = TerminalWinsize(rows: 22, columns: 80, heightInPixels: 1280, widthInPixels: 2250)
+    private let viewport = CGSize(width: 1125, height: 640)
+
+    func testTheBracketDoesNotClose() {
+        XCTAssertNil(pane.cellHeightInPixels, "22 rows at a 57-pixel cell cannot pin it")
+        XCTAssertEqual(pane.cellHeightBracket, 56...58)
+        XCTAssertNil(pane.grid(viewportSize: viewport, scale: 2), "an exact answer is still refused")
+    }
+
+    /// The width closes where the height does not: there are far more columns than rows.
+    func testTheWidthIsStillExact() {
+        XCTAssertEqual(pane.cellWidthInPixels, 28)
+    }
+
+    func testTheMiddleOfANarrowBracketIsAnAnswer() throws {
+        let grid = try XCTUnwrap(pane.approximateGrid(viewportSize: viewport, scale: 2))
+        XCTAssertEqual(grid.rowHeight, 28.5, accuracy: 0.001)
+        XCTAssertEqual(grid.rows, 22)
+        XCTAssertEqual(grid.columns, 80)
+        // Half a point a row, which is a fifth of a row over the whole screen.
+        XCTAssertLessThanOrEqual(abs(grid.rowHeight - 28) * 22, 11)
+    }
+
+    /// The veto, which is the half that stops a wrong frame rather than starting a right one.
+    func testARememberedHeightFromAnotherFontIsRefused() {
+        XCTAssertFalse(pane.admits(rowHeight: 16, scale: 2), "32 pixels is nowhere near 56 to 58")
+        XCTAssertFalse(pane.admits(rowHeight: 20, scale: 2))
+        XCTAssertTrue(pane.admits(rowHeight: 28.5, scale: 2))
+        XCTAssertTrue(pane.admits(rowHeight: 28, scale: 2))
+        XCTAssertTrue(pane.admits(rowHeight: 29, scale: 2))
+    }
+
+    /// A reading with no bracket to offer vetoes nothing, so a terminal that reports no pixel size
+    /// leaves every other route exactly as it was.
+    func testAReadingWithNoPixelsVetoesNothing() {
+        let blind = TerminalWinsize(rows: 24, columns: 97, heightInPixels: 0, widthInPixels: 0)
+        XCTAssertNil(blind.cellHeightBracket)
+        XCTAssertTrue(blind.admits(rowHeight: 16, scale: 2))
+        XCTAssertNil(blind.approximateGrid(viewportSize: viewport, scale: 2))
+    }
+
+    /// And a bracket too wide to have a middle worth using still refuses, because past a couple of
+    /// pixels the drift is visible by the bottom of a diagram.
+    func testAWideBracketHasNoUsableMiddle() {
+        // Seven rows in 228 pixels: (28.5, 32.571], four candidates.
+        let short = TerminalWinsize(rows: 7, columns: 140, heightInPixels: 228, widthInPixels: 2250)
+        let bracket = try? XCTUnwrap(short.cellHeightBracket)
+        XCTAssertEqual(bracket?.count, 4)
+        XCTAssertNil(short.approximateGrid(viewportSize: CGSize(width: 1125, height: 114), scale: 2))
+    }
+
+    /// A pane that can pin its cell exactly still does, and the approximate route agrees with it.
+    func testAPaneThatClosesIsUnchanged() throws {
+        // The measured 40-row pane: 1280 pixels, cell 32.
+        let tall = TerminalWinsize(rows: 40, columns: 140, heightInPixels: 1280, widthInPixels: 2250)
+        XCTAssertEqual(tall.cellHeightInPixels, 32)
+        let exact = try XCTUnwrap(tall.grid(viewportSize: CGSize(width: 1125, height: 644), scale: 2))
+        XCTAssertEqual(exact.rowHeight, 16, accuracy: 0.001)
+        let approximate = try XCTUnwrap(tall.approximateGrid(viewportSize: CGSize(width: 1125, height: 644), scale: 2))
+        XCTAssertEqual(approximate.rowHeight, exact.rowHeight, accuracy: 0.001)
+    }
+}

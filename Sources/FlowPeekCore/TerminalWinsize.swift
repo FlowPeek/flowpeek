@@ -122,6 +122,40 @@ public struct TerminalWinsize: Hashable, Sendable {
         return candidates.count == 1 ? candidates.first : nil
     }
 
+    /// Every cell height the reading allows, as a range in device pixels.
+    ///
+    /// The bracket is the whole of what one reading knows, and it is worth having even when it
+    /// holds more than one integer, for two reasons. It bounds the answer -- a bracket two pixels
+    /// wide puts the row within half a point at a Retina scale, which is a frame nobody can see is
+    /// wrong -- and, more importantly, it *rules out* answers that came from somewhere else. A row
+    /// height remembered from a different font is not a near miss; measured on a 22-row pane whose
+    /// bracket was 56 to 58 pixels, the remembered one was 32, and the frame it drew covered a
+    /// little over half the diagram and started a row above it.
+    public var cellHeightBracket: ClosedRange<Int>? {
+        let candidates = Self.cellPixels(spanning: heightInPixels, cells: rows)
+        guard let low = candidates.min(), let high = candidates.max() else { return nil }
+        return low...high
+    }
+
+    /// How wide a bracket may be before its middle stops being an answer, in device pixels.
+    ///
+    /// Two, so the middle is at most one pixel out -- half a point at a Retina scale, which is a
+    /// fifth of a row over a forty-row screen. Wider than that and the drift is visible by the
+    /// bottom of a diagram, which is the mistake the bracket was built to avoid.
+    public static let widestUsableBracket = 2
+
+    /// Whether a row height worked out some other way is one this reading could have produced.
+    ///
+    /// This is the half that matters most. A pane where the bracket cannot be closed used to fall
+    /// through to whatever was remembered for the terminal, and nothing checked that the two had
+    /// anything to do with each other.
+    public func admits(rowHeight: CGFloat, scale: CGFloat) -> Bool {
+        guard let bracket = cellHeightBracket, scale > 0, rowHeight > 0 else { return true }
+        let pixels = rowHeight * scale
+        // A pixel of slack at each end: the bracket is whole pixels and a solved height is not.
+        return pixels >= CGFloat(bracket.lowerBound) - 1 && pixels <= CGFloat(bracket.upperBound) + 1
+    }
+
     /// The cell width in device pixels, when the bracket holds exactly one.
     ///
     /// Nearly always pinned, because there are far more columns than rows: 2250 over 140 columns
@@ -165,7 +199,32 @@ public struct TerminalWinsize: Hashable, Sendable {
     /// Known limitation: the top padding is half the total, which is what Ghostty does while
     /// `window-padding-balance` is off, its default. With it on, the top is capped and the excess
     /// pushed to the bottom, and nothing in `ws_*` says so.
+    /// The grid, allowing the cell height to be the middle of a narrow bracket.
+    ///
+    /// `grid` refuses anything it cannot pin exactly, which is right when there is another way to
+    /// find out -- and there is, for a pane whose buffer overflows its viewport, or one the reader
+    /// resizes. A full-screen program on the alternate screen offers neither: its buffer is exactly
+    /// its viewport for ever, so nothing is ever solved and nothing narrows. Measured on such a pane
+    /// -- 22 rows in 1280 pixels -- the bracket is 56 to 58 and closes only at about 57 rows. That
+    /// is the case this exists for, and a row within half a point beats no frame and beats a
+    /// remembered one from another font.
+    public func approximateGrid(viewportSize: CGSize, scale: CGFloat) -> TerminalCellGrid? {
+        guard let bracket = cellHeightBracket,
+              bracket.upperBound - bracket.lowerBound <= Self.widestUsableBracket else { return nil }
+        let middle = (bracket.lowerBound + bracket.upperBound) / 2
+        return grid(viewportSize: viewportSize, scale: scale, cellHeightInPixels: middle)
+    }
+
     public func grid(viewportSize: CGSize, scale: CGFloat) -> TerminalCellGrid? {
+        guard let pinned = cellHeightInPixels else { return nil }
+        return grid(viewportSize: viewportSize, scale: scale, cellHeightInPixels: pinned)
+    }
+
+    private func grid(
+        viewportSize: CGSize,
+        scale: CGFloat,
+        cellHeightInPixels cellHeight: Int
+    ) -> TerminalCellGrid? {
         // An unset winsize. Terminals that never report a pixel size answer zeroes, and zeroes have
         // no grid in them.
         guard rows > 0, columns > 0, heightInPixels > 0, widthInPixels > 0 else { return nil }
@@ -173,8 +232,9 @@ public struct TerminalWinsize: Hashable, Sendable {
         guard viewportSize.height.isFinite, viewportSize.width.isFinite,
               viewportSize.height > 0, viewportSize.width > 0 else { return nil }
 
-        // Two candidates in either bracket is a guess, and a guess is refused rather than picked.
-        guard let cellHeight = cellHeightInPixels, let cellWidth = cellWidthInPixels else { return nil }
+        // The width is still pinned exactly: there are far more columns than rows, so its bracket
+        // closes where the height's does not.
+        guard let cellWidth = cellWidthInPixels else { return nil }
 
         // The guard, in device pixels, on both axes. Vertically it catches the scale errors;
         // horizontally it catches a reading that belongs to another of this process's surfaces.

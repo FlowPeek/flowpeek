@@ -830,7 +830,12 @@ final class TerminalPeekMonitor {
                 if let answer = gridEvidence.grid(for: key, viewportSize: viewport.size) {
                     return answer.grid
                 }
+                // Exactly first, and the middle of a narrow bracket after it. A full-screen program
+                // on the alternate screen never gives the evidence store a second reading to
+                // intersect -- its buffer is its viewport for ever -- so without this its pane has
+                // no answer at all and falls through to whatever was remembered for the terminal.
                 return reading.winsize.grid(viewportSize: viewport.size, scale: scale)
+                    ?? reading.winsize.approximateGrid(viewportSize: viewport.size, scale: scale)
             }
         guard let first = candidates.first else { return nil }
         // Agreement, not a vote: a disagreement means the pane could be either, and either is a
@@ -982,6 +987,14 @@ final class TerminalPeekMonitor {
             // viewport heights, so it is worth keeping and the residual is not.
             solved = rowHeights[reading] ?? readingApp.flatMap(Self.rememberedRowHeight(for:))
         }
+        // And the terminal's own pty gets a veto over it. A number carried in from another window,
+        // another font or another run is not evidence about this pane, and drawing a frame from one
+        // the pane's own grid rules out is worse than drawing none.
+        if let solvedHeight = solved,
+           ptyAdmits(rowHeight: solvedHeight, viewport: viewport, before: deadline) == false {
+            solved = nil
+            if let reading { rowHeights[reading] = nil }
+        }
 
         let rowHeight: CGFloat
         let topPadding: CGFloat
@@ -1028,6 +1041,28 @@ final class TerminalPeekMonitor {
             // a scrolling buffer, and that arithmetic says nothing about how wide the grid is.
             columns: nil
         )
+    }
+
+    /// Whether the terminal's own pty would allow a row height this pane worked out another way.
+    ///
+    /// Nil when nothing was readable, which is every terminal but Ghostty and every pane whose pty
+    /// could not be found; the caller then has nothing to check against and carries on as before.
+    ///
+    /// This is the guard that was missing. A row height is remembered per terminal because the row
+    /// is a property of the font rather than of the window -- but the font changes, and a pane that
+    /// cannot solve its own grid would take the remembered number whatever it was. Measured on a
+    /// 22-row pane at 1280 pixels, whose cell is between 56 and 58: the remembered height was 32
+    /// pixels, and the frame it drew was a little over half the diagram's height and a row above it.
+    private func ptyAdmits(rowHeight: CGFloat, viewport: CGRect, before deadline: Date) -> Bool? {
+        guard readingApp == .ghostty, let pid = reading,
+              let scale = Self.backingScale(of: viewport) else { return nil }
+        let survey = ptyProbe.survey(of: pid, before: deadline)
+        let brackets = survey.readings.filter { $0.winsize.cellHeightBracket != nil }
+        guard !brackets.isEmpty else { return nil }
+        // One surface agreeing is enough: the reading that belongs to this pane is in there, and
+        // refusing because another tab is at a different font size would be refusing on the
+        // strength of a pane nobody is looking at.
+        return brackets.contains { $0.winsize.admits(rowHeight: rowHeight, scale: scale) }
     }
 
     /// The pane's whole value, when copying it is the cheaper way to read it.

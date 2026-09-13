@@ -80,11 +80,22 @@ let tint: (UInt8, UInt8, UInt8) = {
 /// wrong answer: the outline's own hairline runs the full width of the terminal, so picking the
 /// longest run of tint picked the frame's edge and reported the chip a whole diagram away from
 /// where it is. The pill is twenty points tall; a hairline is one or two.
-func chip(in image: NSBitmapImageRep, matching target: (UInt8, UInt8, UInt8), scale: Double) -> (Double, Double, Double, Double)? {
+func chip(
+    in image: NSBitmapImageRep,
+    matching target: (UInt8, UInt8, UInt8),
+    scale: Double,
+    within: (Int, Int)? = nil
+) -> (Double, Double, Double, Double)? {
     guard let data = image.bitmapData else { return nil }
     let bytes = image.bytesPerRow, samples = image.samplesPerPixel
     var spans: [Int: (Int, Int)] = [:]
-    for y in 0..<image.pixelsHigh {
+    // Where two frames are on screen there are two pills, and the taller of them is not necessarily
+    // the one being asked about. The rows searched are narrowed to the frame in question so each
+    // chip is found on its own frame rather than on whichever frame happens to win.
+    let first = within.map { max(0, $0.0) } ?? 0
+    let last = within.map { min(image.pixelsHigh - 1, $0.1) } ?? image.pixelsHigh - 1
+    guard first <= last else { return nil }
+    for y in first...last {
         var from = -1, to = -1, runStart = -1, longest = 0
         for x in 0..<image.pixelsWide {
             let o = y * bytes + x * samples
@@ -134,7 +145,16 @@ print("magenta \(magenta.map { "\($0.top)-\($0.bottom)" }.joined(separator: ",")
 print("cyan \(cyan.map { "\($0.top)-\($0.bottom)" }.joined(separator: ","))")
 print("yellow \(yellow.map { "\($0.top)-\($0.bottom)" }.joined(separator: ","))")
 print("blue \(blue.map { "\($0.top)-\($0.bottom)" }.joined(separator: ","))")
-if let box = chip(in: rep, matching: tint, scale: scale) {
+// Window-relative points, turned into rows of the capture: the band of the image the chip must be
+// found in. The sweep passes the frame it is asking about.
+let within: (Int, Int)? = {
+    guard let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--within=") })?.dropFirst(9)
+    else { return nil }
+    let parts = arg.split(separator: ",").compactMap { Double($0) }
+    guard parts.count == 2 else { return nil }
+    return (Int(parts[0] * scale), Int(parts[1] * scale))
+}()
+if let box = chip(in: rep, matching: tint, scale: scale, within: within) {
     print("chip \(box.0),\(box.1),\(box.2),\(box.3)")
 } else {
     print("chip none")

@@ -11,19 +11,29 @@ rows that are handed to it; this pins what the reader sees.
 
 ## How it decides
 
-Nothing FlowPeek believes is used. The printer puts a coloured row immediately above the block and
-another immediately below it, and a third one row below that:
+Nothing FlowPeek believes is used. The printer puts a coloured row immediately above **each** block
+and another immediately below it:
 
 ```
-[magenta]  ← one row, immediately above the block
+[blue]     ← one row above the first marker, so the pitch is
+             measurable when the top has scrolled away
+[magenta]  ← one row, immediately above block 0
   mermaid
   flowchart TD          ┐
-      A --> B           │ the block
+      A --> B           │ block 0
       ...               ┘
 [cyan]     ← one row, immediately below it
-[yellow]   ← one row below that, so the row pitch is measurable
-           when the diagram is taller than the window
+[magenta]  ← and again for block 1, where there is one
+  mermaid
+  sequenceDiagram       ┐ block 1
+      ...               ┘
+[cyan]
+[yellow]   ← one row below the last marker, so the row pitch is
+             measurable when the diagram is taller than the window
 ```
+
+A pair per block rather than one pair around everything, because that is the only way to say which
+frame belongs to which diagram. Two markers, two frames, paired top to bottom.
 
 The checker finds those bands in the screenshot by their colour, takes the row pitch from the
 distance between two bands' **centres** — centres rather than edges, because a band's edges are
@@ -36,11 +46,44 @@ checked for not claiming rows above the window rather than against a marker, and
 carries the pitch.
 
 The hint box is the frame **and** the chip that names the diagram and says which key opens it, so
-the chip is checked too. It only appears once the pointer is near, so a second capture is taken
-with the pointer in the middle of the frame, and the chip is found by the hint tint: the tallest
-block of tinted pixels that is wider than a glyph and narrower than half the window. Both of those
-bounds are load-bearing -- without the upper one the finder picks the frame's own hairline, which
-runs the whole width of the terminal, and reports the chip a diagram away from where it is.
+the chip is checked too. It only appears once the pointer is near, so every frame is looked at again
+with the pointer on it, and the chip is found by the hint tint: the tallest block of tinted pixels
+that is wider than a glyph and narrower than half the window, searched only in the rows around the
+frame being asked about. All three bounds are load-bearing -- without the width limit the finder
+picks the frame's own hairline, which runs the whole width of the terminal; without the row limit it
+picks whichever of two chips happens to be taller.
+
+## Does the checker work
+
+A suite that has only ever said PASS proves nothing about a build; it may just be unable to say
+anything else. `selftest.py` feeds the checker screens that are made up rather than captured — one
+correct, then the same one broken in each of the ways a real fault would break it: the frame a row
+too low, the frame swallowing the label row above the diagram, the chip missing, the chip floating
+off the frame, one frame drawn around both diagrams, and the two frames **swapped** so that each
+sits on the other's diagram. That last one is the case the old two-diagram check could not see at
+all, because it counted frames instead of locating them.
+
+It needs no terminal, no app and no window server, so it runs anywhere in about a second, and the
+battery runs it first — if the checker cannot reject a wrong screen, nothing after it means
+anything.
+
+## Why it does not sleep
+
+Nothing here waits a fixed number of seconds for a result. A sweep that sleeps and then measures
+gives one answer on an idle machine and another on a busy one, and both look equally confident --
+this harness has been wrong that way twice, once measuring a window that was still closing and once
+capturing a chip mid-fade, and both times the product was fine. So it polls for the state it needs,
+bounded, and says so when the state never arrives: for the window to exist, for the set of frames to
+stop changing, for the chip to have faded in.
+
+Two other rules follow from the same idea. The terminal window is given a fixed position as well as
+a fixed size, so the coordinates in a report do not depend on where macOS felt like cascading it.
+And a case that produces no verdict at all counts as a **failure**, not as silence -- counting only
+the lines that said PASS or FAIL is how two launch failures once vanished from a battery's totals
+and left it reading clean.
+
+`repeat.sh` is the check on all of that: it runs one case several times and compares the reports
+character for character.
 
 ## Running it
 
@@ -48,11 +91,13 @@ Needs a Debug build installed and granted Accessibility — `zsh Scripts/install
 Ghostty. It opens and closes its own terminal windows and touches nothing else.
 
 ```sh
+python3 Scripts/framesweep/selftest.py   # the checker's own cases; no app or terminal needed
 zsh Scripts/framesweep/all.sh       # everything below, in order
 zsh Scripts/framesweep/matrix.sh    # output shape x screen x font size
 zsh Scripts/framesweep/matrix2.sh   # wide cells, a diagram taller than the window, scrolled past
 zsh Scripts/framesweep/scroll.sh back agent 14 60 4   # the frame across five scroll positions
 zsh Scripts/framesweep/sweep.sh agent alt 20 0        # one case
+zsh Scripts/framesweep/repeat.sh 4 two no 16 0       # the same case four times, must agree
 ```
 
 `sweep.sh <shape> <no|alt> <font size> <leading rows>`, where the shape is `agent` (no fence, a dim
@@ -92,6 +137,9 @@ every one was found by looking at the capture rather than at the number:
   again too tall. Runs closer than ten pixels are one band now, and the tallest band wins.
 - A large font left the top marker off screen. The window is grown to 1180x880 and the printer
   repaints on `SIGWINCH`.
+- Two diagrams on one screen were checked by **counting** frames, not by locating them: the case
+  passed as long as two frames existed anywhere. A build that drew the right number of frames in the
+  wrong two places would have passed it. Each block carries its own markers now.
 - The chip finder took the longest run of tint, which is the frame's edge, not the chip; then
   grouping rows by where their run started split the pill into slivers, because the white text
   through its middle moves the run. Height is what tells a pill from a hairline.

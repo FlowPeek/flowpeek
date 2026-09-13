@@ -56,35 +56,40 @@ SECOND = """sequenceDiagram
     A->>B: holds Option and clicks
     B-->>A: opens the picture"""
 
-def body(shape, width):
+def blocks(shape, width):
+    """The diagram blocks to print, each as its own list of rows.
+
+    A list rather than one flat run of rows because a screen with two diagrams on it has to be
+    checked the way a reader sees it: each block gets its own pair of marker rows, so each frame is
+    measured against the diagram it is supposed to be around rather than against the pair of them.
+    Counting frames -- which is all this did before -- passes a build that draws two frames in the
+    wrong two places.
+    """
     source = {"korean": KOREAN, "long": LONG}.get(shape, DIAGRAM)
-    rows = []
     if shape == "two":
-        # Two blocks on one screen: each must get its own frame, and neither may swallow the other.
+        out = []
         for block in (DIAGRAM, SECOND):
-            rows.append(MARGIN + "mermaid")
+            rows = [MARGIN + "mermaid"]
             for line in block.split("\n"):
                 rows.extend(wrap(MARGIN + line, width))
-            rows.append("")
-        return rows
+            out.append(rows)
+        return out
     if shape in ("agent", "korean", "long"):
-        rows.append(MARGIN + "mermaid")
+        rows = [MARGIN + "mermaid"]
         for line in source.split("\n"):
             rows.extend(wrap(MARGIN + line, width))
-    elif shape == "fenced":
-        rows.append("```mermaid")
-        rows.extend(source.split("\n"))
-        rows.append("```")
-    else:  # plain
-        rows.extend(source.split("\n"))
-    return rows
+        return [rows]
+    if shape == "fenced":
+        return [["```mermaid"] + source.split("\n") + ["```"]]
+    return [source.split("\n")]
 
 def show(*_):
     width = columns()
-    rows = body(SHAPE, width)
-    # The checker needs to know how many rows sit between the markers; counting them off a
-    # screenshot would be guessing, and this is the one thing only the printer knows.
-    open("/tmp/fpsweep-rows", "w").write(str(len(rows)))
+    groups = blocks(SHAPE, width)
+    # The checker needs to know how many rows sit between each pair of markers; counting them off a
+    # screenshot would be guessing, and this is the one thing only the printer knows. One count per
+    # block, in the order they are printed.
+    open("/tmp/fpsweep-rows", "w").write(",".join(str(len(g)) for g in groups))
     # And its own pid, so the harness can ask for more output without having to guess which process
     # to signal -- matching the command line also matches the terminal that launched it, and a
     # stray SIGUSR1 kills the terminal.
@@ -99,10 +104,14 @@ def show(*_):
     # A band one row above the top marker, so the row pitch is measurable when the reader has
     # scrolled back and the bottom of the diagram is below the window.
     print("\033[48;2;0;0;255m" + "FPSWEEP-PITCH".ljust(width) + "\033[0m")
-    print("\033[48;2;255;0;255m" + "FPSWEEP-TOP".ljust(width) + "\033[0m")
-    for row in rows:
-        print(row)
-    print("\033[48;2;0;255;255m" + "FPSWEEP-BOTTOM".ljust(width) + "\033[0m")
+    # One pair of markers per block. Where there are two, block one's bottom marker and block two's
+    # top marker are adjacent rows; they stay apart in the reading because they are different
+    # colours, and each is found by its own colour rather than by its position.
+    for index, group in enumerate(groups):
+        print("\033[48;2;255;0;255m" + f"FPSWEEP-TOP-{index}".ljust(width) + "\033[0m")
+        for row in group:
+            print(row)
+        print("\033[48;2;0;255;255m" + f"FPSWEEP-BOTTOM-{index}".ljust(width) + "\033[0m")
     # A third band one row below the bottom marker, so the row pitch can be measured even when the
     # diagram is taller than the window and the top marker is off screen.
     print("\033[48;2;255;255;0m" + f"cols={width} shape={SHAPE}".ljust(width) + "\033[0m")

@@ -129,9 +129,11 @@ func chip(in image: NSBitmapImageRep, matching target: (UInt8, UInt8, UInt8), sc
 let magenta = bands(in: rep, matching: (255, 0, 255), scale: scale)
 let cyan = bands(in: rep, matching: (0, 255, 255), scale: scale)
 let yellow = bands(in: rep, matching: (255, 255, 0), scale: scale)
+let blue = bands(in: rep, matching: (0, 0, 255), scale: scale)
 print("magenta \(magenta.map { "\($0.top)-\($0.bottom)" }.joined(separator: ","))")
 print("cyan \(cyan.map { "\($0.top)-\($0.bottom)" }.joined(separator: ","))")
 print("yellow \(yellow.map { "\($0.top)-\($0.bottom)" }.joined(separator: ","))")
+print("blue \(blue.map { "\($0.top)-\($0.bottom)" }.joined(separator: ","))")
 if let box = chip(in: rep, matching: tint, scale: scale) {
     print("chip \(box.0),\(box.1),\(box.2),\(box.3)")
 } else {

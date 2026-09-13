@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print a diagram into a terminal in one of several shapes, with markers that make the
 diagram's first and last row findable in a screenshot without reading anything else."""
-import fcntl, signal, struct, sys, termios, time
+import fcntl, os, signal, struct, sys, termios, time
 
 MARGIN = "  "
 KOREAN = """flowchart TD
@@ -85,6 +85,10 @@ def show(*_):
     # The checker needs to know how many rows sit between the markers; counting them off a
     # screenshot would be guessing, and this is the one thing only the printer knows.
     open("/tmp/fpsweep-rows", "w").write(str(len(rows)))
+    # And its own pid, so the harness can ask for more output without having to guess which process
+    # to signal -- matching the command line also matches the terminal that launched it, and a
+    # stray SIGUSR1 kills the terminal.
+    open("/tmp/fpsweep-pid", "w").write(str(os.getpid()))
     if ALTERNATE:
         sys.stdout.write("\033[?1049h")
     sys.stdout.write("\033[2J\033[H")
@@ -92,6 +96,9 @@ def show(*_):
         print(f"LEADIN{i:03d} ordinary output before the diagram")
     # Marker rows in colours nothing else on screen uses, so a screenshot can be measured
     # without reading any of the text in it.
+    # A band one row above the top marker, so the row pitch is measurable when the reader has
+    # scrolled back and the bottom of the diagram is below the window.
+    print("\033[48;2;0;0;255m" + "FPSWEEP-PITCH".ljust(width) + "\033[0m")
     print("\033[48;2;255;0;255m" + "FPSWEEP-TOP".ljust(width) + "\033[0m")
     for row in rows:
         print(row)
@@ -108,6 +115,12 @@ if __name__ == "__main__":
     # Reprint whenever the window changes size, so the harness can grow the window until everything
     # it needs to measure is on screen.
     signal.signal(signal.SIGWINCH, show)
+    # More output on demand, which is how a terminal really scrolls: the agent keeps talking and the
+    # diagram walks up the screen. Synthetic wheel events do not move Ghostty at all.
+    signal.signal(signal.SIGUSR1, lambda *_: (
+        [print(f"TRAILING{n:03d} more output after the diagram") for n in range(3)],
+        sys.stdout.flush(),
+    ))
     show()
     while True:
         time.sleep(60)

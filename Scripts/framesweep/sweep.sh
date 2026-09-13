@@ -4,14 +4,28 @@ set -e
 HERE=${0:a:h}
 shape=$1; screen=$2; font=$3; lead=$4
 : ${FPTINT:=009E73}
+: ${FPUSER:=1510}
 # Build the two measuring tools the first time, next to the scripts.
-[[ -x "$HERE/bands" ]] || swiftc -O "$HERE/bands.swift" -o "$HERE/bands"
-[[ -x "$HERE/overlay" ]] || swiftc -O "$HERE/overlay.swift" -o "$HERE/overlay"
+for tool in bands overlay point scrollto; do
+  [[ -x "$HERE/$tool" ]] || swiftc -O "$HERE/$tool.swift" -o "$HERE/$tool"
+done
 /usr/bin/open -na /Applications/Ghostty.app --args --font-size=$font --title=FPSWEEP \
   --command="/usr/bin/python3 $HERE/sweepprint.py $shape $screen $lead"
-sleep 5
-pid=$(pgrep -x ghostty | grep -v '^1510$' | head -1)
-[[ -z "$pid" ]] && { print "  LAUNCH FAILED"; exit 1 }
+# Wait for the window rather than for a fixed time. Run back to back, the previous terminal is
+# still closing when the next is asked for, and a stale pid put two of twenty-four cases into a
+# failure that reproduced nowhere on its own.
+pid=""
+for attempt in $(seq 1 20); do
+  sleep 1
+  if [[ -n "$($HERE/overlay 2>/dev/null | grep '^window ')" ]]; then
+    for candidate in $(pgrep -x ghostty); do
+      [[ "$candidate" == "$FPUSER" ]] && continue
+      pid=$candidate
+    done
+    [[ -n "$pid" ]] && break
+  fi
+done
+[[ -z "$pid" ]] && { print "  LAUNCH FAILED (no FPSWEEP window after 20s)"; exit 1 }
 # Grow the window so a large font still leaves both markers on screen, and let the printer
 # repaint at the new size.
 /usr/bin/osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid) to set size of window 1 to {1180, 880}" >/dev/null 2>&1

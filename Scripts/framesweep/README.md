@@ -48,14 +48,23 @@ Needs a Debug build installed and granted Accessibility — `zsh Scripts/install
 Ghostty. It opens and closes its own terminal windows and touches nothing else.
 
 ```sh
+zsh Scripts/framesweep/all.sh       # everything below, in order
 zsh Scripts/framesweep/matrix.sh    # output shape x screen x font size
 zsh Scripts/framesweep/matrix2.sh   # wide cells, a diagram taller than the window, scrolled past
-zsh Scripts/framesweep/sweep.sh agent alt 20 0   # one case
+zsh Scripts/framesweep/scroll.sh back agent 14 60 4   # the frame across five scroll positions
+zsh Scripts/framesweep/sweep.sh agent alt 20 0        # one case
 ```
 
 `sweep.sh <shape> <no|alt> <font size> <leading rows>`, where the shape is `agent` (no fence, a dim
 `mermaid` label and a two-space margin, the way a coding agent prints one), `fenced`, `plain`,
-`korean` (two cells to a character) or `long` (taller than any window).
+`korean` (two cells to a character), `long` (taller than any window) or `two` (two diagrams at
+once, which must get two separate frames).
+
+`scroll.sh <back|output> <shape> <font size> <leading rows> <ticks>` checks the same thing while the
+rows are moving: `back` scrolls the reader up the scrollback, so the diagram's bottom leaves the
+window a row at a time; `output` prints further rows, so the diagram climbs the window under the
+frame. Each tick is checked on its own, and a tick where neither marker is left on screen is skipped
+rather than guessed at.
 
 ## What it has caught
 
@@ -64,6 +73,13 @@ zsh Scripts/framesweep/sweep.sh agent alt 20 0   # one case
 - Every join refused after a window was resized, because the pty reported the new width while the
   rows on screen still carried the old one.
 - An `erDiagram` joined into two lines, because `||--o{` was read as an opened bracket.
+- A row height solved from the pane's own measurements, one pixel under what the pty said the cell
+  was, at one scroll position out of five. The frame there covered the label row above the diagram
+  and cut the last line off the bottom. The terminal is asked first now and the solver is held to
+  its answer.
+- The padding that followed from that: pinning the solved row height to the pty's without also
+  taking the pty's padding pushed the mismatch into the leftover and moved a frame fourteen points
+  down the screen, its top edge through the declaration.
 
 ## What it has got wrong itself
 

@@ -30,7 +30,8 @@ def band(text, key):
 shape, window, outline, bands = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 wx, wy, ww, wh = [float(v) for v in window.split(",")]
 top_marker, bottom_marker = band(bands, "magenta"), band(bands, "cyan")
-pitch_marker = band(bands, "yellow")
+pitch_below = band(bands, "yellow")
+pitch_above = band(bands, "blue")
 try:
     printed = int(open("/tmp/fpsweep-rows").read().strip())
 except Exception:
@@ -44,10 +45,12 @@ if top_marker is None and bottom_marker is None:
 # and the top of it has scrolled away -- which is the case worth checking, not one to skip.
 if top_marker is not None and bottom_marker is not None and printed:
     row = (bottom_marker - top_marker) / (printed + 1)
-elif bottom_marker is not None and pitch_marker is not None:
-    row = pitch_marker - bottom_marker
+elif bottom_marker is not None and pitch_below is not None:
+    row = pitch_below - bottom_marker
+elif top_marker is not None and pitch_above is not None:
+    row = top_marker - pitch_above
 else:
-    print(f"  SKIP  cannot measure the row pitch (top={top_marker} bottom={bottom_marker} pitch={pitch_marker})")
+    print(f"  SKIP  cannot measure the row pitch (top={top_marker} bottom={bottom_marker})")
     sys.exit(0)
 
 want_top = (wy + top_marker + row / 2 + row * BEFORE[shape] - INSET) if top_marker is not None else None

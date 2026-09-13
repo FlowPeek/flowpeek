@@ -15,5 +15,6 @@ vendor/bundle/
 Scripts/framesweep/bands
 Scripts/framesweep/overlay
 Scripts/framesweep/point
-Scripts/framesweep/case.png
-Scripts/framesweep/case-hover.png
+Scripts/framesweep/scrollto
+Scripts/framesweep/wheel
+Scripts/framesweep/*.png

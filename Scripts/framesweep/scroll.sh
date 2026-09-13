@@ -8,6 +8,15 @@
 # Synthetic wheel events do not move Ghostty at all -- measured -- so neither is faked with one.
 set -e
 HERE=${0:a:h}
+# The hint tint, taken from the build under test rather than assumed.
+#
+# It was hard-coded to the default green, and the default is not what anyone is running: the first
+# sweep against a real installation reported the chip missing on every case, because that app is set
+# to #CC79A7 and the finder was hunting for #009E73. The frame was exactly where it should be in all
+# of them. A tint is the reader's choice, so it is an input to the test, not a thing under test --
+# the geometry below is still measured off the screen and nothing FlowPeek computes is used.
+: ${FPDOMAIN:=$(pgrep -f "FlowPeek Debug.app" >/dev/null && print com.selenehyun.FlowPeek.debug || print com.selenehyun.FlowPeek)}
+: ${FPTINT:=$(defaults read $FPDOMAIN flowpeek.hint.tint 2>/dev/null | tr -d '#[:space:]')}
 : ${FPTINT:=009E73}
 : ${FPUSER:=1510}
 mode=${1:-output}; shape=${2:-agent}; font=${3:-14}; lead=${4:-0}; ticks=${5:-3}

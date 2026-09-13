@@ -896,14 +896,45 @@ final class TerminalPeekMonitor {
         let buffer = self.buffer(of: pane, characters: characters, before: deadline)
         let fills = contentSize.height <= viewport.height + TerminalPeekPolicy.overflowTolerance
 
-        if let inferred = inferredGrid(
+        // What the terminal says about its own cell, asked first because it is the better answer and
+        // because the sieve below can be told it. The sieve solves a row height out of the pane's
+        // measurements and lands one pixel out often enough to matter: measured on a pane whose pty
+        // pinned the cell at 34 device pixels exactly, the sieve settled on 32 at one scroll
+        // position out of five, and the frame there covered the label row above the diagram and cut
+        // the last line off the bottom. What the sieve is still needed for is the line lengths --
+        // only they say how many rows a line wider than the pane occupies -- so it is constrained
+        // rather than skipped.
+        let cell = ptyCellGrid(
+            viewport: viewport, lineCount: lineCount, contentSize: contentSize, before: deadline
+        )
+
+        // Where the terminal answered for its own cell, the padding is its answer too. The sieve's
+        // padding is whatever is left over once its rows are counted, so constraining its row
+        // height to the terminal's pushes the mismatch into that leftover -- measured, a frame
+        // shifted fourteen points down the screen, its top edge drawn through the declaration
+        // instead of above it. The pty knows what the padding really is: the pane's height less the
+        // pixels the grid is drawn in.
+        let sieved = inferredGrid(
             pane,
             characters: characters,
             lineCount: lineCount,
             contentHeight: contentSize.height,
             viewport: viewport,
+            knownRowHeight: cell?.rowHeight,
             before: deadline
-        ), let rows = TerminalGridInference.visibleRows(
+        ).map { found -> (grid: TerminalGrid, lineLengths: [Int]) in
+            guard let cell else { return found }
+            return (
+                TerminalGrid(
+                    columns: cell.columns,
+                    rowHeight: cell.rowHeight,
+                    padding: cell.topPadding * 2
+                ),
+                found.lineLengths
+            )
+        }
+
+        if let inferred = sieved, let rows = TerminalGridInference.visibleRows(
             offset: offset,
             viewportHeight: viewport.height,
             grid: inferred.grid,
@@ -937,11 +968,11 @@ final class TerminalPeekMonitor {
             )
         }
 
-        // What the terminal itself says, asked before anything is solved. Measured on Ghostty
-        // 1.3.1: one ioctl answered a 16.000-point row where three readings of AXContentSize had
-        // been needed to solve the same number, and it answers in a full-screen program, where
-        // there is nothing to solve from at all.
-        if let cell = ptyCellGrid(viewport: viewport, lineCount: lineCount, contentSize: contentSize, before: deadline) {
+        // What the terminal itself says, where the sieve above found nothing to attach line lengths
+        // to. Measured on Ghostty 1.3.1: one ioctl answered a 16.000-point row where three readings
+        // of AXContentSize had been needed to solve the same number, and it answers in a full-screen
+        // program, where there is nothing to solve from at all.
+        if let cell {
             guard let visible = TerminalPeekPolicy.visibleLines(
                 offset: offset,
                 viewportHeight: viewport.height,
@@ -1104,6 +1135,7 @@ final class TerminalPeekMonitor {
         lineCount: Int,
         contentHeight: CGFloat,
         viewport: CGRect,
+        knownRowHeight: CGFloat? = nil,
         before deadline: Date
     ) -> (grid: TerminalGrid, lineLengths: [Int])? {
         guard characters <= TerminalBufferScanner.maximumWindowCharacters,
@@ -1139,8 +1171,15 @@ final class TerminalPeekMonitor {
                 viewportHeight: viewport.height,
                 paneWidth: viewport.width,
                 lineLengths: lengths,
-                rowHeight: rowHeights[pid] ?? readingApp.flatMap(Self.rememberedRowHeight(for:))
+                rowHeight: knownRowHeight ?? rowHeights[pid] ?? readingApp.flatMap(Self.rememberedRowHeight(for:))
             )
+        }
+        // Where the terminal answered for its own cell, nothing the sieve worked out may disagree
+        // with it. This is the guard the scroll sweep was written to find: the sieve's answer is a
+        // solution to the pane's measurements rather than a measurement, and one pixel of drift puts
+        // the frame a row out by the bottom of a diagram.
+        if let known = knownRowHeight {
+            candidates = candidates.filter { abs($0.rowHeight - known) < 0.5 }
         }
         gridCandidates[pid] = candidates
         guard let grid = TerminalGridInference.agreed(candidates, lineLengths: lengths) else { return nil }

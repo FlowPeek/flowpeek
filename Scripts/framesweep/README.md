@@ -84,7 +84,7 @@ rather than guessed at.
 ## What it has got wrong itself
 
 Worth recording, because each of these would have passed a broken build or failed a working one, and
-all four were found by looking at the capture rather than at the number:
+every one was found by looking at the capture rather than at the number:
 
 - Measuring a band by its edges rather than its centre made the row pitch wander by a third between
   captures, because the edges are anti-aliased.
@@ -95,3 +95,12 @@ all four were found by looking at the capture rather than at the number:
 - The chip finder took the longest run of tint, which is the frame's edge, not the chip; then
   grouping rows by where their run started split the pill into slivers, because the white text
   through its middle moves the run. Height is what tells a pill from a hairline.
+- The tint the chip is found by was hard-coded to the default green, and the default is not what
+  anyone runs. The first sweep against a real installation reported the chip missing on all
+  twenty-four cases; that app is set to `#CC79A7` and the finder was hunting for `#009E73`. The
+  frame was exactly where it belonged in every one of them. The tint now comes from the defaults
+  domain of whichever build is running -- a tint is the reader's choice, an input to the test rather
+  than a thing under test, and the geometry is still measured off the screen.
+- Waiting a fixed five seconds for a terminal to open put two cases of twenty-four onto the previous
+  case's window, which was still closing, and failed them for a fault that reproduced nowhere on its
+  own. It waits for a window to actually be there now.

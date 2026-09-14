@@ -443,6 +443,16 @@
 "settings.history.age.quarter" = "세 달";
 
 /* The hint box's colour, which a reader with colour-vision deficiency may have to choose. */
+"settings.theme" = "다이어그램 스타일";
+"settings.theme.short" = "다이어그램을 그리는 방식입니다. 여기서 바꾸면 모든 다이어그램에 적용되고, 미리보기에서는 이 설정을 바꾸지 않고 한 다이어그램만 다른 스타일로 볼 수 있습니다.";
+"settings.theme.description" = "기본값은 시스템 글꼴과 시스템 팔레트로, 선택하신 강조 색을 써서 그립니다. Editorial은 실험 기능으로, github.com/cathrynlavery/diagram-design의 스타일을 흉내 낸 것입니다. 종이와 잉크, 머리카락 굵기의 테두리, 한두 곳에만 쓰는 강조 색, 넉넉한 여백이 특징입니다. 테마를 읽는 다이어그램 종류에는 대부분 적용되지만, xychart나 quadrant처럼 색을 스스로 칠하는 차트는 원래 팔레트를 유지합니다. 어느 쪽이든 Mac 밖으로 나가는 것은 없습니다.";
+"theme.system.name" = "시스템";
+"theme.system.blurb" = "시스템 글꼴과 팔레트, 선택하신 강조 색.";
+"theme.editorial.name" = "Editorial";
+"theme.editorial.blurb" = "종이와 잉크, 가는 테두리, 절제된 강조 색.";
+"theme.experimental.badge" = "실험";
+"preview.theme" = "다이어그램 스타일";
+"preview.theme.help" = "이 다이어그램만 다른 스타일로 그립니다. 전체를 바꾸려면 설정에서 바꾸세요.";
 "settings.hint-tint" = "힌트 색상";
 "settings.hint-tint.short" = "테두리와 버튼을 어떤 색으로 그릴지 정합니다.";
 "settings.hint-tint.description" = "힌트는 두 가지를 색으로 말합니다. 테두리는 여기에 다이어그램이 있다는 뜻이고, 버튼은 이걸 누르면 열린다는 뜻입니다. 강조색이 뒤의 글자와 구분되지 않는 색이라면 둘 다 전달되지 않습니다. 스와치는 바로 그 목적으로 공개된 팔레트로, 흔한 색약에서도 서로 구분됩니다. 그리고 오른쪽 색 상자로는 어떤 색이든 고를 수 있습니다 — 확실히 보이는 색은 결국 본인이 보이는 색뿐이니까요. 이 창의 모든 그림이 고른 색을 따라가므로, 고른 그대로를 만나게 됩니다.";

@@ -460,6 +460,25 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // Beside the tint, because both are about how a diagram is drawn rather than about
+            // when one is found. The rows come from the catalogue, so a theme added later appears
+            // here without this file being opened.
+            settingsCard {
+                HStack(alignment: .top, spacing: 14) {
+                    settingIcon("paintpalette", color: .orange)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("settings.theme").font(.headline)
+                        Text("settings.theme.short")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 14)
+                }
+                ThemePicker(selection: $app.previewThemeID)
+                explanation(ThemePickScene(), detail: "settings.theme.description")
+            }
+
             settingsCard {
                 HStack(alignment: .top, spacing: 14) {
                     settingIcon("eyedropper.halffull", color: .pink)
@@ -986,5 +1005,52 @@ struct SettingsView: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
         .background(Color.primary.opacity(0.07), in: Capsule())
+    }
+}
+
+/// The list of looks, wherever one is chosen.
+///
+/// It reads `MermaidThemeCatalogue.all` rather than naming themes, so adding one is a catalogue
+/// entry and two strings. The shape changes with the number of them: a segmented control reads at a
+/// glance while there are few, and stops fitting anywhere once there are several, at which point a
+/// menu is the honest control. That threshold is here, in one place, rather than in each view that
+/// offers the choice.
+struct ThemePicker: View {
+    @Binding var selection: MermaidThemeID
+    /// Past this many, a segmented control is wider than any chrome it could sit in.
+    static let segmentedLimit = 3
+
+    static var fitsSegmented: Bool { MermaidThemeCatalogue.all.count <= segmentedLimit }
+
+    // Two branches rather than one styled picker: `.segmented` and `.menu` are different types, so
+    // the choice has to be made in the view tree.
+    @ViewBuilder var body: some View {
+        if Self.fitsSegmented {
+            picker.pickerStyle(.segmented)
+        } else {
+            picker.pickerStyle(.menu)
+        }
+    }
+
+    private var picker: some View {
+        Picker("settings.theme", selection: $selection) {
+            ForEach(MermaidThemeCatalogue.all, id: \.id) { descriptor in
+                ThemePickerLabel(descriptor: descriptor).tag(descriptor.id)
+            }
+        }
+        .labelsHidden()
+    }
+}
+
+/// A theme's name, with the experiment said out loud rather than implied by its position in a list.
+struct ThemePickerLabel: View {
+    let descriptor: MermaidThemeDescriptor
+
+    var body: some View {
+        if descriptor.isExperimental {
+            Text("\(Text(LocalizedStringKey(descriptor.nameKey)))  \(Text("theme.experimental.badge").font(.caption2))")
+        } else {
+            Text(LocalizedStringKey(descriptor.nameKey))
+        }
     }
 }

@@ -145,6 +145,12 @@ final class MermaidEngineView: NSObject, MermaidRendering {
     }
 
     /// Fit and zoom are applied to the wrapper, never to the `<svg>`, so text stays vector-crisp.
+    /// Paint the page behind the drawing, or clear it. Empty clears, which is what a transparent
+    /// canvas wants.
+    func setPaper(_ hex: String) {
+        command("window.__flowpeek.setPaper(arguments.hex)", ["hex": hex])
+    }
+
     func setScale(_ value: Double) { command(MermaidEnginePage.setScaleInvocation, ["scale": value]) }
 
     func zoom(by factor: Double) { command(MermaidEnginePage.zoomInvocation, ["factor": factor]) }
@@ -485,7 +491,17 @@ enum MermaidEngineAssets {
 @MainActor
 enum MermaidThemeFactory {
     static func current(_ appearance: MacMermaidTheme.Appearance) -> MacMermaidTheme {
-        MacMermaidTheme(
+        current(appearance, theme: MermaidThemeCatalogue.fallback)
+    }
+
+    /// The same, for a named theme. Everything about which theme is chosen lives above this; here
+    /// it is only the three things the app knows and the catalogue does not.
+    static func current(
+        _ appearance: MacMermaidTheme.Appearance,
+        theme id: MermaidThemeID
+    ) -> MacMermaidTheme {
+        MermaidThemeCatalogue.theme(
+            id,
             appearance: appearance,
             accentHex: NSColor.controlAccentColor.hexRGB,
             increaseContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
@@ -499,13 +515,21 @@ enum MermaidThemeFactory {
     }
 
     static func selfTestPayloadJSON(_ theme: MacMermaidTheme) -> String {
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "renderID": "fp-selftest",
             "seed": "flowpeek-selftest",
             "fontFamily": theme.fontFamily,
             "themeVariables": theme.variables,
             "themeCSS": theme.css,
         ]
+        // The self test exists to prove the engine can draw with the theme it is about to be given,
+        // so it has to be given the same config -- an arrangement that breaks rendering would
+        // otherwise pass the health check and fail on the reader's first diagram.
+        if !theme.arrangement.isEmpty,
+           let data = try? JSONEncoder().encode(theme.arrangement),
+           let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            object["arrangement"] = fields
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               let json = String(data: data, encoding: .utf8) else { return "{}" }
         return json

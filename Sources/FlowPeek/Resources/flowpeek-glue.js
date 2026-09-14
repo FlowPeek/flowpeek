@@ -122,7 +122,45 @@
       themeCSS: p.themeCSS || ""
     };
     if (p.fontFamily) cfg.fontFamily = p.fontFamily;
+    applyArrangement(cfg, p.arrangement);
     return cfg;
+  }
+
+  // The spacing and edge shape a theme asked for, spread across the per-diagram config blocks that
+  // actually read them. mermaid has no single place for these: flowchart, sequence, state and class
+  // each keep their own, and a value set on the wrong one is silently ignored.
+  //
+  // Every field is optional and a theme that sets none leaves `cfg` untouched, so the default theme
+  // emits exactly the config it always did -- which is what the golden snapshots check.
+  //
+  // Deliberately not a loop over the payload's own keys: this is the second guard, after the typed
+  // struct on the Swift side, that a theme can only reach spacing. Anything not named here does not
+  // arrive, whatever the payload says.
+  function applyArrangement(cfg, a) {
+    if (!a || typeof a !== "object") return;
+    var num = function (v) { return typeof v === "number" && isFinite(v) ? v : null; };
+    var flowchart = {}, sequence = {}, state = {}, classDiagram = {};
+
+    var nodeSpacing = num(a.nodeSpacing);
+    if (nodeSpacing !== null) { flowchart.nodeSpacing = nodeSpacing; }
+    var rankSpacing = num(a.rankSpacing);
+    if (rankSpacing !== null) { flowchart.rankSpacing = rankSpacing; }
+    var padding = num(a.padding);
+    if (padding !== null) { flowchart.padding = padding; classDiagram.padding = padding; }
+    var diagramPadding = num(a.diagramPadding);
+    if (diagramPadding !== null) {
+      flowchart.diagramPadding = diagramPadding;
+      state.diagramPadding = diagramPadding;
+      classDiagram.diagramPadding = diagramPadding;
+    }
+    if (typeof a.curve === "string" && a.curve) { flowchart.curve = a.curve; }
+    var wrappingWidth = num(a.wrappingWidth);
+    if (wrappingWidth !== null) { flowchart.wrappingWidth = wrappingWidth; sequence.wrap = true; }
+
+    if (Object.keys(flowchart).length) cfg.flowchart = flowchart;
+    if (Object.keys(sequence).length) cfg.sequence = sequence;
+    if (Object.keys(state).length) cfg.state = state;
+    if (Object.keys(classDiagram).length) cfg.class = classDiagram;
   }
 
   // Post-render sweep over the detached node. <style> is deliberately NOT removed:
@@ -668,7 +706,25 @@
     bindGestures();
   }
 
+  // The colour the diagram's own theme calls paper, painted behind the drawing.
+  //
+  // On the document, not on the SVG. `adoptGeometry` forces the SVG's own background transparent
+  // and must keep doing so: that is what lets the reader see through to their desktop, and what
+  // keeps an exported SVG free of a background it never asked for. Without this the paper reached
+  // PNG and PDF -- which are composited against `backgroundHex` in Swift -- but never the preview,
+  // so the same diagram was one colour on screen and another in an export of it.
+  //
+  // An empty or unreadable value means "paint nothing", which is what the transparent canvas needs.
+  function setPaper(hex) {
+    var ok = typeof hex === "string" && /^#[0-9a-fA-F]{3,8}$/.test(hex);
+    var value = ok ? hex : "";
+    if (document.documentElement) document.documentElement.style.backgroundColor = value;
+    if (document.body) document.body.style.backgroundColor = value;
+    return value;
+  }
+
   window.__flowpeek = {
+    setPaper: setPaper,
     version: GLUE_VERSION,
     render: render,
     selfTest: selfTest,

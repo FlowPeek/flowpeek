@@ -75,6 +75,14 @@ public struct LabelContrast: Codable, Equatable, Sendable {
     public var darkInk: String
     public var lightInk: String
 
+    /// The same thresholds, in another theme's ink.
+    public func inked(dark: String, light: String) -> LabelContrast {
+        var copy = self
+        copy.darkInk = dark
+        copy.lightInk = light
+        return copy
+    }
+
     public init(
         enabled: Bool,
         ratio: Double = LabelContrast.readableRatio,
@@ -125,7 +133,10 @@ public struct MermaidRenderRequest: Sendable, Equatable {
             themeVariables: theme.variables,
             themeCSS: theme.css,
             dark: theme.appearance == .dark,
-            labelContrast: labelContrast
+            // The reader's switch decides whether labels are corrected; the theme decides what
+            // colour a corrected one becomes.
+            labelContrast: labelContrast.inked(dark: theme.darkInk, light: theme.lightInk),
+            arrangement: theme.arrangement
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -160,6 +171,9 @@ struct MermaidRenderPayload: Codable, Equatable, Sendable {
     /// their colours still adapt instead of keeping light defaults under dark text.
     let dark: Bool
     let labelContrast: LabelContrast
+    /// The spacing and edge-shape values this theme asks for. Empty for every theme that asks for
+    /// nothing, in which case the glue emits no diagram config and mermaid keeps its own defaults.
+    let arrangement: MermaidArrangement
 }
 
 public struct MermaidRenderResult: Sendable, Equatable {

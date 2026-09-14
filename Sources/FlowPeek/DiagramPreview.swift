@@ -68,6 +68,20 @@ final class DiagramViewModel: ObservableObject {
         UserDefaults.standard.object(forKey: labelContrastKey) as? Bool == false ? .off : .on
     }
 
+    /// Which look this diagram is drawn in.
+    ///
+    /// Seeded from the stored default and then owned by this preview: choosing here does NOT write
+    /// the default, which is the one place this deliberately differs from the canvas, label and
+    /// scale controls beside it. Those are preferences; this is "try the experiment on this one
+    /// diagram", and a control that quietly rewrote the default would make that impossible to say.
+    /// The way to change it for everything is Settings, which is also where it is explained.
+    @Published private(set) var themeID = DiagramViewModel.storedThemeID
+
+    static let themeKey = "flowpeek.preview.theme"
+    private static var storedThemeID: MermaidThemeID {
+        MermaidThemeCatalogue.id(rawValue: UserDefaults.standard.string(forKey: themeKey))
+    }
+
     /// How many pixels a copied or saved bitmap gets per point of the drawing. Remembered, because
     /// somebody who needs 4x for slides needs it every time, and somebody who does not should never
     /// have to say 2x again either.
@@ -180,6 +194,14 @@ final class DiagramViewModel: ObservableObject {
     /// The user working the readable-labels switch. Unlike the canvas, this one changes the drawing
     /// rather than what is behind it, so it re-renders: the SVG an export is drawn from is the SVG
     /// the page produced, and it has to carry the same ink the reader is looking at.
+    /// Draw this diagram in another look, now. Writes nothing: see `themeID`.
+    func chooseTheme(_ id: MermaidThemeID) {
+        guard id != themeID else { return }
+        themeID = id
+        applyPaper()
+        render()
+    }
+
     func chooseLabelContrast(_ enabled: Bool) {
         guard labelContrast.enabled != enabled else { return }
         labelContrast = enabled ? .on : .off
@@ -193,6 +215,19 @@ final class DiagramViewModel: ObservableObject {
         if !canvas.isHonoured {
             logger.error("the engine kept its own backdrop; the canvas switch cannot be honoured")
         }
+        applyPaper()
+    }
+
+    /// Put the theme's own paper behind the drawing, so the preview and an export of it are the
+    /// same picture. Nothing while the canvas is transparent: there the point is to see through.
+    private func applyPaper() {
+        guard let engine else { return }
+        guard !canvas.preferred || !canvas.isHonoured else {
+            engine.setPaper("")
+            return
+        }
+        let paper = MermaidThemeFactory.current(appearance, theme: themeID).variables["background"]
+        engine.setPaper(paper ?? "")
     }
 
     /// A dead engine reported by the view itself rather than by a render. Deliberately routed
@@ -245,6 +280,8 @@ final class DiagramViewModel: ObservableObject {
     func update(appearance newValue: MacMermaidTheme.Appearance) {
         guard newValue != appearance else { return }
         appearance = newValue
+        // Light and dark have different paper, so the page behind the drawing moves with them.
+        applyPaper()
         render()
     }
 
@@ -290,7 +327,10 @@ final class DiagramViewModel: ObservableObject {
         return DiagramExporter.Request(
             svg: result.svg,
             size: result.size,
-            backgroundHex: MermaidThemeFactory.current(appearance).variables["background"] ?? "#FFFFFF"
+            // The theme this diagram is actually drawn in, so a PNG or PDF of it is not exported on
+            // a different paper from the one on screen.
+            backgroundHex: MermaidThemeFactory.current(appearance, theme: themeID)
+                .variables["background"] ?? "#FFFFFF"
         )
     }
 
@@ -399,7 +439,7 @@ final class DiagramViewModel: ObservableObject {
         Self.renderCounter += 1
         let request = MermaidRenderRequest(
             source: source,
-            theme: MermaidThemeFactory.current(appearance),
+            theme: MermaidThemeFactory.current(appearance, theme: themeID),
             seed: seed,
             renderID: MermaidRenderIdentifier.renderID(Self.renderCounter),
             labelContrast: labelContrast
@@ -1343,6 +1383,8 @@ struct DiagramPreviewView: View {
                 .transition(.opacity)
             }
             DiagramChromeControls(model: model, keyEquivalentsWork: !compact, showsPin: compact)
+            themeCluster
+                .disabled(!hasDiagram)
             zoomCluster
                 .disabled(!hasDiagram)
             if compact {
@@ -1352,6 +1394,35 @@ struct DiagramPreviewView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
+    }
+
+    /// Which look this diagram is drawn in, at the top of the preview where it can be tried against
+    /// what is on screen.
+    ///
+    /// Hidden entirely while there is only one look to choose, which is what a reader sees until a
+    /// second theme exists: a one-segment control is a button that does nothing. The strip is
+    /// already six controls at a 320pt minimum, so it earns its place only once it has a job.
+    @ViewBuilder private var themeCluster: some View {
+        if MermaidThemeCatalogue.all.count > 1 {
+            Picker("preview.theme", selection: themeBinding) {
+                ForEach(MermaidThemeCatalogue.all, id: \.id) { descriptor in
+                    // The glyph alone here: the strip has no room for names, and the names with
+                    // their explanations live in Settings.
+                    Image(systemName: descriptor.isExperimental ? "flask" : "square.on.square")
+                        .help(Text(LocalizedStringKey(descriptor.nameKey)))
+                        .tag(descriptor.id)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("preview.theme.help")
+            .accessibilityLabel(Text("preview.theme"))
+        }
+    }
+
+    private var themeBinding: Binding<MermaidThemeID> {
+        Binding(get: { model.themeID }, set: { model.chooseTheme($0) })
     }
 
     /// Key equivalents only where they can fire. The quick panel is non-activating: nothing is

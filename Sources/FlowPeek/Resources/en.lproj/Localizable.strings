@@ -443,6 +443,16 @@
 "settings.history.age.quarter" = "Three months";
 
 /* The hint box's colour, which a reader with colour-vision deficiency may have to choose. */
+"settings.theme" = "Diagram style";
+"settings.theme.short" = "How a diagram is drawn. Changing it here changes every diagram; a preview can try another for one diagram without changing this.";
+"settings.theme.description" = "The default draws diagrams in the system font and the system palette, with your accent colour. Editorial is an experiment: an imitation of the look at github.com/cathrynlavery/diagram-design — paper and ink, hairline borders, one reserved accent, generous spacing. It reaches the diagram types that read a theme, which is most of them; charts that paint their own colours, such as xychart and quadrant, keep their own palette. Nothing leaves your Mac either way.";
+"theme.system.name" = "System";
+"theme.system.blurb" = "The system font and palette, with your accent colour.";
+"theme.editorial.name" = "Editorial";
+"theme.editorial.blurb" = "Paper and ink, hairline borders, one reserved accent.";
+"theme.experimental.badge" = "Experiment";
+"preview.theme" = "Diagram style";
+"preview.theme.help" = "Draw this diagram in another style. Only this diagram; Settings changes them all.";
 "settings.hint-tint" = "Hint Colour";
 "settings.hint-tint.short" = "What colour the frame and its button are drawn in.";
 "settings.hint-tint.description" = "The hint says two things in colour: the frame means a diagram is here, and the button means this one opens. If the accent is a colour you cannot separate from the text behind it, neither of those reaches you. The swatches are a palette published for exactly that — it stays distinguishable under the common forms of colour blindness — and the well takes any colour at all, because the only one certain to work is the one you can see. Every drawing in this window follows your choice, so what you pick is what you will meet.";

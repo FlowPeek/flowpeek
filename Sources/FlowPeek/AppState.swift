@@ -134,6 +134,19 @@ final class AppState: ObservableObject {
     /// Whether the icon is in the menu bar right now: always when it is not hidden, and while the
     /// gesture is holding it there when it is.
     @Published private(set) var menuBarPresent = !Defaults.bool(.menuBarHidden, default: false)
+    /// Which look diagrams are drawn in, until a preview is told otherwise for one diagram.
+    ///
+    /// Stored as the theme's raw id rather than an index, because an index would point at a
+    /// different theme the moment the catalogue gains or loses one. An id the catalogue no longer
+    /// knows degrades to the default rather than failing -- see `MermaidThemeCatalogue.id(rawValue:)`.
+    @Published var previewThemeID = MermaidThemeCatalogue.id(
+        rawValue: Defaults.stringIfPresent(.previewTheme)
+    ) {
+        didSet {
+            guard previewThemeID != oldValue else { return }
+            Defaults.set(previewThemeID.rawValue, .previewTheme)
+        }
+    }
     @Published var aiEnabled = Defaults.bool(.aiEnabled, default: false) {
         didSet { Defaults.set(aiEnabled, .aiEnabled) }
     }
@@ -321,6 +334,8 @@ final class AppState: ObservableObject {
             Defaults.double(.doubleTapInterval) ?? ModifierDoubleTap.defaultInterval
         )
         if tapInterval != doubleTapInterval { doubleTapInterval = tapInterval }
+        let storedTheme = MermaidThemeCatalogue.id(rawValue: Defaults.stringIfPresent(.previewTheme))
+        if storedTheme != previewThemeID { previewThemeID = storedTheme }
         let hiddenIcon = Defaults.bool(.menuBarHidden, default: false)
         if hiddenIcon != menuBarHidden { menuBarHidden = hiddenIcon }
         let ai = Defaults.bool(.aiEnabled, default: false)
@@ -355,6 +370,7 @@ final class AppState: ObservableObject {
             case editorFileEnabled = "flowpeek.editorFile.enabled"
             case agentSessionEnabled = "flowpeek.agentSession.enabled"
             case menuBarHidden = "flowpeek.menuBar.hidden"
+            case previewTheme = "flowpeek.preview.theme"
         }
 
         static func bool(_ key: Key, default fallback: Bool) -> Bool {

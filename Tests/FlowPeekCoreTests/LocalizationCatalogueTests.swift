@@ -1,4 +1,5 @@
 import XCTest
+@testable import FlowPeekCore
 
 /// Checks the two string catalogues against each other, on the things that are wrong in a way
 /// nothing else notices.
@@ -99,6 +100,17 @@ final class LocalizationCatalogueTests: XCTestCase {
                 let ours = value.matches(of: specifier).map { String($0.0) }.sorted()
                 let theirs = translated.matches(of: specifier).map { String($0.0) }.sorted()
                 XCTAssertEqual(ours, theirs, "\(key): en has \(ours), \(language) has \(theirs)")
+            }
+        }
+    }
+
+    /// Every theme in the catalogue names two strings, and the catalogue is the thing that grows.
+    /// Without this, adding a theme and forgetting its Korean name ships a raw key into a menu.
+    func testEveryThemeInTheCatalogueIsNamedInEveryLanguage() throws {
+        for language in Self.languages {
+            let table = try catalogue(language)
+            for key in MermaidThemeCatalogue.localizationKeys {
+                XCTAssertNotNil(table[key], "\(language) is missing \(key)")
             }
         }
     }

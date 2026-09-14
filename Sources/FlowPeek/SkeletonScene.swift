@@ -1157,3 +1157,78 @@ struct MenuBarRevealScene: View {
         }
     }
 }
+
+// MARK: - Pick a look
+
+/// What choosing a theme does: the same diagram, redrawn in another language of shape and colour.
+///
+/// Two beats rather than four. Every other scene here explains a mechanic that happens over time --
+/// output arrives, a key goes down, a badge slides in. This one has no mechanic: it is a before and
+/// an after, and drawing it as a sequence would invent a process that does not exist.
+enum ThemePickStage: Equatable, Sendable {
+    case system
+    case editorial
+}
+
+struct ThemePickScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
+    static let script = SkeletonScript<ThemePickStage>(
+        [
+            .init(.system, 1.8),
+            .init(.editorial, 2.2),
+        ],
+        // The experiment is the thing being explained, so it is the frame worth keeping.
+        resting: .editorial
+    )
+
+    var size: CGSize = Skeleton.cardSize
+
+    /// The editorial language in miniature: hairline boxes on paper, one coral node, muted rules.
+    private static let paper = Color(red: 0.96, green: 0.96, blue: 0.96)
+    private static let ink = Color(red: 0.18, green: 0.19, blue: 0.26)
+    private static let coral = Color(red: 0.92, green: 0.42, blue: 0.21)
+
+    var body: some View {
+        SkeletonPlayer(Self.script, initial: .system) { stage in
+            let editorial = stage == .editorial
+            SkeletonWindow {
+                VStack(spacing: editorial ? 9 : 7) {
+                    node(width: 34, focal: editorial, editorial: editorial)
+                    edge(editorial: editorial)
+                    node(width: 44, focal: false, editorial: editorial)
+                    edge(editorial: editorial)
+                    node(width: 30, focal: false, editorial: editorial)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.vertical, 2)
+                .background(editorial ? Self.paper : .clear)
+            }
+            .frame(width: size.width, height: size.height)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func node(width: CGFloat, focal: Bool, editorial: Bool) -> some View {
+        RoundedRectangle(cornerRadius: editorial ? 3 : 2, style: .continuous)
+            .fill(editorial ? Self.paper : Skeleton.line(0.10))
+            .frame(width: width, height: editorial ? 13 : 12)
+            .overlay(
+                RoundedRectangle(cornerRadius: editorial ? 3 : 2, style: .continuous)
+                    .strokeBorder(
+                        editorial ? (focal ? Self.coral : Self.ink.opacity(0.22)) : skeletonTint.opacity(0.7),
+                        lineWidth: editorial && focal ? 1.4 : 1
+                    )
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(editorial ? Self.ink.opacity(0.75) : Skeleton.line(0.30))
+                    .frame(width: width * 0.5, height: 3)
+            }
+    }
+
+    private func edge(editorial: Bool) -> some View {
+        Rectangle()
+            .fill(editorial ? Color(red: 0.31, green: 0.36, blue: 0.46) : Skeleton.line(0.28))
+            .frame(width: editorial ? 1.2 : 1, height: editorial ? 8 : 6)
+    }
+}

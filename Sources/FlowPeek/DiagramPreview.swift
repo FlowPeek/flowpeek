@@ -1406,10 +1406,13 @@ struct DiagramPreviewView: View {
         if MermaidThemeCatalogue.all.count > 1 {
             Picker("preview.theme", selection: themeBinding) {
                 ForEach(MermaidThemeCatalogue.all, id: \.id) { descriptor in
-                    // The glyph alone here: the strip has no room for names, and the names with
-                    // their explanations live in Settings.
+                    // The glyph alone is what is drawn: the strip has no room for names, and the
+                    // names with their explanations live in Settings. The name still has to be
+                    // said, though -- without this the segment is announced as its SF Symbol, and
+                    // "flask" is not the name of anything a reader chose.
                     Image(systemName: descriptor.isExperimental ? "flask" : "square.on.square")
                         .help(Text(LocalizedStringKey(descriptor.nameKey)))
+                        .accessibilityLabel(Text(LocalizedStringKey(descriptor.nameKey)))
                         .tag(descriptor.id)
                 }
             }
@@ -1417,7 +1420,6 @@ struct DiagramPreviewView: View {
             .labelsHidden()
             .fixedSize()
             .help("preview.theme.help")
-            .accessibilityLabel(Text("preview.theme"))
         }
     }
 

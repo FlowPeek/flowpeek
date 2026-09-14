@@ -22,6 +22,11 @@ public struct MacMermaidTheme: Equatable, Sendable {
     /// white in the first place.
     public let darkInk: String
     public let lightInk: String
+    /// The one colour this theme uses to say "look here". Named rather than dug out of `variables`,
+    /// because a settings tile has to draw a theme before anything has been rendered in it, and
+    /// hunting for it under `noteBorderColor` would tie the picker to which variable happens to
+    /// carry it this month.
+    public let accent: String
 
     /// The look FlowPeek has always drawn, and the one every reader gets until they choose
     /// otherwise. Reached through `MermaidThemeCatalogue.theme(.system, ...)`; the initialiser below
@@ -32,6 +37,17 @@ public struct MacMermaidTheme: Equatable, Sendable {
         increaseContrast: Bool
     ) -> MacMermaidTheme {
         MacMermaidTheme(appearance: appearance, accentHex: accentHex, increaseContrast: increaseContrast)
+    }
+
+    /// The handful of colours a picture of this theme is drawn from, by role. For a settings tile,
+    /// which has to show what a theme looks like before anything has been drawn in it.
+    public var sample: (paper: String, ink: String, line: String, accent: String) {
+        (
+            paper: variables["background"] ?? "#FFFFFF",
+            ink: variables["primaryTextColor"] ?? "#000000",
+            line: variables["lineColor"] ?? "#AEAEB2",
+            accent: accent
+        )
     }
 
     // MARK: - Editorial
@@ -211,7 +227,8 @@ public struct MacMermaidTheme: Equatable, Sendable {
             ),
             // A repainted label lands on the theme's own two ends.
             darkInk: ink,
-            lightInk: paper
+            lightInk: paper,
+            accent: accent
         )
     }
 
@@ -224,7 +241,8 @@ public struct MacMermaidTheme: Equatable, Sendable {
         fontFamily: String,
         arrangement: MermaidArrangement,
         darkInk: String,
-        lightInk: String
+        lightInk: String,
+        accent: String
     ) {
         self.appearance = appearance
         self.variables = variables
@@ -233,6 +251,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         self.arrangement = arrangement
         self.darkInk = darkInk
         self.lightInk = lightInk
+        self.accent = accent
     }
 
     public init(appearance: Appearance, accentHex: String, increaseContrast: Bool) {
@@ -242,6 +261,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         arrangement = .unset
         darkInk = LabelContrast.darkInk
         lightInk = LabelContrast.lightInk
+        accent = accentHex
         let line = dark ? (increaseContrast ? "#98989D" : "#636366") : (increaseContrast ? "#636366" : "#AEAEB2")
         variables = [
             "fontFamily": Self.systemFontStack,

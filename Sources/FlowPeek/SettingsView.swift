@@ -1008,49 +1008,124 @@ struct SettingsView: View {
     }
 }
 
-/// The list of looks, wherever one is chosen.
+/// The list of looks, drawn rather than named.
+///
+/// A row of tiles, like the tint swatches beside it and for the same reason: the thing being chosen
+/// is what something will look like, and a word for a look is a worse answer than the look. Each
+/// tile is a miniature drawn from the theme's own colours, so a theme added later illustrates itself
+/// with no work here.
 ///
 /// It reads `MermaidThemeCatalogue.all` rather than naming themes, so adding one is a catalogue
-/// entry and two strings. The shape changes with the number of them: a segmented control reads at a
-/// glance while there are few, and stops fitting anywhere once there are several, at which point a
-/// menu is the honest control. That threshold is here, in one place, rather than in each view that
-/// offers the choice.
+/// entry and two strings.
 struct ThemePicker: View {
     @Binding var selection: MermaidThemeID
-    /// Past this many, a segmented control is wider than any chrome it could sit in.
-    static let segmentedLimit = 3
+    @Environment(\.colorScheme) private var colorScheme
 
-    static var fitsSegmented: Bool { MermaidThemeCatalogue.all.count <= segmentedLimit }
-
-    // Two branches rather than one styled picker: `.segmented` and `.menu` are different types, so
-    // the choice has to be made in the view tree.
-    @ViewBuilder var body: some View {
-        if Self.fitsSegmented {
-            picker.pickerStyle(.segmented)
-        } else {
-            picker.pickerStyle(.menu)
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(MermaidThemeCatalogue.all, id: \.id) { descriptor in
+                tile(descriptor)
+            }
+            Spacer(minLength: 0)
         }
     }
 
-    private var picker: some View {
-        Picker("settings.theme", selection: $selection) {
-            ForEach(MermaidThemeCatalogue.all, id: \.id) { descriptor in
-                ThemePickerLabel(descriptor: descriptor).tag(descriptor.id)
+    private func tile(_ descriptor: MermaidThemeDescriptor) -> some View {
+        let selected = selection == descriptor.id
+        return Button {
+            selection = descriptor.id
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                ThemeSample(descriptor: descriptor, appearance: colorScheme == .dark ? .dark : .light)
+                    .frame(width: 104, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(
+                                .primary.opacity(selected ? 0.75 : 0.15),
+                                lineWidth: selected ? 2 : 1
+                            )
+                    )
+                HStack(spacing: 5) {
+                    Text(LocalizedStringKey(descriptor.nameKey))
+                        .font(.callout)
+                        .foregroundStyle(selected ? .primary : .secondary)
+                    if descriptor.isExperimental {
+                        Text("theme.experimental.badge")
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(.primary.opacity(0.09), in: Capsule())
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
-        .labelsHidden()
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(LocalizedStringKey(descriptor.nameKey)))
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 }
 
-/// A theme's name, with the experiment said out loud rather than implied by its position in a list.
-struct ThemePickerLabel: View {
+/// One theme, drawn small: its paper, a couple of its boxes, its rule colour, and its accent doing
+/// the one thing an accent is for.
+///
+/// Built from `MacMermaidTheme.sample`, so it is the theme's own colours rather than a second set
+/// kept beside them that could drift.
+struct ThemeSample: View {
     let descriptor: MermaidThemeDescriptor
+    let appearance: MacMermaidTheme.Appearance
+
+    private var sample: (paper: String, ink: String, line: String, accent: String) {
+        MermaidThemeCatalogue.theme(
+            descriptor.id,
+            appearance: appearance,
+            accentHex: NSColor.controlAccentColor.hexRGB,
+            increaseContrast: false
+        ).sample
+    }
 
     var body: some View {
-        if descriptor.isExperimental {
-            Text("\(Text(LocalizedStringKey(descriptor.nameKey)))  \(Text("theme.experimental.badge").font(.caption2))")
-        } else {
-            Text(LocalizedStringKey(descriptor.nameKey))
+        let s = sample
+        let paper = Color(themeHex: s.paper) ?? .white
+        let ink = Color(themeHex: s.ink) ?? .primary
+        let line = Color(themeHex: s.line) ?? .secondary
+        let accent = Color(themeHex: s.accent) ?? .accentColor
+        ZStack {
+            paper
+            VStack(spacing: 5) {
+                box(ink: ink, line: accent, width: 44, emphasis: true)
+                connector(line)
+                box(ink: ink, line: line, width: 56, emphasis: false)
+                connector(line)
+                box(ink: ink, line: line, width: 38, emphasis: false)
+            }
         }
+    }
+
+    private func box(ink: Color, line: Color, width: CGFloat, emphasis: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+            .strokeBorder(line.opacity(emphasis ? 0.95 : 0.55), lineWidth: emphasis ? 1.2 : 0.8)
+            .frame(width: width, height: 10)
+            .overlay {
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(ink.opacity(0.7))
+                    .frame(width: width * 0.45, height: 2.5)
+            }
+    }
+
+    private func connector(_ line: Color) -> some View {
+        Rectangle().fill(line.opacity(0.7)).frame(width: 1, height: 4)
+    }
+}
+
+
+private extension Color {
+    /// A theme's stored colour, through `HintTint`'s parser rather than a second one written here.
+    /// Answers nil for the values a theme legitimately holds that are not plain hex -- the editorial
+    /// rule colour is an `rgba(...)` hairline -- and the caller falls back to a semantic colour.
+    init?(themeHex: String) {
+        guard let tint = HintTint(hex: themeHex) else { return nil }
+        self.init(red: tint.red, green: tint.green, blue: tint.blue)
     }
 }

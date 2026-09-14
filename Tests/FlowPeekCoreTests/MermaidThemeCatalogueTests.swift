@@ -136,7 +136,8 @@ final class ThemeLabelInkTests: XCTestCase {
             fontFamily: "X",
             arrangement: .unset,
             darkInk: "#123456",
-            lightInk: "#ABCDEF"
+            lightInk: "#ABCDEF",
+            accent: "#00FF00"
         )
         let json = try MermaidRenderRequest(
             source: "flowchart TD\n A --> B", theme: theme, seed: "fp-seed", renderID: "fp-1"

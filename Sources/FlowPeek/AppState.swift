@@ -117,6 +117,23 @@ final class AppState: ObservableObject {
             doubleTap.setInterval(doubleTapInterval)
         }
     }
+    /// Whether FlowPeek keeps its icon out of the menu bar.
+    ///
+    /// Off, and it has to stay a deliberate choice, because the icon is this app's only permanent
+    /// surface: hiding it is hiding the way in. Two things make it safe to offer. Holding Option on
+    /// its own for five seconds brings it back, through a watch that needs no permission and so
+    /// cannot stop working; and Command-comma opens Settings from a preview or the shelf, which is
+    /// a way in that never depended on the icon at all.
+    @Published var menuBarHidden = Defaults.bool(.menuBarHidden, default: false) {
+        didSet {
+            guard menuBarHidden != oldValue else { return }
+            Defaults.set(menuBarHidden, .menuBarHidden)
+            applyMenuBarPresence(primed: menuBarHidden)
+        }
+    }
+    /// Whether the icon is in the menu bar right now: always when it is not hidden, and while the
+    /// gesture is holding it there when it is.
+    @Published private(set) var menuBarPresent = !Defaults.bool(.menuBarHidden, default: false)
     @Published var aiEnabled = Defaults.bool(.aiEnabled, default: false) {
         didSet { Defaults.set(aiEnabled, .aiEnabled) }
     }
@@ -194,6 +211,8 @@ final class AppState: ObservableObject {
     /// Tells the reader when an editor's own switch is why a gesture did nothing.
     private let editorAdvisor = EditorAccessibilityAdvisor()
     let doubleTap = DoubleTapMonitor()
+    /// Watches for the hold that brings a hidden icon back. Runs only while the icon is hidden.
+    let menuBarReveal = MenuBarRevealMonitor()
     let highlight = AmbientHighlightCoordinator()
     /// Its own panels rather than the one the pointer route uses: the two routes can be raised by
     /// unrelated events milliseconds apart, and sharing a panel would mean one route's dismissal
@@ -302,6 +321,8 @@ final class AppState: ObservableObject {
             Defaults.double(.doubleTapInterval) ?? ModifierDoubleTap.defaultInterval
         )
         if tapInterval != doubleTapInterval { doubleTapInterval = tapInterval }
+        let hiddenIcon = Defaults.bool(.menuBarHidden, default: false)
+        if hiddenIcon != menuBarHidden { menuBarHidden = hiddenIcon }
         let ai = Defaults.bool(.aiEnabled, default: false)
         if ai != aiEnabled { aiEnabled = ai }
         let provider = Defaults.string(.aiProvider, default: AIProviderKind.openAI.rawValue)
@@ -333,6 +354,7 @@ final class AppState: ObservableObject {
             case hintTint = "flowpeek.hint.tint"
             case editorFileEnabled = "flowpeek.editorFile.enabled"
             case agentSessionEnabled = "flowpeek.agentSession.enabled"
+            case menuBarHidden = "flowpeek.menuBar.hidden"
         }
 
         static func bool(_ key: Key, default fallback: Bool) -> Bool {
@@ -493,6 +515,14 @@ final class AppState: ObservableObject {
         // The gesture is a second door to the clipboard route, not a different feature: it opens
         // exactly what the chord opens, apology and all.
         doubleTap.onDoubleTap = { [weak self] in self?.previewCopied() }
+        // Not part of `applyEnabledState()`: this is the way back to a hidden app, so it must keep
+        // running when FlowPeek is paused and when the Accessibility grant is missing. It is the
+        // one watch whose whole purpose is to work in the states the others stand down for.
+        menuBarReveal.onChange = { [weak self] revealed in
+            guard let self else { return }
+            self.setMenuBarPresent(!self.menuBarHidden || revealed)
+        }
+        applyMenuBarPresence(primed: false)
         startEngine()
         // Registers the hot keys as well, and only the ones whose feature is on — which is why there
         // is no `registerAll()` here: it would claim ⌥⌘M for a moment even with AI switched off.
@@ -544,6 +574,35 @@ final class AppState: ObservableObject {
         guard enabled != isEnabled else { return }
         isEnabled = enabled
         applyEnabledState()
+    }
+
+    /// Puts the icon where the setting says it should be, and arms or disarms the gesture that is
+    /// the way back from hiding it.
+    ///
+    /// - Parameter primed: whether to leave the icon on screen for the usual grace first. True the
+    ///   moment the switch is turned on: an icon that blinks out as the switch moves has not told
+    ///   the reader where it went, and one that fades has.
+    func applyMenuBarPresence(primed: Bool) {
+        if menuBarHidden {
+            menuBarReveal.start(primed: primed)
+            setMenuBarPresent(menuBarReveal.isRevealed)
+        } else {
+            menuBarReveal.stop()
+            setMenuBarPresent(true)
+        }
+    }
+
+    /// Moves the icon in or out.
+    private func setMenuBarPresent(_ present: Bool) {
+        guard present != menuBarPresent else { return }
+        menuBarPresent = present
+    }
+
+    /// The panel hangs off the icon, so while it is open the icon may not be taken away underneath
+    /// it. Called from the menu bar content appearing and going away.
+    func setMenuBarPanelOpen(_ open: Bool) {
+        guard menuBarHidden else { return }
+        menuBarReveal.setPanelOpen(open)
     }
 
     func applyEnabledState() {

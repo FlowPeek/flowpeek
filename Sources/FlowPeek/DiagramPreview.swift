@@ -1296,6 +1296,25 @@ struct DiagramPreviewView: View {
             }
         }
         .frame(minWidth: 320, maxWidth: .infinity, minHeight: 220, maxHeight: .infinity)
+        .background(settingsCommand)
+    }
+
+    /// Command-comma, the way into Settings that does not go through the menu bar icon.
+    ///
+    /// It matters because the icon can be hidden. Anywhere else this would be a nicety that macOS
+    /// users try anyway; here it is the door that is still there when the only other one has been
+    /// put away. Drawn as a zero-sized button because Command-comma is a menu command as far as
+    /// AppKit is concerned and `onKeyPress` never sees one, and registered only where key
+    /// equivalents fire -- the quick panel is non-activating and would show a key that does
+    /// nothing.
+    @ViewBuilder private var settingsCommand: some View {
+        if let shortcut = shortcut(",", modifiers: .command) {
+            Button("preview.open-settings") { AppState.shared.handle(.showSettings) }
+                .keyboardShortcut(shortcut)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
     }
 
     private var chrome: some View {

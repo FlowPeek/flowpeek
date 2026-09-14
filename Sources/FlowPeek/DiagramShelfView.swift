@@ -57,6 +57,14 @@ struct DiagramShelfView: View {
                         .opacity(0)
                         .frame(width: 0, height: 0)
                         .accessibilityHidden(true)
+                    // And the way into Settings that does not go through the menu bar icon, for the
+                    // same reason it is on the preview: the icon can be hidden, and this door is
+                    // still there when it is. A menu command, so it needs a button too.
+                    Button("preview.open-settings") { AppState.shared.handle(.showSettings) }
+                        .keyboardShortcut(",", modifiers: .command)
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
                 }
             }
             .padding(.vertical, 14)

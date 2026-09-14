@@ -1047,3 +1047,113 @@ struct MenuBarScene: View {
         )
     }
 }
+
+// MARK: - Bring a hidden icon back
+
+/// What hiding the icon costs and how to undo it, in four beats: the menu bar with nothing of
+/// FlowPeek's in it, Option going down and staying down, the icon arriving, and the key coming up.
+///
+/// The bar filling under the key is the part that had to be drawn rather than written. Five seconds
+/// is a long time to hold a key with nothing happening, and a reader who lets go at two has decided
+/// the feature is broken; a bar that is visibly moving says the wait is the gesture.
+enum MenuBarRevealStage: Equatable, Sendable {
+    case hidden
+    case holding
+    case revealed
+    case fading
+}
+
+struct MenuBarRevealScene: View {
+    @Environment(\.skeletonTint) private var skeletonTint
+    static let script = SkeletonScript<MenuBarRevealStage>(
+        [
+            .init(.hidden, 1.1),
+            .init(.holding, 1.5),
+            .init(.revealed, 1.7),
+            .init(.fading, 1.0),
+        ],
+        // The stage worth keeping for a reader who has asked for less motion: the icon back, which
+        // is what the gesture is for.
+        resting: .revealed
+    )
+
+    var size: CGSize = Skeleton.cardSize
+
+    private var isShowing: (MenuBarRevealStage) -> Bool {
+        { $0 == .revealed || $0 == .fading }
+    }
+
+    var body: some View {
+        SkeletonPlayer(Self.script, initial: .hidden) { stage in
+            VStack(spacing: 0) {
+                menuBar(showing: isShowing(stage), arriving: stage == .revealed, leaving: stage == .fading)
+                Spacer(minLength: 0)
+                held(stage)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.bottom, 10)
+            }
+            .frame(width: size.width, height: size.height)
+            .background(Skeleton.line(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Skeleton.line(0.14), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// The menu bar. The slot FlowPeek's mark sits in keeps its width whether the mark is there or
+    /// not, so the other items do not shuffle sideways as it comes and goes -- which would read as
+    /// the whole bar reacting rather than as one icon arriving.
+    private func menuBar(showing: Bool, arriving: Bool, leaving: Bool) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(Skeleton.line(0.2))
+                .frame(width: 8, height: 4)
+            Spacer(minLength: 0)
+            ForEach(0..<2, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Skeleton.line(0.16))
+                    .frame(width: 7, height: 4)
+            }
+            ZStack {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(skeletonTint)
+                    .opacity(showing ? (leaving ? 0.35 : 1) : 0)
+                    .scaleEffect(showing ? 1 : 0.6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(skeletonTint.opacity(arriving ? 0.22 : 0))
+                            .padding(-2)
+                    )
+            }
+            .frame(width: 14)
+        }
+        .padding(.horizontal, 7)
+        .frame(height: 16)
+        .background(Skeleton.line(0.08))
+    }
+
+    /// The key, and how much of the hold has been served.
+    private func held(_ stage: MenuBarRevealStage) -> some View {
+        let pressed = stage == .holding || stage == .revealed
+        let filled: Double = switch stage {
+        case .hidden: 0
+        case .holding: 0.55
+        case .revealed, .fading: 1
+        }
+        return VStack(spacing: 6) {
+            SkeletonKey(glyph: "⌥", pressed: pressed)
+            Capsule()
+                .fill(Skeleton.line(0.12))
+                .frame(width: 52, height: 4)
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(skeletonTint.opacity(pressed || stage == .fading ? 0.9 : 0))
+                        .frame(width: 52 * filled, height: 4)
+                }
+        }
+    }
+}

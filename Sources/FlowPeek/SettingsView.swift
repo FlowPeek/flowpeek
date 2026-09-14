@@ -61,6 +61,33 @@ struct SettingsView: View {
         )
     }
 
+    /// The key that opens Settings without the menu bar icon. Composed here, not written into the
+    /// catalogue: a translated string must never carry a shortcut, because the shortcut is decided
+    /// by the app and the string would go stale silently.
+    private static let settingsKeyDisplay = "\u{2318},"
+
+    private var menuBarHiddenShort: String {
+        String(
+            format: String(localized: "settings.menu-bar-hidden.short"),
+            Int(ModifierHold.defaultHold)
+        )
+    }
+
+    private var menuBarHiddenDescription: String {
+        String(
+            format: String(localized: "settings.menu-bar-hidden.description"),
+            Int(ModifierHold.defaultHold),
+            Int(ModifierHold.defaultGrace)
+        )
+    }
+
+    private var menuBarHiddenEscape: String {
+        String(
+            format: String(localized: "settings.menu-bar-hidden.escape"),
+            Self.settingsKeyDisplay
+        )
+    }
+
     /// The one line the card leads with. Names the same chord for the same reason.
     private var ambientShort: String {
         String(
@@ -478,6 +505,44 @@ struct SettingsView: View {
                 }
             }
             .togglesOnTap(launchAtLoginBinding)
+
+            // Last in General, and on its own, because it is the only switch here that changes what
+            // FlowPeek *is* rather than what it watches. The icon is the app's only permanent
+            // surface; putting it away is a thing to do deliberately, having read how to undo it.
+            settingsCard {
+                HStack(alignment: .top, spacing: 14) {
+                    settingIcon("menubar.rectangle", color: .indigo)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("settings.menu-bar-hidden").font(.headline)
+                        Text(verbatim: menuBarHiddenShort)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 14)
+                    Toggle("settings.menu-bar-hidden", isOn: $app.menuBarHidden)
+                        .labelsHidden()
+                        .accessibilityHint(Text(verbatim: menuBarHiddenDescription))
+                }
+                explanation(MenuBarRevealScene(), detail: Text(verbatim: menuBarHiddenDescription))
+                // Shown only once the icon is actually going away. Before that it is advice about a
+                // situation the reader is not in; after it, it is the way back, and it stays on the
+                // card so it is there to be found the next time Settings is opened.
+                if app.menuBarHidden {
+                    HStack(alignment: .top, spacing: 10) {
+                        Label {
+                            Text(verbatim: menuBarHiddenEscape)
+                        } icon: {
+                            Image(systemName: "lightbulb.fill")
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            .togglesOnTap($app.menuBarHidden)
 
             settingsCard {
                 HStack(alignment: .top, spacing: 14) {

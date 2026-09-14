@@ -178,6 +178,7 @@
 "settings.clipboard" = "Watch the clipboard";
 "settings.clipboard.short" = "Copy Mermaid anywhere and a badge appears with the key that opens it.";
 "settings.clipboard.description" = "When you copy Mermaid from an app FlowPeek cannot read a selection from — a terminal that draws its own text, for instance — a small badge appears with the shortcut that opens it. The clipboard is only read, never changed, and its contents are never stored or logged.";
+"preview.open-settings" = "Settings…";
 "preview.open-window" = "Open in Window";
 "preview.zoom-in" = "Zoom In";
 "preview.zoom-out" = "Zoom Out";
@@ -285,6 +286,10 @@
 "settings.launch-at-login.needs-approval" = "macOS needs you to allow this once. Open Login Items and switch FlowPeek on.";
 "settings.launch-at-login.failed" = "macOS did not add FlowPeek to your login items. You can add it yourself in Login Items.";
 "settings.launch-at-login.open-login-items" = "Open Login Items";
+"settings.menu-bar-hidden" = "Hide from the menu bar";
+"settings.menu-bar-hidden.short" = "Keep FlowPeek's icon out of the menu bar. Hold Option on its own for %lld seconds to bring it back.";
+"settings.menu-bar-hidden.description" = "FlowPeek keeps working exactly as it does now — every watch, gesture and shortcut is unchanged. Only the icon goes away. To bring it back, hold Option on its own for %lld seconds with no other key down; it appears in the menu bar and stays for about %lld seconds after you let go, which is long enough to click it. While its panel is open it will not disappear.";
+"settings.menu-bar-hidden.escape" = "You can also press %@ while a preview or the shelf is in front to open Settings without the icon.";
 "settings.experimental" = "EXPERIMENTAL";
 "settings.sidebar.hint" = "Your selected text stays on this Mac unless you explicitly generate with AI.";
 "common.close" = "Close";

@@ -592,9 +592,15 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Moves the icon in or out.
+    /// Moves the icon in or out, carrying the reader's own placement across the gap.
+    ///
+    /// The two calls have to sit on this side of the assignment. AppKit deletes the item's stored
+    /// position as it is removed, so it can only be read while the item is still there; and it
+    /// reads the position back as the item is created, so it has to be in place before the item
+    /// returns. See `MenuBarItemPosition`.
     private func setMenuBarPresent(_ present: Bool) {
         guard present != menuBarPresent else { return }
+        if present { MenuBarItemPosition.restore() } else { MenuBarItemPosition.remember() }
         menuBarPresent = present
     }
 

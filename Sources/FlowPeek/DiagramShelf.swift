@@ -67,6 +67,26 @@ final class DiagramHistoryCoordinator: NSObject, NSWindowDelegate {
                     self?.close()
                     AppState.shared.previews.openWindow(document: document)
                 },
+                // The shelf reports a card in its own coordinates; only this knows where the shelf
+                // is, so the conversion to the screen belongs here. SwiftUI measures down from the
+                // top of the content, AppKit up from the bottom of the screen, hence the flip.
+                peek: { [weak self] document, card in
+                    guard let panel = self?.panel else { return }
+                    let content = panel.contentRect(forFrameRect: panel.frame)
+                    let origin = CGRect(
+                        x: content.minX + card.minX,
+                        y: content.maxY - card.maxY,
+                        width: card.width,
+                        height: card.height
+                    )
+                    AppState.shared.previews.peek(document: document, from: origin)
+                    // The keyboard comes back here. `makeKey` rather than `makeKeyAndOrderFront`:
+                    // the peek belongs in front of the shelf, it just must not have the keys, or
+                    // the arrows stop walking along the row the moment the first diagram opens.
+                    panel.makeKey()
+                },
+                endPeek: { AppState.shared.previews.endPeek() },
+                isPeeking: { AppState.shared.previews.isPeeking },
                 close: { [weak self] in self?.close() }
             )
         )
@@ -90,6 +110,9 @@ final class DiagramHistoryCoordinator: NSObject, NSWindowDelegate {
 
     func close() {
         guard let panel else { return }
+        // A peek grew out of a card on this shelf, so it goes when the shelf does: left behind it
+        // would shrink back into a card that is no longer on screen.
+        if AppState.shared.previews.isPeeking { AppState.shared.previews.endPeek() }
         self.panel = nil
         removeDismissMonitor()
         panel.delegate = nil

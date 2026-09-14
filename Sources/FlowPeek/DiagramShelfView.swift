@@ -2,10 +2,35 @@ import AppKit
 import FlowPeekCore
 import SwiftUI
 
+/// Where each card is inside the shelf, collected from the cards themselves.
+private struct CardFrameKey: PreferenceKey {
+    static let defaultValue: [DiagramHistoryEntry.ID: CGRect] = [:]
+    static func reduce(
+        value: inout [DiagramHistoryEntry.ID: CGRect],
+        nextValue: () -> [DiagramHistoryEntry.ID: CGRect]
+    ) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 /// The contents of the shelf: a row of diagrams, newest first, scrolled sideways.
 struct DiagramShelfView: View {
+    /// The shelf's own coordinate space. Named rather than `.global`, which on a panel is not the
+    /// screen and would put a peek wherever the window happens to be relative to the main one.
+    static let space = "flowpeek.shelf"
+
     @ObservedObject var store: DiagramHistoryStore
     let open: (DiagramDocument) -> Void
+    /// Raise a preview out of a card, or move the one that is up onto another diagram. The rect is
+    /// the card, in this view's own coordinate space; the shelf's window turns it into a screen
+    /// rect, because only it knows where the shelf is.
+    let peek: (DiagramDocument, CGRect) -> Void
+    /// Put the peek away again, shrinking it back into wherever it came from.
+    let endPeek: () -> Void
+    /// Whether one is up right now. Read rather than remembered: a peek can be dismissed by a click
+    /// somewhere else or by Escape reaching the panel, and a shelf that had remembered "open" would
+    /// answer the next Space by trying to close something that has already gone.
+    let isPeeking: () -> Bool
     let close: () -> Void
 
     @State private var confirmingClear = false
@@ -13,6 +38,8 @@ struct DiagramShelfView: View {
     /// The diagram whose source is on the pasteboard, for the moment after Command-C. A copy with
     /// no answer looks exactly like a key that did nothing.
     @State private var copied: DiagramHistoryEntry.ID?
+    /// Where each card is, so a peek can grow out of the one that was asked about.
+    @State private var cardFrames: [DiagramHistoryEntry.ID: CGRect] = [:]
     @FocusState private var focus: Field?
 
     /// Everything the keyboard can be on. A card is named by its diagram rather than by its
@@ -70,14 +97,27 @@ struct DiagramShelfView: View {
             .padding(.vertical, 14)
             // Escape backs out one step at a time -- out of the cards, then out of the query, then
             // out of the shelf -- which is what it does everywhere else in macOS.
+            .coordinateSpace(name: DiagramShelfView.space)
+            .onPreferenceChange(CardFrameKey.self) { frames in
+                cardFrames.merge(frames) { _, new in new }
+            }
             .onExitCommand(perform: retreat)
             .onKeyPress(.leftArrow) { step(-1) }
             .onKeyPress(.rightArrow) { step(1) }
             // Handled here rather than on the card: `focusable()` wraps a plain-styled Button in
             // something that takes the focus but does not pass it these, so a card that plainly had
             // the focus ring did nothing when Return was pressed on it.
+            // Return opens the diagram properly, in a window of its own. Space is the glance:
+            // it grows a preview out of the card and the next Space puts it back, which is what
+            // the key does in Finder and therefore what a hand expects it to do here.
             .onKeyPress(.return) { actOnFocused(openEntry) }
-            .onKeyPress(.space) { actOnFocused(openEntry) }
+            .onKeyPress(.space) {
+                if isPeeking() {
+                    endPeek()
+                    return .handled
+                }
+                return actOnFocused(peekEntry)
+            }
             // Matched on the character rather than on `KeyEquivalent.delete`: measured, neither
             // `.delete` nor `.deleteForward` fired for the key labelled Delete on this keyboard,
             // and a card with a focus ring on it that ignores Delete is a dead key.
@@ -235,6 +275,16 @@ struct DiagramShelfView: View {
                         .focusable()
                         .focused($focus, equals: .card(entry.id))
                         .id(entry.id)
+                        // Where this card is, so a peek can grow out of it. Reported rather than
+                        // computed: the row scrolls, so a card's place is only known by asking it.
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: CardFrameKey.self,
+                                    value: [entry.id: proxy.frame(in: .named(DiagramShelfView.space))]
+                                )
+                            }
+                        )
                     }
                 }
                 .padding(.horizontal, 18)
@@ -290,6 +340,11 @@ struct DiagramShelfView: View {
 
     /// One step out: off the cards, then out of the query, then off the screen.
     private func retreat() {
+        // The peek is the innermost thing on screen, so it is the first thing Escape takes away.
+        if isPeeking() {
+            endPeek()
+            return
+        }
         if case .card = focus {
             focus = .search
         } else if !query.isEmpty {
@@ -331,8 +386,20 @@ struct DiagramShelfView: View {
               let index = visible.firstIndex(where: { $0.id == id }) else { return .ignored }
         let next = index + delta
         guard visible.indices.contains(next) else { return .handled }
-        focus = .card(visible[next].id)
+        let entry = visible[next]
+        focus = .card(entry.id)
+        // A peek that is up follows the focus. This is the reason it is a peek and not a window:
+        // the shelf keeps the keyboard, so arrowing along it reads the diagrams one after another
+        // without opening and closing anything.
+        if isPeeking() { peekEntry(entry) }
         return .handled
+    }
+
+    /// Grows a preview out of this card, or moves the one that is up onto it.
+    private func peekEntry(_ entry: DiagramHistoryEntry) {
+        guard let document = entry.document(fallbackTitle: String(localized: "diagram.default-title")),
+              let frame = cardFrames[entry.id] else { return }
+        peek(document, frame)
     }
 
     private func openEntry(_ entry: DiagramHistoryEntry) {

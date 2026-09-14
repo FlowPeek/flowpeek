@@ -885,7 +885,76 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     private(set) var quickIsPinned = false
 
     /// A pinned panel that is already drawing takes the next diagram itself.
-    var acceptsDiagramInPlace: Bool { quickIsPinned && quickPanelIsDiagram && quickModel != nil }
+    /// Where a peek came from, and whether one is up at all.
+    ///
+    /// A peek is the quick panel raised from a shelf card rather than from a selection, and it
+    /// behaves differently in two ways: it grows out of the card it was asked for and shrinks back
+    /// into it, and it takes a new diagram in place while it is up, so arrowing along the shelf
+    /// changes what is shown instead of closing and reopening a panel under the reader.
+    private(set) var peekOrigin: CGRect?
+    /// True only while `peek` is raising one. `showQuick` tears the old panel down before building
+    /// the new one, and that teardown ends a peek -- so the origin cannot be set until afterwards,
+    /// and this is what tells the panel it is a peek in the meantime.
+    private var raisingPeek = false
+    var isPeeking: Bool { peekOrigin != nil || raisingPeek }
+
+    var acceptsDiagramInPlace: Bool {
+        (quickIsPinned || isPeeking) && quickPanelIsDiagram && quickModel != nil
+    }
+
+    /// How long the grow and the shrink take. Short enough to feel like the panel came from the
+    /// card rather than that the card launched it.
+    private static let peekDuration: TimeInterval = 0.2
+
+    /// Raise a preview out of `origin`, a rect in screen coordinates -- the card that was asked
+    /// about. A peek already up takes the new diagram where it stands.
+    func peek(document: DiagramDocument, from origin: CGRect) {
+        if isPeeking, acceptsDiagramInPlace {
+            peekOrigin = origin
+            showQuick(document: document)
+            return
+        }
+        raisingPeek = true
+        showQuick(document: document)
+        raisingPeek = false
+        // After, not before: `showQuick` closes whatever was there first, and closing clears this.
+        peekOrigin = origin
+        guard let panel = quickPanel else { return }
+        let target = panel.frame
+        // Start as the card, end as the panel. `setFrame` before the first paint, so the grow is
+        // the first thing seen rather than a full-size panel that then shrinks.
+        panel.setFrame(origin, display: false)
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.peekDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().setFrame(target, display: true)
+            panel.animator().alphaValue = 1
+        }
+    }
+
+    /// Shrink the peek back into the card it came from and let it go.
+    func endPeek() {
+        guard let origin = peekOrigin, let panel = quickPanel else {
+            peekOrigin = nil
+            closeQuick()
+            return
+        }
+        peekOrigin = nil
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.peekDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().setFrame(origin, display: true)
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            // Only if nothing else has taken the panel over in the meantime: a selection that
+            // raised its own preview during the shrink must not be closed by the end of this one.
+            guard let self, self.quickPanel === panel else { return }
+            self.closeQuick()
+            panel.alphaValue = 1
+        }
+    }
 
     private func setQuickPinned(_ pinned: Bool) {
         guard quickIsPinned != pinned else { return }
@@ -935,7 +1004,13 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         )
         quickPanel = panel
         installDismissMonitors()
-        panel.makeKeyAndOrderFront(nil)
+        // A peek leaves the keyboard where it was, which is the shelf that asked for it.
+        if isPeeking {
+            (panel as? FlowPeekGlassPanel)?.refusesKey = true
+            panel.orderFrontRegardless()
+        } else {
+            panel.makeKeyAndOrderFront(nil)
+        }
         markSettled(.quick)
     }
 
@@ -1087,6 +1162,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
 
     func closeQuick() {
         trace("closeQuick")
+        peekOrigin = nil
         dismissQuickPanel()
         releaseQuickModel()
     }
@@ -1240,6 +1316,11 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     private func handlePanelKey(_ stroke: PreviewKeyStroke, surface: PreviewKeyBinding.Surface) -> Bool {
         guard quickPanel != nil,
               let command = PreviewKeyBinding.command(for: stroke, surface: surface) else { return false }
+        // While a peek is up the arrows belong to the shelf that raised it: they walk along the row
+        // and the peek follows. Panning the drawing instead would end the browse at the first
+        // diagram, and this monitor consumes what it handles, so declining here is what lets the
+        // key through at all.
+        if isPeeking, case .pan = command { return false }
         if command == .close {
             trace("escape dismiss")
             closeQuick()

@@ -99,7 +99,13 @@ struct FlowPeekGlassSurface<Content: View>: View {
 
 /// A borderless panel still has to accept keys, or Escape and every button inside it are inert.
 final class FlowPeekGlassPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
+    /// Whether this panel may take the keyboard.
+    ///
+    /// False for a peek raised from the shelf: the shelf keeps the keys, so the arrows keep walking
+    /// along it and the preview follows. A panel that took the keyboard would end that at the first
+    /// diagram, which is the whole thing the peek exists to avoid.
+    var refusesKey = false
+    override var canBecomeKey: Bool { !refusesKey }
     override var canBecomeMain: Bool { false }
     override func cancelOperation(_ sender: Any?) { close() }
 }

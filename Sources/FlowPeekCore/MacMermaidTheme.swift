@@ -55,25 +55,32 @@ public struct MacMermaidTheme: Equatable, Sendable {
     /// An imitation of the look at github.com/cathrynlavery/diagram-design, as far as mermaid can be
     /// made to go.
     ///
-    /// Every value below is that project's own, read from its style guide and its example markup:
-    /// the paper/ink/muted/soft/rule palette, the 12px 600-weight node name, the 1.2 edge stroke,
-    /// the rx=6 node box, the coral accent and the gaps from its allowed ramp. What that project
-    /// has and mermaid does not -- per-node-type opacity ladders, orthogonal connector routing with
-    /// quarter-arc elbows, index numerals, legend strips, dot paper -- is skipped rather than
-    /// approximated, because a half-imitation of a device reads worse than its absence.
+    /// The first cut of this theme kept the palette's restraint and lost the palette: every node was
+    /// paper on paper behind a 12% hairline, and the coral was spent only on notes, which most
+    /// previews do not contain. Measured against the source, that is the wrong half. Across its 56
+    /// examples the coral is 9.5% of paint operations and lands on exactly one node -- three examples
+    /// use none at all -- while 56% is an ink/muted/soft ramp. What makes those pages read as drawn
+    /// rather than flat is the seven-rung node ladder, and what makes the ladder legible is its
+    /// STROKE ramp: ink, muted, soft, and a light composite, with the fills only a wash apart. So the
+    /// ladder below is built stroke-first, and the accent is the last thing spent rather than the fix.
     ///
-    /// Two deliberate departures, each with the source's own reasoning behind it:
+    /// Three departures from the source, each with its own reason:
     ///
-    /// The accent is fixed rather than the reader's. It exists to mark the one or two things to
-    /// look at first -- "coral is editorial, not a flag" -- and spending a reader's graphite or pink
-    /// on that would put a sixth colour into a five-colour palette at the one place the palette is
-    /// doing the most work.
+    /// The accent is fixed rather than the reader's. It marks the one thing to look at first --
+    /// "coral is editorial, not a flag" -- and spending a reader's graphite or pink there would put a
+    /// sixth colour into a five-colour palette at the place the palette works hardest.
     ///
-    /// Arrow labels are 12px, not the 8px the source ships. Its own hard floor is "Hangul goes
-    /// muddy below 12px; if a Korean name doesn't fit at 12px, cut the name, don't shrink the type",
-    /// and Korean is a first-class language here, so the floor wins over the ratio. Hierarchy is
-    /// carried by weight and colour instead, which is how the source separates a node name from its
-    /// sublabel anyway.
+    /// Arrow labels are 12px, not the source's 8px. Its own floor is "Hangul goes muddy below 12px;
+    /// if a Korean name doesn't fit at 12px, cut the name, don't shrink the type", and Korean is first
+    /// class here. Hierarchy is carried by weight and colour instead, which is how the source
+    /// separates a node name from its sublabel anyway.
+    ///
+    /// No legend strip. The source mandates one and it is what normally licenses the colour, but a
+    /// legend has to extend the viewBox before the glue measures the drawing or it falls outside every
+    /// PNG and PDF export, and its words would enter the spoken narration as text the diagram does not
+    /// contain. The redundancy requirement is met by construction instead: every rung differs from its
+    /// neighbours in at least two of {fill, stroke, stroke width, dash}, so the whole ladder survives
+    /// greyscale with the hue deleted.
     static func editorial(
         appearance: Appearance,
         increaseContrast: Bool
@@ -88,10 +95,86 @@ public struct MacMermaidTheme: Equatable, Sendable {
         let soft = dark ? "#8E98AC" : "#7A8399"
         // A hairline at 12% normally; the solid rule when the reader has asked for more contrast,
         // which is the source's own stronger border rather than a colour invented for the occasion.
+        // It frames zones and secondary boxes only. It is deliberately NOT `nodeBorder` any more:
+        // routing every border through a 12% alpha also painted ER relationship labels
+        // (`.edgeLabel .label{fill:nodeBorder}`) and the state end bullet at 12%, which is how one
+        // assignment produced three separate ghosts.
         let rule = increaseContrast ? (dark ? "#BFC0C0" : "#4F5D75")
                                     : (dark ? "rgba(245,245,245,0.12)" : "rgba(45,49,66,0.12)")
         let accent = dark ? "#F08A59" : "#EB6C36"
-        let accentTint = dark ? "rgba(240,138,89,0.10)" : "rgba(235,108,54,0.08)"
+        // Accent text, for the one small label that carries the accent off its node. The stroke hue
+        // itself measures 2.86:1 on paper -- fine for a graphical object at 2px, under the app's own
+        // 4.5:1 readable ratio for 12px words, and the label-contrast pass cannot rescue an edge
+        // label (its mask rect is a sibling of the text, so `paperUnder` finds nothing behind it).
+        // So the words get a darker mix of the same hue: 5.9:1 light, 5.2:1 dark.
+        let accentText = dark ? accent : "#A33F13"
+        // The second chromatic family, and the only one legible enough to carry meaning on its own:
+        // 6.1:1 on light paper. Edges only -- the source never puts it on a node body.
+        let link = dark ? "#6A95D8" : "#2E5AA8"
+        // #6A95D8 is 4.24:1 on dark paper, under the readable ratio, so the words take a lighter mix
+        // for the same reason the accent's do.
+        let linkText = dark ? "#8FB3E8" : link
+
+        // --- the ladder ------------------------------------------------------
+        //
+        // Five node surfaces, one hue, no legend. The fills are the source's `ink @ 0.0x`
+        // expressions composited over `paper` and written as opaque hex -- not cosmetic: `parseRGB`
+        // in flowpeek-glue.js drops alpha, so an rgba ink wash is measured by the label-contrast
+        // pass as solid ink, the ink label above it computes at roughly 1:1, and the pass would
+        // repaint it to `lightInk`, i.e. paper on paper.
+        //
+        // Measured honestly: adjacent fills are 1.02-1.15:1 apart, which is what the source ships
+        // too. The ladder is carried by the STROKE ramp -- ink 11.8:1, muted 6.1:1, soft 3.4:1, a
+        // 55% ink composite 3.2:1 -- each of which clears the 3:1 WCAG 1.4.11 asks of a graphical
+        // object, with the fill and the dash as the second and third encodings.
+        //
+        // Increase Contrast reaches all of it -- it is the one accessibility control a reader has,
+        // and the first cut of this ladder routed around it. The washes deepen by 1.6, the quiet
+        // stroke goes from 3.2:1 to 4.5:1 (and stays below `muted`, so the ramp keeps its order),
+        // every outline widens to 1.25px and the focal one to 2.4px. Five rungs either way, each one
+        // further from its neighbours.
+        let wash = increaseContrast ? 1.6 : 1.0
+        let inkWash = { (alpha: Double) in Self.blend(ink, alpha * wash, over: paper) }
+        // The one rung the source does not derive: white in light, paper-2 in dark, because white on
+        // a dark page would be brighter than the ink it is outlined with.
+        let backendFill = dark ? paper2 : "#FFFFFF"
+        let storeFill = inkWash(0.10)
+        let entryFill = Self.blend(muted, 0.16 * wash, over: paper)
+        let terminalFill = inkWash(0.04)
+        let optionalFill = inkWash(0.02)
+        // 0.10 in both appearances. style-guide.md says 0.10 and the shipped dark assets use 0.08;
+        // on a screen at preview size the difference is one RGB level, so one number is stated here
+        // rather than two that have to be kept in step.
+        let focalFill = Self.blend(accent, 0.10, over: paper)
+        // The quiet end of the stroke ramp. Composited rather than left as rgba() so it can be
+        // reasoned about: 3.2:1 light, 4.8:1 dark. The source's own 0.30 measures 1.78:1, which is
+        // not a boundary on a screen -- it gets away with it because it always ships a legend.
+        let quietStroke = Self.blend(ink, increaseContrast ? 0.68 : 0.55, over: paper)
+        let strokeWidth = increaseContrast ? "1.25px" : "1px"
+        // type-line.md: "focus is carried by stroke weight, not tone -- 2.4px focal against 1.2px".
+        // Twice the ladder's weight, taken literally, because the hue cannot carry it alone.
+        let focalWidth = increaseContrast ? "2.4px" : "2px"
+        let accentEdgeWidth = increaseContrast ? "2.4px" : "2px"
+
+        let ladder: [Rung] = [
+            // The workhorse, and what a decision diamond gets too: the source's own legend draws
+            // DECISION as a plain white diamond.
+            Rung(token: "backend", fill: backendFill, stroke: ink, width: strokeWidth, dash: nil),
+            // A cylinder [(…)] is the author declaring a datastore out loud -- the one place shape
+            // decides a rung, and import-mermaid.md's own mapping.
+            Rung(token: "store", fill: storeFill, stroke: muted, width: strokeWidth, dash: nil),
+            // In-degree 0. import-mermaid.md gives exactly this to its two entry rects, which are
+            // the same shape as the backend rect beside them: structure decides, not shape.
+            Rung(token: "entry", fill: entryFill, stroke: soft, width: strokeWidth, dash: nil),
+            // Out-degree 0. The quietest surface on the page -- measured, all three non-focal ovals
+            // in the source's own flowchart take this, including the start oval.
+            Rung(token: "terminal", fill: terminalFill, stroke: quietStroke, width: strokeWidth, dash: nil),
+            // Reached only by `-.->`: the author saying "conditional". Same stroke as terminal, so
+            // the dash is what tells them apart, and it survives greyscale.
+            Rung(token: "optional", fill: optionalFill, stroke: quietStroke, width: strokeWidth, dash: "4,3"),
+            // At most one per diagram, and usually none. Its label stays ink.
+            Rung(token: "focal", fill: focalFill, stroke: accent, width: focalWidth, dash: nil),
+        ]
 
         // Three families, because the source says the three-way contrast is load-bearing -- and its
         // own CSS already falls back to system-ui / serif / ui-monospace, so substituting the faces
@@ -100,17 +183,29 @@ public struct MacMermaidTheme: Equatable, Sendable {
         let sans = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif"
         let mono = "ui-monospace, 'SF Mono', Menlo, 'Apple SD Gothic Neo', monospace"
 
-        let variables: [String: String] = [
+        // A depth ladder for the three types mermaid indexes by depth itself. It alternates ink and
+        // muted rather than stepping the ink wash, because `cScaleN` is used as an unstroked node
+        // FILL *and* as the stroke of an 11px branch: a wash there is an eleven-pixel invisible line.
+        var sections: [String: String] = [:]
+        for rung in 0..<12 {
+            sections["cScale\(rung)"] = rung % 2 == 0 ? ink : muted
+            sections["cScaleLabel\(rung)"] = paper
+            sections["cScaleInv\(rung)"] = muted
+        }
+
+        var variables: [String: String] = [
             "fontFamily": sans,
             // 12, from the allowed ramp of 8/12/16/20/24/28/32/40, and the Hangul floor.
             "fontSize": "12px",
             "background": paper,
-            // Node fill is paper too: in this language a box is told apart from the page by its
-            // hairline, not by a different fill. Subgraph containers take paper-2.
-            "primaryColor": paper,
-            "mainBkg": paper,
+            // The default node surface is the backend rung, so every type without a structural sweep
+            // still gets a real box. `mainBkg` has to be said out loud: theme-default hardcodes
+            // #ECECFF before its `||` defaults run, so `primaryColor` alone never reaches a node.
+            "primaryColor": backendFill,
+            "mainBkg": backendFill,
             "primaryTextColor": ink,
-            "primaryBorderColor": rule,
+            "primaryBorderColor": muted,
+            "nodeBorder": muted,
             "secondaryColor": paper2,
             "secondaryTextColor": ink,
             "secondaryBorderColor": rule,
@@ -120,25 +215,27 @@ public struct MacMermaidTheme: Equatable, Sendable {
             "lineColor": muted,
             "textColor": ink,
             "titleColor": ink,
-            "nodeBorder": rule,
             "nodeTextColor": ink,
-            "clusterBkg": paper2,
+            // A zone is a hairline frame, never a filled band: the stylesheet takes its fill to
+            // `none` so no rung can collide with the surface it sits on.
+            "clusterBkg": paper,
             "clusterBorder": rule,
             "edgeLabelBackground": paper,
             "labelColor": ink,
-            // Notes are the one place the accent tint earns its keep without being a flag.
-            "noteBkgColor": accentTint,
+            // Notes give the accent up. A diagram with five notes drew five coral outlines, which is
+            // the source's own "coral on every important node" anti-pattern; a note is not a rung.
+            "noteBkgColor": terminalFill,
             "noteTextColor": ink,
-            "noteBorderColor": accent,
-            // Sequence. Its type sizes are set in the stylesheet below rather than here: these
-            // read as numbers in mermaid's own sequence config, and a "12px" string handed to them
-            // as a theme variable is dropped without complaint -- measured, the messages stayed at
-            // 16px while every node label was 12.
+            "noteBorderColor": muted,
+            // Sequence. Its type sizes are set in the stylesheet below rather than here: these read
+            // as numbers in mermaid's own sequence config, and a "12px" string handed to them as a
+            // theme variable is dropped without complaint -- measured, the messages stayed at 16px
+            // while every node label was 12.
             "actorFontFamily": sans,
             "messageFontFamily": sans,
             "noteFontFamily": sans,
-            "actorBkg": paper,
-            "actorBorder": rule,
+            "actorBkg": backendFill,
+            "actorBorder": ink,
             "actorTextColor": ink,
             "actorLineColor": muted,
             "signalColor": muted,
@@ -146,30 +243,99 @@ public struct MacMermaidTheme: Equatable, Sendable {
             "labelBoxBkgColor": paper2,
             "labelBoxBorderColor": rule,
             "labelTextColor": ink,
-            "loopTextColor": soft,
-            "activationBkgColor": accentTint,
-            "activationBorderColor": accent,
+            "loopTextColor": muted,
+            // Furniture, not a focal element: a sequence diagram can carry a dozen activation bars.
+            "activationBkgColor": storeFill,
+            "activationBorderColor": muted,
             "sequenceNumberColor": paper,
-            // State and class.
-            "altBackground": paper2,
+            // State. The ladder mermaid gives away through variables alone.
+            "stateBkg": backendFill,
+            // MUST accompany stateBkg: theme-default evaluates
+            // `stateLabelColor || stateBkg || primaryTextColor` BEFORE defaulting stateBkg, so
+            // setting stateBkg alone paints every state label the colour of its own box.
+            "stateLabelColor": ink,
+            "stateBorder": ink,
+            "specialStateColor": muted,
+            // Reads as the end bullet's fill in mermaid's stylesheet, but nothing in 11.17.2 carries
+            // `circle.state-end` -- the end pseudo-state is drawn as a two-path rough ring. Set to a
+            // real colour anyway so that if mermaid starts emitting it, it is not the 12% ghost it
+            // used to be. State diagrams get no accent: there is no element to put it on.
+            "innerEndBackground": muted,
+            "compositeBackground": optionalFill,
+            "compositeTitleBackground": paper2,
+            "altBackground": storeFill,
+            "transitionColor": muted,
+            "transitionLabelColor": muted,
+            "labelBackgroundColor": paper,
+            // ER: the ink ladder applied to a table, for free.
+            "rowOdd": backendFill,
+            "rowEven": terminalFill,
+            "erEdgeLabelBackground": paper,
             "classText": ink,
-            // Relationship and error ink, so a link reads as a link rather than as the body colour.
             "relationColor": muted,
-            "relationLabelColor": soft,
-            "errorBkgColor": accentTint,
+            "relationLabelColor": muted,
+            // Gantt, finished rather than half-touched: left alone it is periwinkle sections, a pure
+            // red critical task and a literal `red` today-line. The today-line is the one thing a
+            // reader looks at first and there is exactly one of it, so it is the accent; everything
+            // else is the ladder, and the critical task is told apart by an ink border.
+            "sectionBkgColor": optionalFill,
+            "altSectionBkgColor": paper,
+            "sectionBkgColor2": storeFill,
+            "excludeBkgColor": paper2,
+            "taskBkgColor": backendFill,
+            "taskBorderColor": muted,
+            "taskTextColor": ink,
+            "taskTextDarkColor": ink,
+            "taskTextLightColor": paper,
+            "taskTextOutsideColor": ink,
+            "taskTextClickableColor": ink,
+            "activeTaskBkgColor": entryFill,
+            "activeTaskBorderColor": ink,
+            "doneTaskBkgColor": terminalFill,
+            "doneTaskBorderColor": soft,
+            "critBkgColor": storeFill,
+            "critBorderColor": ink,
+            "gridColor": rule,
+            "vertLineColor": rule,
+            "todayLineColor": accent,
+            // A mindmap's root is its one unambiguous focal element, so it takes the focal tint --
+            // one accent, no heuristic. `git0`/`gitBranchLabel0` are shared with gitGraph's branch 0,
+            // which therefore also becomes pale coral: accepted, it is the trunk.
+            "git0": focalFill,
+            "gitBranchLabel0": ink,
+            "errorBkgColor": terminalFill,
             "errorTextColor": ink,
         ]
+        variables.merge(sections) { current, _ in current }
 
-        // What the variables cannot say. Kept to geometry, weight and the two type roles: every
-        // colour above is a token, and nothing here introduces one.
+        // What the variables cannot say. Every colour here is a token above; the structural class
+        // tokens (`fp-backend` … `fp-focal`, `fp-accent`, `fp-cross`) are written by
+        // flowpeek-glue.js from the graph's own shape, and every decision about what they look like
+        // is here. Specificity is (0,2,1) against mermaid's own (0,1,1), so no `!important` is
+        // needed -- and an author's `classDef`, which mermaid emits after this stylesheet with
+        // `!important`, still beats all of it by construction.
         let css = """
-        .node rect, .node polygon, .node path { stroke-width: 1px; rx: 6px; ry: 6px; }
-        .node circle, .node ellipse { stroke-width: 1px; }
-        .cluster rect { stroke-width: 1px; rx: 8px; ry: 8px; }
+        /* The glue runs its structural sweep only for a theme whose stylesheet can paint what the
+           sweep tags. It looks for this marker in the theme CSS before mermaid ever compiles it, so
+           the system theme -- which has no `.fp-` rules -- is untouched and its goldens do not move.
+           The rule itself matches nothing. */
+        .fp-ladder { --fp-ladder: on; }
+        /* rx only where it does something. It is inert on <polygon> and <path>, whose corners live
+           in `points`/`d`, and `:not([rx])` leaves mermaid's own rx="5" on `(round)` alone -- that
+           attribute is the one shape cue separating `[rect]` from `(round)`. */
+        .node rect.basic:not([rx]) { rx: 6px; ry: 6px; }
+        .node rect, .node polygon, .node path, .node circle, .node ellipse { stroke-width: \(strokeWidth); }
+        .cluster rect { fill: none; stroke: \(rule); stroke-width: 0.8px; rx: 8px; ry: 8px; }
         /* 600 on the name, 400 everywhere else: the source carries hierarchy in weight and colour
            rather than in size, which is what lets every label sit on the 12px Hangul floor. */
         .node .label text, .node .nodeLabel, .nodeLabel { font-weight: 600; }
-        .edgePath path, .flowchart-link, .relation { stroke-width: 1.2px; }
+        /* `==>` is the author asking for weight, and weight is this theme's non-colour channel, so
+           it is scoped around rather than flattened -- but brought into the ladder's range from
+           mermaid's 3.5px. */
+        .edgePath path:not(.edge-thickness-thick), .flowchart-link:not(.edge-thickness-thick), .relation {
+            stroke-width: 1.2px;
+        }
+        .flowchart-link.edge-thickness-thick, .edgePath path.edge-thickness-thick { stroke-width: 2.4px; }
         .edgeLabel, .edgeLabel .label text, .edgeLabel foreignObject div {
             font-family: \(mono);
             font-weight: 400;
@@ -178,18 +344,44 @@ public struct MacMermaidTheme: Equatable, Sendable {
             fill: \(muted);
         }
         .edgeLabel rect, .edgeLabel .background, rect.background { fill: \(paper); }
-        .cluster .cluster-label text, .cluster text { fill: \(soft); font-weight: 600; letter-spacing: 0.06em; }
+        /* The zone eyebrow. The source sets this in `soft`, which measures 3.5:1 on paper -- fine
+           for an outline, under this app's own 4.5:1 bar for words, and the label-contrast pass
+           never sees a cluster label. `soft` stays what it is here: a stroke colour, not an ink. */
+        .cluster .cluster-label text, .cluster text { fill: \(muted); font-weight: 600; letter-spacing: 0.06em; }
         marker path, marker polygon, .marker { fill: \(muted); stroke: \(muted); }
+
+        /* The ladder. Mermaid emits no shape class and no shape attribute, so each rung has to name
+           every form it can be drawn as: rect.basic (rect and round), circle.basic, polygon
+           (diamond, hexagon, subroutine, parallelogram, trapezoid), the bare path (cylinder), the
+           circles inside a doublecircle's wrapper, and the two-path group (stadium, terminator),
+           whose fill and outline are different elements -- one rule setting both would fill the
+           outline path and double-paint the shape. */
+        \(ladder.map(Self.rungCSS).joined(separator: "\n"))
+
+        /* The accent edge: its stroke, its own arrowhead -- cloned by the glue so every other arrow
+           keeps the shared marker -- and its label, which is the part usually forgotten and the part
+           that carries the accent off the node and along the flow. */
+        .flowchart-link.fp-accent, .edgePath path.fp-accent { stroke: \(accent); stroke-width: \(accentEdgeWidth); }
+        marker.fp-marker-accent path, marker.fp-marker-accent polygon { fill: \(accent); stroke: \(accent); }
+        .edgeLabels g.label.fp-accent text, .edgeLabels g.label.fp-accent tspan { fill: \(accentText); }
+
+        /* The second edge class, for a path that leaves one zone and enters another -- the source's
+           own trigger for it. The dash is not decoration: hue alone would be the only carrier, and
+           link-blue against muted is 1.003:1 in greyscale. Never on a node body. */
+        .flowchart-link.fp-cross, .edgePath path.fp-cross { stroke: \(link); stroke-dasharray: 6,3; }
+        marker.fp-marker-cross path, marker.fp-marker-cross polygon { fill: \(link); stroke: \(link); }
+        .edgeLabels g.label.fp-cross text, .edgeLabels g.label.fp-cross tspan { fill: \(linkText); }
+
         /* Sequence draws its own lines outside the edge classes above, and its dashed reply arrow
            kept mermaid's stock violet: measured, the variables alone do not reach it. */
         .messageLine0, .messageLine1, line.loopLine, .actor-line {
             stroke: \(muted);
             stroke-width: 1.2px;
         }
-        /* Sequence writes `font-size: 16px` inline onto every <text> it draws, from its own
-           config, and measured: setting actorFontSize and messageFontSize there does not change it.
-           An inline style beats a stylesheet, so this is one of the two places in this theme that
-           has to insist -- the alternative is the one diagram type that is mostly words sitting four
+        /* Sequence writes `font-size: 16px` inline onto every <text> it draws, from its own config,
+           and measured: setting actorFontSize and messageFontSize there does not change it. An
+           inline style beats a stylesheet, so this is one of the two places in this theme that has
+           to insist -- the alternative is the one diagram type that is mostly words sitting four
            points off every other type. */
         .messageText { fill: \(ink); font-size: 12px !important; font-weight: 400 !important; }
         text.actor, text.actor > tspan, .actor-box text {
@@ -230,6 +422,55 @@ public struct MacMermaidTheme: Equatable, Sendable {
             lightInk: paper,
             accent: accent
         )
+    }
+
+    /// One rung of the node ladder: a fill, a stroke, and the two channels that are not colour.
+    private struct Rung {
+        let token: String
+        let fill: String
+        let stroke: String
+        let width: String
+        let dash: String?
+    }
+
+    private static func rungCSS(_ rung: Rung) -> String {
+        let dash = rung.dash.map { " stroke-dasharray: \($0);" } ?? ""
+        return """
+        .node.fp-\(rung.token) rect.basic,
+        .node.fp-\(rung.token) circle.basic,
+        .node.fp-\(rung.token) polygon.label-container,
+        .node.fp-\(rung.token) path.basic.label-container,
+        .node.fp-\(rung.token) g.label-container circle {
+            fill: \(rung.fill); stroke: \(rung.stroke); stroke-width: \(rung.width);\(dash)
+        }
+        .node.fp-\(rung.token) g.outer-path path:nth-child(1) { fill: \(rung.fill); stroke: none; }
+        .node.fp-\(rung.token) g.outer-path path:nth-child(2) {
+            fill: none; stroke: \(rung.stroke); stroke-width: \(rung.width);\(dash)
+        }
+        """
+    }
+
+    /// `colour @ alpha` over `base`, as an opaque hex.
+    ///
+    /// The source states its ladder as `ink @ 0.05`; this does that arithmetic here instead of
+    /// shipping the `rgba()`. Not cosmetic: `parseRGB` in flowpeek-glue.js keeps only the rgb and
+    /// drops the alpha, so an rgba ink wash is measured by the label-contrast pass as solid ink --
+    /// the ink label above it computes at roughly 1:1 and the pass repaints it to `lightInk`, which
+    /// is paper on paper. Anything that stays `rgba()` here is a stroke, which that pass never reads.
+    private static func blend(_ colour: String, _ alpha: Double, over base: String) -> String {
+        guard let top = channels(colour), let bottom = channels(base) else { return colour }
+        let mixed = (0..<3).map { index -> Int in
+            let value = Double(bottom[index]) + (Double(top[index]) - Double(bottom[index])) * alpha
+            return min(255, max(0, Int(value.rounded())))
+        }
+        return String(format: "#%02X%02X%02X", mixed[0], mixed[1], mixed[2])
+    }
+
+    private static func channels(_ hex: String) -> [Int]? {
+        var text = hex.trimmingCharacters(in: .whitespaces)
+        if text.hasPrefix("#") { text.removeFirst() }
+        guard text.count == 6, let value = Int(text, radix: 16) else { return nil }
+        return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
     }
 
     /// For a theme that supplies its own values outright rather than deriving them from the

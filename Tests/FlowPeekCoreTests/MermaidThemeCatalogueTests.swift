@@ -219,13 +219,19 @@ final class EditorialThemeTests: XCTestCase {
         }
     }
 
-    /// A hairline at rest, the solid rule when the reader has asked for more contrast.
+    /// A hairline at rest, the solid rule when the reader has asked for more contrast. The hairline
+    /// moved: it frames zones and secondary boxes now, and no longer paints node borders, ER
+    /// relationship labels or the state end bullet at 12% alpha.
     func testIncreasedContrastStrengthensTheHairline() {
         for appearance in [MacMermaidTheme.Appearance.light, .dark] {
-            let soft = theme(appearance).variables["nodeBorder"]!
-            let strong = theme(appearance, contrast: true).variables["nodeBorder"]!
-            XCTAssertTrue(soft.hasPrefix("rgba"), "the resting border should be a hairline")
+            let soft = theme(appearance).variables["clusterBorder"]!
+            let strong = theme(appearance, contrast: true).variables["clusterBorder"]!
+            XCTAssertTrue(soft.hasPrefix("rgba"), "the resting zone frame should be a hairline")
             XCTAssertFalse(strong.hasPrefix("rgba"), "increased contrast should go solid")
+            XCTAssertFalse(
+                theme(appearance).variables["nodeBorder"]!.hasPrefix("rgba"),
+                "a node outline is not a hairline: it is the rung, and it has to be visible"
+            )
         }
     }
 

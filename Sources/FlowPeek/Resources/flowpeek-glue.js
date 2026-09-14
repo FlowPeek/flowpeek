@@ -402,6 +402,270 @@
     return "parse";
   }
 
+  // ---------------------------------------------------------------------------
+  // Structural rungs.
+  //
+  // A theme can say what a node type looks like; it cannot say what a node IS, because mermaid
+  // emits no node type, no shape name and no degree. This pass reads the graph's own shape out of
+  // the markup -- in-degree, out-degree, declared cylinders, subgraph membership -- and writes
+  // class tokens: `fp-backend` / `fp-store` / `fp-entry` / `fp-terminal` / `fp-optional` /
+  // `fp-focal` on nodes, `fp-accent` and `fp-cross` on edges and their labels. Not one colour
+  // value appears in this file; the theme's stylesheet decides what each token looks like.
+  //
+  // Three things follow from that, and all three are why it is done this way:
+  //
+  //   a theme that asks for nothing is untouched. The sweep runs only when the theme's own CSS
+  //   carries the marker rule, so the system theme's 124 goldens stay byte-identical;
+  //
+  //   an author still wins. mermaid emits `classDef` and `style` rules AFTER the theme's
+  //   stylesheet and writes them with !important, so a node the author painted keeps the author's
+  //   colour without a single check here;
+  //
+  //   and it is all attributes. Node ids carry the mermaid id, edge data-ids carry the endpoints,
+  //   cluster rects and node transforms share one untransformed coordinate space. No getBBox, no
+  //   getComputedStyle, no layout -- measured at 0.30ms on a 151-node graph against 3.7ms for the
+  //   same walk asking for a bounding box, which is also why it can run on the detached node
+  //   before anything is attached.
+  //
+  // What it deliberately does not do is guess. A diagram with no single busiest node gets no
+  // accent at all, which is what the source itself asks for: leave it unaccented rather than
+  // promoting an arbitrary node.
+  // ---------------------------------------------------------------------------
+
+  // The theme's opt-in. Read from the payload's CSS as a plain string, before mermaid compiles it.
+  var LADDER_MARKER = ".fp-ladder";
+  // The only families whose markup carries edge endpoints. stateDiagram's data-id is opaque
+  // ("edge0"), and about half the supported types emit no edge metadata at all.
+  var LADDER_TYPES = { "flowchart-v2": 1, "flowchart-elk": 1, "swimlane": 1 };
+
+  function tagStructure(svg, renderID, diagramType, themeCSS) {
+    if (String(themeCSS || "").indexOf(LADDER_MARKER) === -1) return null;
+    if (!LADDER_TYPES[String(diagramType || "")]) return null;
+
+    var prefix = String(renderID || "") + "-flowchart-";
+    var byId = {}, nodes = [];
+    svg.querySelectorAll("g.nodes > g.node").forEach(function (g) {
+      var id = String(g.id || "");
+      if (id.indexOf(prefix) !== 0) return;
+      // "<renderID>-flowchart-<mermaidId>-<counter>", and a mermaid id may itself contain "-" and
+      // "_", so take everything up to the trailing counter.
+      var m = /^(.+)-(\d+)$/.exec(id.slice(prefix.length));
+      if (!m) return;
+      var rec = { el: g, id: m[1], inDeg: 0, outDeg: 0, edges: 0, dotted: 0, incoming: [] };
+      byId[m[1]] = rec;
+      nodes.push(rec);
+    });
+    if (nodes.length < 2) return null;
+
+    // data-id is "L_" + from + "_" + to + "_" + counter, and both halves may contain underscores --
+    // `a_1 --> b_2` emits L_a_1_b_2_0. Resolve the split against the ids that actually exist rather
+    // than guessing, and give up rather than guess when none of them matches: an author-defined
+    // edge id replaces the convention outright.
+    function endpoints(dataID) {
+      var m = /^L_(.+)_(\d+)$/.exec(dataID || "");
+      if (!m) return null;
+      var body = m[1];
+      for (var i = 1; i < body.length - 1; i++) {
+        if (body.charAt(i) !== "_") continue;
+        var from = byId[body.slice(0, i)], to = byId[body.slice(i + 1)];
+        if (from && to) return [from, to];
+      }
+      return null;
+    }
+
+    var edges = [];
+    svg.querySelectorAll("g.edgePaths path[data-id]").forEach(function (path) {
+      var pair = endpoints(path.getAttribute("data-id"));
+      if (!pair) return;
+      // `.edge-pattern-solid` is worthless as a test: mermaid appends an unconditional
+      // "edge-thickness-normal edge-pattern-solid" pair to every edge. Only dashed, dotted and
+      // thick carry information.
+      var dotted = path.classList.contains("edge-pattern-dotted");
+      var patterned = dotted || path.classList.contains("edge-pattern-dashed");
+      var edge = {
+        path: path,
+        id: String(path.getAttribute("data-id") || ""),
+        from: pair[0],
+        to: pair[1],
+        patterned: patterned
+      };
+      pair[0].outDeg++; pair[1].inDeg++;
+      pair[0].edges++; pair[1].edges++;
+      if (dotted) { pair[0].dotted++; pair[1].dotted++; }
+      pair[1].incoming.push(edge);
+      edges.push(edge);
+    });
+    if (!edges.length) return null;
+
+    // Subgraph membership is not in the DOM: g.clusters and g.nodes are flat siblings even for
+    // nested subgraphs. But neither they nor g.root carry a transform, so a cluster rect's
+    // x/y/width/height and a node's translate() are directly comparable. Innermost wins.
+    var zones = [];
+    svg.querySelectorAll("g.clusters > g.cluster").forEach(function (cluster) {
+      var r = cluster.querySelector("rect");
+      if (!r) return;
+      var x = parseFloat(r.getAttribute("x")), y = parseFloat(r.getAttribute("y"));
+      var w = parseFloat(r.getAttribute("width")), h = parseFloat(r.getAttribute("height"));
+      if (!isFinite(x) || !isFinite(y) || !isFinite(w) || !isFinite(h)) return;
+      zones.push({ x: x, y: y, w: w, h: h, area: w * h });
+    });
+
+    function zoneOf(rec) {
+      if (!zones.length) return null;
+      var t = /translate\(\s*([-\d.]+)[\s,]+([-\d.]+)/.exec(rec.el.getAttribute("transform") || "");
+      if (!t) return null;
+      var cx = parseFloat(t[1]), cy = parseFloat(t[2]), best = null;
+      for (var i = 0; i < zones.length; i++) {
+        var z = zones[i];
+        if (cx < z.x || cx > z.x + z.w || cy < z.y || cy > z.y + z.h) continue;
+        if (!best || z.area < best.area) best = z;
+      }
+      return best;
+    }
+
+    // A cylinder is a bare <path class="basic label-container outer-path">; a stadium is a <g> of
+    // the same classes holding two paths. That tagName difference is the whole discriminator, and
+    // it is the one place a shape decides a rung -- because a cylinder is the author declaring a
+    // datastore, not us inferring one.
+    function isCylinder(rec) {
+      var shape = rec.el.firstElementChild;
+      return !!shape && shape.tagName.toLowerCase() === "path" && shape.classList.contains("outer-path");
+    }
+
+    // `style X fill:#900` and `classDef` reach the shape as an inline fill -- the same fact
+    // `paperUnder` already reads. "The author chose this" is readable, not guessable.
+    function authored(rec) {
+      var shape = rec.el.firstElementChild;
+      return !!shape && /(^|;)\s*fill\s*:/i.test(shape.getAttribute("style") || "");
+    }
+
+    var counts = {
+      backend: 0, store: 0, entry: 0, terminal: 0, optional: 0, focal: 0, accent: 0, cross: 0
+    };
+    nodes.forEach(function (n) {
+      var rung = isCylinder(n) ? "store"
+        : (n.inDeg === 0 && n.outDeg > 0) ? "entry"
+        : (n.outDeg === 0 && n.inDeg > 0) ? "terminal"
+        : "backend";
+      // Author intent outranks computed role: a node reached only by `-.->` is conditional.
+      if (n.edges > 0 && n.dotted === n.edges) rung = "optional";
+      n.rung = rung;
+      n.el.classList.add("fp-" + rung);
+      counts[rung]++;
+    });
+
+    // ------------------------------------------------------------------------
+    // The focal node: one, or none, and none is the common answer.
+    //
+    // The only structure that names a single thing to look at without inventing a story is a node
+    // that is busier than everything else on the page -- the API-gateway case. A rule that fired on
+    // "the last node" would fire on every linear chain the app previews, which is how an editorial
+    // accent turns into "this is where the arrows stop", the one thing the source calls an
+    // anti-pattern. So: strictly one node at the top, and genuinely busy, or nothing.
+    // ------------------------------------------------------------------------
+    var focal = null;
+    if (nodes.length >= 4) {
+      var top = null, ties = 0;
+      for (var i = 0; i < nodes.length; i++) {
+        var degree = nodes[i].inDeg + nodes[i].outDeg;
+        if (!top || degree > top.degree) { top = { rec: nodes[i], degree: degree }; ties = 1; }
+        else if (degree === top.degree) ties++;
+      }
+      if (top && ties === 1 && top.degree >= 4) focal = top.rec;
+      // The author has already said where to look.
+      if (focal && authored(focal)) focal = null;
+    }
+
+    // One cloned arrowhead per kind. Every arrow in a flowchart points at the same shared marker,
+    // so a per-edge head is the one thing CSS cannot do -- and mermaid clones markers for
+    // `linkStyle` itself, which is the precedent. `marker-end="url(#…)"` survives the scrub by
+    // construction: it is not one of the attributes the scrub rewrites, and its url() points inside
+    // the document.
+    var markers = {};
+    function retarget(path, kind) {
+      var ref = /url\(#([^)]+)\)/.exec(path.getAttribute("marker-end") || "");
+      if (!ref) return;
+      if (!markers[kind]) {
+        var source = null, all = svg.querySelectorAll("marker");
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].id === ref[1]) { source = all[i]; break; }
+        }
+        if (!source || !source.parentNode) return;
+        var clone = source.cloneNode(true);
+        clone.id = String(renderID || "fp") + "-fp-" + kind + "-head";
+        // Drop mermaid's own `marker` class so only the theme's fp- rule paints the clone.
+        clone.setAttribute("class", "fp-marker fp-marker-" + kind);
+        source.parentNode.appendChild(clone);
+        markers[kind] = clone;
+      }
+      path.setAttribute("marker-end", "url(#" + markers[kind].id + ")");
+    }
+
+    function tagEdge(edge, kind) {
+      edge.path.classList.add("fp-" + kind);
+      // The label group carries the same data-id as its path. An author-chosen edge id could carry
+      // a quote, which would be a broken selector rather than a styled label.
+      if (edge.id && !/["\\\]]/.test(edge.id)) {
+        svg.querySelectorAll('g.edgeLabels g.label[data-id="' + edge.id + '"]').forEach(function (l) {
+          l.classList.add("fp-" + kind);
+        });
+      }
+      retarget(edge.path, kind);
+      counts[kind]++;
+    }
+
+    if (focal) {
+      focal.el.classList.remove("fp-" + focal.rung);
+      counts[focal.rung]--;
+      focal.el.classList.add("fp-focal");
+      counts.focal = 1;
+      // The accent edge is derived from the focal node, never chosen: the one edge into it, with
+      // its arrowhead and its label, which is the part that carries the accent off the node and
+      // along the flow.
+      //
+      // It abstains on a tie, the same way the focal node itself does. Breaking the tie on DOM
+      // order is deterministic but not defensible on the page: two entry nodes that are alike in
+      // every way, one of whose edges is coral, asks the reader to find a difference that is not
+      // there. Rendered and looked at, that is exactly how it read. No edge is better than an
+      // arbitrary one -- the node still carries the accent.
+      var best = null;
+      var tied = false;
+      for (var e = 0; e < focal.incoming.length; e++) {
+        var candidate = focal.incoming[e];
+        if (!best || candidate.from.outDeg > best.from.outDeg) {
+          best = candidate;
+          tied = false;
+        } else if (candidate.from.outDeg === best.from.outDeg) {
+          tied = true;
+        }
+      }
+      if (best && !tied) tagEdge(best, "accent");
+    }
+
+    // The second edge class: a path that leaves one zone and enters another, which is the source's
+    // own trigger for it. Both ends have to be IN a zone -- an edge to a node that is in no
+    // subgraph has not crossed a boundary, and counting it as one made every edge in a
+    // half-grouped diagram "crossing". Capped so it stays a category rather than becoming the
+    // default stroke, and an edge the author already patterned is left alone because the class
+    // carries its own dash.
+    if (zones.length) {
+      var crossing = [];
+      for (var k = 0; k < edges.length; k++) {
+        var edge = edges[k];
+        if (edge.patterned || edge.path.classList.contains("fp-accent")) continue;
+        var from = zoneOf(edge.from), to = zoneOf(edge.to);
+        if (from && to && from !== to) crossing.push(edge);
+      }
+      if (crossing.length && crossing.length <= 6 && crossing.length * 3 <= edges.length) {
+        for (var c = 0; c < crossing.length; c++) tagEdge(crossing[c], "cross");
+      }
+    }
+
+    // Counts only. Nothing here names a node, an edge or a label: what the reader is previewing
+    // never leaves this function.
+    return { nodes: nodes.length, edges: edges.length, zones: zones.length, rungs: counts };
+  }
+
   async function render(rawPayload) {
     var p;
     try {
@@ -439,6 +703,9 @@
       if (!svg) { wipeMeasure(); return fail("render-no-svg", "mermaid returned no <svg> element"); }
       var node = document.importNode(svg, true);
       var scrubbed = scrub(node);
+      // Structural rungs, on the detached node: this pass touches no layout, so it costs nothing
+      // here, and it must run before makeLabelsReadable(), which reads computed fills.
+      tagStructure(node, String(p.renderID || "fp-0"), r.diagramType, p.themeCSS);
       diagram.replaceChildren(node);
 
       // Post-condition: an <svg> is really in the live DOM, or this is a failure.

@@ -56,10 +56,15 @@ final class PeekOriginTests: XCTestCase {
 
     /// The zoom's first frame is the card. Not near it, not scaled toward it: the same rectangle.
     func testTheZoomStartsExactlyOnTheCardItWasGiven() async throws {
+        // Placed against the screen this is running on rather than at absolute coordinates. The
+        // first version used fixed rectangles from a large display and failed on a CI runner, where
+        // the window they implied did not fit and AppKit trimmed it.
+        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let size = CGSize(width: 188, height: 142)
         for card in [
-            CGRect(x: 300, y: 120, width: 188, height: 142),
-            CGRect(x: 1100, y: 120, width: 188, height: 142),
-            CGRect(x: 700, y: 900, width: 188, height: 142),
+            CGRect(origin: CGPoint(x: screen.minX + 40, y: screen.minY + 40), size: size),
+            CGRect(origin: CGPoint(x: screen.maxX - size.width - 40, y: screen.minY + 40), size: size),
+            CGRect(origin: CGPoint(x: screen.midX, y: screen.maxY - size.height - 40), size: size),
         ] {
             guard let began = try await start(from: card) else {
                 XCTFail("no animation for \(card)"); return
@@ -73,8 +78,10 @@ final class PeekOriginTests: XCTestCase {
 
     /// And the thing the reader actually reported: two cards far apart must not share a start.
     func testTwoCardsDoNotStartTheZoomInTheSamePlace() async throws {
-        let left = CGRect(x: 300, y: 120, width: 188, height: 142)
-        let right = CGRect(x: 1100, y: 120, width: 188, height: 142)
+        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let size = CGSize(width: 188, height: 142)
+        let left = CGRect(origin: CGPoint(x: screen.minX + 40, y: screen.minY + 40), size: size)
+        let right = CGRect(origin: CGPoint(x: screen.maxX - size.width - 40, y: screen.minY + 40), size: size)
         guard let fromLeft = try await start(from: left),
               let fromRight = try await start(from: right) else {
             XCTFail("no animation"); return

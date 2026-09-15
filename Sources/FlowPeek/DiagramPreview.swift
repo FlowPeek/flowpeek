@@ -984,7 +984,12 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         // at its real size inside it. A window cannot draw outside itself: scaling the content down
         // onto a card that sits below the panel simply cut it off at the panel's edge, which is how
         // the shrink came out clipped. Nothing here is outside the window, so nothing is clipped.
-        let stage = target.union(origin)
+        panel.setFrame(target.union(origin), display: false)
+        // Read back rather than assumed. AppKit clamps a window frame to the screen, and the union
+        // of a centred panel and a card near an edge can be larger than one -- on a small display it
+        // certainly is. Measuring from the frame actually granted keeps the content over its card
+        // instead of over wherever the untrimmed rectangle would have put it.
+        let stage = panel.frame
         let hostFrame = CGRect(
             x: target.minX - stage.minX,
             y: target.minY - stage.minY,
@@ -997,7 +1002,6 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
             width: origin.width,
             height: origin.height
         )
-        panel.setFrame(stage, display: false)
         container.pinContent(to: hostFrame)
         // Draw once, at the size and place the zoom starts from, before the zoom starts.
         //

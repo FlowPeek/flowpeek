@@ -999,16 +999,29 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         )
         panel.setFrame(stage, display: false)
         container.pinContent(to: hostFrame)
+        // Draw once, at the size and place the zoom starts from, before the zoom starts.
+        //
+        // The panel and its SwiftUI content are made moments earlier and have not painted yet, so
+        // without this the opening frames of the zoom are of an empty window: what a reader sees is
+        // the picture arriving somewhere in the middle of the travel, which looks the same wherever
+        // it began and is why the zoom read as starting from one fixed place whichever card was
+        // chosen.
+        container.content.layoutSubtreeIfNeeded()
+        panel.displayIfNeeded()
 
         // Scaled about the layer's centre, then carried over to where the card is.
+        //
+        // Written out rather than composed from `CATransform3DScale(translate, …)`, which produces
+        // exactly the same matrix -- checked, after a first guess that it did not. It is spelled
+        // out only so nobody has to re-derive which way round those helpers compose in order to
+        // read this.
         let scaleX = max(cardFrame.width / hostFrame.width, 0.05)
         let scaleY = max(cardFrame.height / hostFrame.height, 0.05)
-        var small = CATransform3DMakeTranslation(
-            cardFrame.midX - hostFrame.midX,
-            cardFrame.midY - hostFrame.midY,
-            0
-        )
-        small = CATransform3DScale(small, scaleX, scaleY, 1)
+        var small = CATransform3DIdentity
+        small.m11 = scaleX
+        small.m22 = scaleY
+        small.m41 = cardFrame.midX - hostFrame.midX
+        small.m42 = cardFrame.midY - hostFrame.midY
 
         let hadShadow = panel.hasShadow
         panel.hasShadow = false

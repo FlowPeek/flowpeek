@@ -1346,15 +1346,17 @@ final class TerminalPeekMonitor {
         guard let terminal = reading else { return nil }
         for candidate in editorFiles.candidates(under: terminal) {
             guard let file = contents(of: candidate.path) else { continue }
-            guard let placed = EditorViewportAlignment.placement(ofRows: rows, in: file.lines)
+            // Wrapped the way the editor wrapped it, and the same wrapping is used for the
+            // alignment, the row spans and the exactness check -- three answers about one screen.
+            let wrapped = EditorWrappedFile(lines: file.lines, columns: grid.columns)
+            guard let placed = EditorViewportAlignment.placement(ofRows: rows, in: wrapped)
             else { continue }
-            let firstLine = placed.firstLine
             let located = TerminalBufferScanner.blocks(in: file.text).compactMap { block -> Located? in
                 guard let span = EditorViewportAlignment.rowsOnScreen(
                     // The editor's own furniture is not the file and is not the diagram: only the
                     // rows that matched are rows a frame may be drawn over.
-                    ofLines: block.lines, firstLine: firstLine, rowCount: placed.matchedRows
-                ), showsExactly(block, at: span, firstLine: firstLine, rows: rows, file: file.lines),
+                    ofLines: block.lines, placement: placed, in: wrapped
+                ), showsExactly(at: span, placement: placed, rows: rows, file: wrapped),
                     let rectangle = TerminalPeekPolicy.rowsRectangle(
                         lines: span,
                         viewport: grid.viewport,
@@ -1371,17 +1373,16 @@ final class TerminalPeekMonitor {
 
     /// Whether the rows the reader can see of this block are the file's, character for character.
     private func showsExactly(
-        _ block: TerminalDiagramBlock,
         at span: ClosedRange<Int>,
-        firstLine: Int,
+        placement: EditorViewportAlignment.Placement,
         rows: [String],
-        file: [String]
+        file: EditorWrappedFile
     ) -> Bool {
         for row in span {
-            let line = firstLine + row
-            guard line >= 0, line < file.count, row < rows.count else { return false }
-            guard EditorViewportAlignment.normalise(rows[row]) == EditorViewportAlignment.normalise(file[line])
-            else { return false }
+            let fileRow = placement.firstRow + row
+            guard fileRow >= 0, fileRow < file.rows.count, row < rows.count else { return false }
+            guard EditorViewportAlignment.normalise(rows[row])
+                == EditorViewportAlignment.normalise(file.rows[fileRow]) else { return false }
         }
         return true
     }

@@ -17,6 +17,69 @@ import Foundation
 /// process owns every split and tab, and none of them says which pty is in front -- so the file is
 /// a candidate rather than an answer, and the alignment is what accepts or refuses it. A file whose
 /// lines are not on the screen does not align, and a candidate that does not align is not used.
+/// A file as an editor draws it: every line broken into the rows a pane of this width needs.
+///
+/// vim wraps a line wider than the window over as many rows as it takes, so the pane's rows and the
+/// file's lines stop being the same sequence at the first long line. Aligning them one to one --
+/// which is what this did -- ended the match there and made everything below it unreachable.
+/// Measured on a 741-line Korean document in a 178-column pane: of the 254 screens that show a
+/// diagram, 23 were framed nothing at all, and every one of them had a wrapping line above the
+/// diagram. Where the wrap fell on the pane's first rows there were fewer than `minimumRun` rows
+/// left to agree on and the file was refused outright.
+///
+/// So the comparison is made against the file wrapped the same way the editor wrapped it. With no
+/// column count the wrapping is the identity and everything behaves as it did.
+public struct EditorWrappedFile: Sendable {
+    /// The file's lines, each broken into the rows it is drawn over.
+    public let rows: [String]
+    /// The file line each row belongs to.
+    public let lineOfRow: [Int]
+    /// The row each line starts on, with one final entry for the row after the last line -- so the
+    /// rows of line `i` are `firstRowOfLine[i] ..< firstRowOfLine[i + 1]`.
+    public let firstRowOfLine: [Int]
+
+    public init(lines: [String], columns: Int?) {
+        var rows: [String] = []
+        var lineOfRow: [Int] = []
+        var firstRowOfLine: [Int] = []
+        firstRowOfLine.reserveCapacity(lines.count + 1)
+        for (number, line) in lines.enumerated() {
+            firstRowOfLine.append(rows.count)
+            for piece in Self.wrap(line, columns: columns) {
+                rows.append(piece)
+                lineOfRow.append(number)
+            }
+        }
+        firstRowOfLine.append(rows.count)
+        self.rows = rows
+        self.lineOfRow = lineOfRow
+        self.firstRowOfLine = firstRowOfLine
+    }
+
+    /// One line, as the rows it is drawn over. Broken on cells rather than characters, because that
+    /// is what the terminal breaks on -- see `RowContinuation.displayWidth`.
+    static func wrap(_ line: String, columns: Int?) -> [String] {
+        guard let columns, RowContinuation.columnRange.contains(columns), !line.isEmpty else {
+            return [line]
+        }
+        var pieces: [String] = []
+        var piece = ""
+        var width = 0
+        for character in line {
+            let cell = character.unicodeScalars.first.map(RowContinuation.cellWidth(of:)) ?? 1
+            if width + cell > columns, !piece.isEmpty {
+                pieces.append(piece)
+                piece = ""
+                width = 0
+            }
+            piece.append(character)
+            width += cell
+        }
+        if !piece.isEmpty || pieces.isEmpty { pieces.append(piece) }
+        return pieces
+    }
+}
+
 public enum EditorViewportAlignment {
     /// How many rows have to match before an alignment is believed.
     ///
@@ -48,10 +111,14 @@ public enum EditorViewportAlignment {
         /// where an unwritten edit stops the match: the changed row is not the file's, the run ends
         /// there, and what is framed is what still agrees.
         public let matchedRows: Int
+        /// Which row of the wrapped file the pane's first row is. The same number as `firstLine`
+        /// only while nothing above it wraps, which is why the two are kept apart.
+        public let firstRow: Int
 
-        public init(firstLine: Int, matchedRows: Int) {
+        public init(firstLine: Int, matchedRows: Int, firstRow: Int? = nil) {
             self.firstLine = firstLine
             self.matchedRows = matchedRows
+            self.firstRow = firstRow ?? firstLine
         }
     }
 
@@ -60,20 +127,30 @@ public enum EditorViewportAlignment {
     /// - Parameters:
     ///   - rows: the pane's rows, top to bottom, exactly as the terminal reported them.
     ///   - fileLines: the file, split on newlines.
-    public static func placement(ofRows rows: [String], in fileLines: [String]) -> Placement? {
-        guard !fileLines.isEmpty else { return nil }
+    public static func placement(
+        ofRows rows: [String],
+        in fileLines: [String],
+        columns: Int? = nil
+    ) -> Placement? {
+        placement(ofRows: rows, in: EditorWrappedFile(lines: fileLines, columns: columns))
+    }
+
+    /// The same, against a file already wrapped -- which the caller wants when it is going to ask
+    /// about row spans afterwards, because both answers have to come off the same wrapping.
+    public static func placement(ofRows rows: [String], in file: EditorWrappedFile) -> Placement? {
+        guard !file.rows.isEmpty else { return nil }
         // The editor's own furniture comes off the bottom: tildes past the end of the file, and the
         // status line, which is the one row that is never in the file.
         var body = rows
-        while let last = body.last, isChrome(last) || body.count > fileLines.count + 1 { body.removeLast() }
-        if let last = body.last, !last.isEmpty, !fileLines.contains(where: { $0.hasSuffix(last) }) {
+        while let last = body.last, isChrome(last) || body.count > file.rows.count + 1 { body.removeLast() }
+        if let last = body.last, !last.isEmpty, !file.rows.contains(where: { $0.hasSuffix(last) }) {
             body.removeLast()
         }
         guard body.count >= minimumRun else { return nil }
 
         // Anchor on the first row that says something. A blank row or a lone brace is in a hundred
         // places; a line of a diagram is usually in one.
-        let index = Self.index(of: fileLines)
+        let index = Self.index(of: file.rows)
         guard let anchorOffset = body.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).count > 3 })
         else { return nil }
         let anchor = normalise(body[anchorOffset])
@@ -85,8 +162,8 @@ public enum EditorViewportAlignment {
             let first = start - anchorOffset
             guard first >= 0 else { continue }
             var run = 0
-            while run < body.count, first + run < fileLines.count,
-                  normalise(fileLines[first + run]) == normalise(body[run]) {
+            while run < body.count, first + run < file.rows.count,
+                  normalise(file.rows[first + run]) == normalise(body[run]) {
                 run += 1
             }
             if run > best.run {
@@ -97,7 +174,11 @@ public enum EditorViewportAlignment {
             }
         }
         guard best.run >= minimumRun, best.run >= runner + minimumLead else { return nil }
-        return Placement(firstLine: best.start, matchedRows: best.run)
+        return Placement(
+            firstLine: file.lineOfRow[best.start],
+            matchedRows: best.run,
+            firstRow: best.start
+        )
     }
 
     /// Only the line, for callers that do not care how much of the pane was furniture.
@@ -127,6 +208,26 @@ public enum EditorViewportAlignment {
     ///
     /// Returns nil when none of it is, which is how a diagram the reader has scrolled away from
     /// stops being framed.
+    /// The rows a block occupies on screen, counted through the editor's own wrapping.
+    ///
+    /// A block's lines are as many rows as the pane needed to draw them, and the rows above it push
+    /// it down by however many they took. Both come off `file`, which has to be the wrapping the
+    /// placement was made against or the two answers are about different screens.
+    public static func rowsOnScreen(
+        ofLines lines: ClosedRange<Int>,
+        placement: Placement,
+        in file: EditorWrappedFile
+    ) -> ClosedRange<Int>? {
+        guard lines.lowerBound >= 0, lines.upperBound + 1 < file.firstRowOfLine.count else { return nil }
+        let top = max(file.firstRowOfLine[lines.lowerBound] - placement.firstRow, 0)
+        let bottom = min(
+            file.firstRowOfLine[lines.upperBound + 1] - 1 - placement.firstRow,
+            placement.matchedRows - 1
+        )
+        guard top <= bottom else { return nil }
+        return top...bottom
+    }
+
     public static func rowsOnScreen(
         ofLines lines: ClosedRange<Int>,
         firstLine: Int,

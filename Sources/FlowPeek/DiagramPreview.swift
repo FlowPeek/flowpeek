@@ -948,6 +948,18 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         }
     }
 
+    /// The card a peek came out of has moved, and this is where it is now.
+    ///
+    /// The shelf scrolls under a peek that is up -- arrowing along the row drags the focused card
+    /// to the middle -- and where a card is can only be known after the layout that moved it. So
+    /// the rect a peek is raised with is the best that was known at the keystroke, and this is how
+    /// it is corrected once the row has actually reported. Nothing on screen moves: the only thing
+    /// an origin decides once the preview is up is where it shrinks back to.
+    func movePeekOrigin(to origin: CGRect) {
+        guard peekOrigin != nil else { return }
+        peekOrigin = origin
+    }
+
     /// Grows the panel's drawn content out of `origin`, or shrinks it back into it.
     ///
     /// A transform on the content's layer, not an animation of the window's frame. Resizing the

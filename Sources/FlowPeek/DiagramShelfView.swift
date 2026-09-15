@@ -25,6 +25,9 @@ struct DiagramShelfView: View {
     /// the card, in this view's own coordinate space; the shelf's window turns it into a screen
     /// rect, because only it knows where the shelf is.
     let peek: (DiagramDocument, CGRect) -> Void
+    /// The card a peek is showing has moved, because the row scrolled under it. The same rect, in
+    /// this view's own coordinate space.
+    let movePeek: (CGRect) -> Void
     /// Put the peek away again, shrinking it back into wherever it came from.
     let endPeek: () -> Void
     /// Whether one is up right now. Read rather than remembered: a peek can be dismissed by a click
@@ -40,6 +43,8 @@ struct DiagramShelfView: View {
     @State private var copied: DiagramHistoryEntry.ID?
     /// Where each card is, so a peek can grow out of the one that was asked about.
     @State private var cardFrames: [DiagramHistoryEntry.ID: CGRect] = [:]
+    /// The card the peek that is up came out of, so that it can be told when that card moves.
+    @State private var peekedCard: DiagramHistoryEntry.ID?
     @FocusState private var focus: Field?
 
     /// Everything the keyboard can be on. A card is named by its diagram rather than by its
@@ -95,12 +100,19 @@ struct DiagramShelfView: View {
                 }
             }
             .padding(.vertical, 14)
+            // Assigned rather than merged: the row is lazy, so a card that has scrolled away stops
+            // reporting, and a merge would keep its last rect forever. Measured -- after arrowing
+            // to the end, cards long since destroyed still held frames from hundreds of points ago.
+            .onPreferenceChange(CardFrameKey.self) { frames in
+                cardFrames = frames
+                // Where a card is is only known after the layout that put it there, and the row is
+                // laid out again by the very keystroke that asks for a peek. So the rect a peek was
+                // raised with is the best that was known at the time, and this is where it is put
+                // right: the report that describes the scroll arrives after the scroll.
+                if let id = peekedCard, let frame = frames[id], isPeeking() { movePeek(frame) }
+            }
             // Escape backs out one step at a time -- out of the cards, then out of the query, then
             // out of the shelf -- which is what it does everywhere else in macOS.
-            .coordinateSpace(name: DiagramShelfView.space)
-            .onPreferenceChange(CardFrameKey.self) { frames in
-                cardFrames.merge(frames) { _, new in new }
-            }
             .onExitCommand(perform: retreat)
             .onKeyPress(.leftArrow) { step(-1) }
             .onKeyPress(.rightArrow) { step(1) }
@@ -113,6 +125,7 @@ struct DiagramShelfView: View {
             .onKeyPress(.return) { actOnFocused(openEntry) }
             .onKeyPress(.space) {
                 if isPeeking() {
+                    peekedCard = nil
                     endPeek()
                     return .handled
                 }
@@ -134,6 +147,12 @@ struct DiagramShelfView: View {
             }
         }
         .padding(6)
+        // Outside the padding, so the space's origin is the window's content origin and nothing
+        // else. Inside the glass surface it began 6 points in on both axes, which the shelf's
+        // window then converted as though it were zero: measured, the first card reported x=18
+        // while it really sat at window-relative x=24, so every peek started 6 points to the left
+        // of and 6 points above its card.
+        .coordinateSpace(name: DiagramShelfView.space)
     }
 
     private var header: some View {
@@ -292,9 +311,20 @@ struct DiagramShelfView: View {
             }
             // The focused card is dragged into view, so arrowing along the shelf scrolls it rather
             // than walking the focus off the end of what can be seen.
+            //
+            // Not animated, and that is load-bearing rather than a matter of taste. A card's place
+            // is only known by asking it, and the answer arrives through `CardFrameKey` after the
+            // layout it describes -- so while the row glided over 0.16s, every rect anyone could
+            // read was a place the card had already left. Space pressed after five arrows started
+            // its zoom -- read from the animation's own `fromValue` -- 323 points sideways of the
+            // card, nearly two card widths; the reported rect only caught up about a quarter of a
+            // second after the last arrow. Unanimated, the row is at its final place within the
+            // same update as the focus change, and the report lands before the next key is even
+            // read: measured, the frame cached at the moment of a Space sent with no delay at all
+            // after five arrows was already the settled one, to the point.
             .onChange(of: focus) { _, new in
                 guard case .card(let id) = new else { return }
-                withAnimation(.easeOut(duration: 0.16)) { scroller.scrollTo(id, anchor: .center) }
+                scroller.scrollTo(id, anchor: .center)
             }
         }
         // A vertical wheel is the only wheel most mice have, and a horizontal shelf it cannot move
@@ -396,9 +426,18 @@ struct DiagramShelfView: View {
     }
 
     /// Grows a preview out of this card, or moves the one that is up onto it.
+    ///
+    /// The rect is the last one the card reported, which is right at the moment it matters: the row
+    /// is not moving when a key is pressed, because the scroll that arrowing causes is not animated
+    /// -- see the scroll in `cards`, where that is load-bearing rather than a matter of taste. The
+    /// one case it cannot be right is this same keystroke moving the row, which is why a peek that
+    /// is up is told again where its card is as soon as the row reports it. Restore the animation
+    /// and `ShelfCardRectTests.testSpacePressedAfterArrowingGrowsTheZoomOutOfTheCard` fails by 323
+    /// points, which is the bug the reader kept describing as the preview starting somewhere else.
     private func peekEntry(_ entry: DiagramHistoryEntry) {
         guard let document = entry.document(fallbackTitle: String(localized: "diagram.default-title")),
               let frame = cardFrames[entry.id] else { return }
+        peekedCard = entry.id
         peek(document, frame)
     }
 

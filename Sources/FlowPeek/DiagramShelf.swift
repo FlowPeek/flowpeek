@@ -71,19 +71,20 @@ final class DiagramHistoryCoordinator: NSObject, NSWindowDelegate {
                 // is, so the conversion to the screen belongs here. SwiftUI measures down from the
                 // top of the content, AppKit up from the bottom of the screen, hence the flip.
                 peek: { [weak self] document, card in
-                    guard let panel = self?.panel else { return }
-                    let content = panel.contentRect(forFrameRect: panel.frame)
-                    let origin = CGRect(
-                        x: content.minX + card.minX,
-                        y: content.maxY - card.maxY,
-                        width: card.width,
-                        height: card.height
-                    )
+                    guard let panel = self?.panel, let origin = self?.screenRect(of: card) else {
+                        return
+                    }
                     AppState.shared.previews.peek(document: document, from: origin)
                     // The keyboard comes back here. `makeKey` rather than `makeKeyAndOrderFront`:
                     // the peek belongs in front of the shelf, it just must not have the keys, or
                     // the arrows stop walking along the row the moment the first diagram opens.
                     panel.makeKey()
+                },
+                // The row has scrolled under a peek that is already up, so the card it came out
+                // of is somewhere else now. Nothing moves; only where it shrinks back to changes.
+                movePeek: { [weak self] card in
+                    guard let origin = self?.screenRect(of: card) else { return }
+                    AppState.shared.previews.movePeekOrigin(to: origin)
                 },
                 endPeek: { AppState.shared.previews.endPeek() },
                 isPeeking: { AppState.shared.previews.isPeeking },
@@ -153,6 +154,19 @@ final class DiagramHistoryCoordinator: NSObject, NSWindowDelegate {
 
     /// The screen the user is looking at, which is the one the pointer is on -- not the one with
     /// the menu bar, and not the one the app happens to have a window on.
+    /// A rect in the shelf view's own coordinate space, as a rect on the screen. SwiftUI measures
+    /// down from the top of the content and AppKit up from the bottom of the screen, hence the flip.
+    private func screenRect(of card: CGRect) -> CGRect? {
+        guard let panel else { return nil }
+        let content = panel.contentRect(forFrameRect: panel.frame)
+        return CGRect(
+            x: content.minX + card.minX,
+            y: content.maxY - card.maxY,
+            width: card.width,
+            height: card.height
+        )
+    }
+
     private static func screenUnderPointer() -> NSScreen? {
         let location = NSEvent.mouseLocation
         return NSScreen.screens.first { $0.frame.contains(location) } ?? NSScreen.main

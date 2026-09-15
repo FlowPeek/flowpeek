@@ -762,6 +762,9 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     private var quickPanel: NSPanel? {
         didSet { reportVisibleSurface() }
     }
+    /// The quick panel, for the tests that have to watch it while it moves. Read-only, and named so
+    /// it is obvious at a call site that nothing in the app should be reaching for it.
+    var quickPanelForTesting: NSPanel? { quickPanel }
     private var quickModel: DiagramViewModel?
     private var promoted: [Promoted] = [] {
         didSet {
@@ -930,22 +933,87 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         // After, not before: `showQuick` closes whatever was there first, and closing clears this.
         peekOrigin = origin
         guard let panel = quickPanel else { return }
-        let target = panel.frame
-        // Start as the card, end as the panel. `setFrame` before the first paint, so the grow is
-        // the first thing seen rather than a full-size panel that then shrinks.
         animatingPeek = true
-        panel.setFrame(origin, display: false)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.peekDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().setFrame(target, display: true)
-            panel.animator().alphaValue = 1
-        } completionHandler: { [weak self] in
+        // The panel is its real size from the first frame and never resizes. What moves is a scale
+        // on the rendered content -- see `zoom(_:from:…)` for why it has to be that way round.
+        zoom(panel, from: origin, into: panel.frame, reversed: false) { [weak self] in
             // From here on the panel is at its real size and anything that changes it is the
             // reader resizing it, which is worth remembering.
             MainActor.assumeIsolated { self?.animatingPeek = false }
+        }
+    }
+
+    /// Grows the panel's drawn content out of `origin`, or shrinks it back into it.
+    ///
+    /// A transform on the content's layer, not an animation of the window's frame. Resizing the
+    /// window makes SwiftUI lay out again at every step, and the diagram inside re-fits itself to
+    /// each new stage -- so the picture stayed the same size on screen while the window grew around
+    /// it, which reads as a window being dragged open rather than as a preview coming out of a card.
+    /// Scaling the layer scales what has already been drawn, which is what Quick Look and CleanShot
+    /// do and what was actually asked for.
+    ///
+    /// The window shadow is off for the duration: AppKit traces it around the window's bounds, not
+    /// around the shrunken picture, so it would sit out in space with nothing under it.
+    private func zoom(
+        _ panel: NSPanel,
+        from origin: CGRect,
+        into target: CGRect,
+        reversed: Bool,
+        completion: @escaping @MainActor () -> Void
+    ) {
+        guard let view = panel.contentView, target.width > 0, target.height > 0 else {
+            panel.alphaValue = reversed ? 0 : 1
+            completion()
+            return
+        }
+        view.wantsLayer = true
+        guard let layer = view.layer else {
+            panel.alphaValue = reversed ? 0 : 1
+            completion()
+            return
+        }
+
+        // The transform that makes the full-size panel look like the card: scale about the layer's
+        // centre, then carry that centre over to the card's.
+        let scaleX = max(origin.width / target.width, 0.05)
+        let scaleY = max(origin.height / target.height, 0.05)
+        var small = CATransform3DMakeTranslation(origin.midX - target.midX, origin.midY - target.midY, 0)
+        small = CATransform3DScale(small, scaleX, scaleY, 1)
+
+        let hadShadow = panel.hasShadow
+        panel.hasShadow = false
+        panel.alphaValue = reversed ? 1 : 0
+
+        // An explicit animation, not an implicit one. A layer-backed NSView turns its layer's
+        // implicit actions off, so assigning `transform` inside an animation group jumps straight
+        // to the end value -- measured: the presentation layer read 1.0 forty milliseconds in, with
+        // nothing having moved at all.
+        let from = reversed ? CATransform3DIdentity : small
+        let to = reversed ? small : CATransform3DIdentity
+        let zoom = CABasicAnimation(keyPath: "transform")
+        zoom.fromValue = NSValue(caTransform3D: from)
+        zoom.toValue = NSValue(caTransform3D: to)
+        zoom.duration = Self.peekDuration
+        zoom.timingFunction = CAMediaTimingFunction(name: reversed ? .easeIn : .easeOut)
+        zoom.fillMode = .forwards
+        layer.transform = to
+        layer.add(zoom, forKey: "flowpeek.peek")
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.peekDuration
+            context.timingFunction = CAMediaTimingFunction(name: reversed ? .easeIn : .easeOut)
+            panel.animator().alphaValue = reversed ? 0 : 1
+        } completionHandler: {
+            // AppKit runs this on the main thread; saying so is what lets the panel and its layer
+            // be touched from a closure the compiler sees as nonisolated.
+            MainActor.assumeIsolated {
+                panel.contentView?.layer?.removeAnimation(forKey: "flowpeek.peek")
+                panel.contentView?.layer?.transform = CATransform3DIdentity
+                panel.hasShadow = hadShadow
+                completion()
+            }
         }
     }
 
@@ -958,12 +1026,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         }
         peekOrigin = nil
         animatingPeek = true
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.peekDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().setFrame(origin, display: true)
-            panel.animator().alphaValue = 0
-        } completionHandler: { [weak self] in
+        zoom(panel, from: origin, into: panel.frame, reversed: true) { [weak self] in
             // Only if nothing else has taken the panel over in the meantime: a selection that
             // raised its own preview during the shrink must not be closed by the end of this one.
             guard let self, self.quickPanel === panel else { return }

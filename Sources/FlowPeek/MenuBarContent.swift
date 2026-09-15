@@ -273,6 +273,14 @@ struct MenuBarContent: View {
                     Spacer(minLength: 0)
                 }
             }
+            // News, where the reader already is. Only when there is something to say: a row that
+            // is always present saying "up to date" is a row nobody reads, and then the one time it
+            // says something else it is invisible too.
+            if app.updater.state.wantsAttention {
+                UpdateRow(updater: app.updater)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+            }
             // Quiet, and deliberately not in the accent colour: the one blue thing in this panel
             // should be the remedy in the header, which is the only row that is ever urgent.
             HStack(spacing: 4) {
@@ -443,4 +451,81 @@ struct MenuBarContent: View {
 
 extension Notification.Name {
     static let flowPeekCheckForUpdates = Notification.Name("FlowPeekCheckForUpdates")
+}
+
+
+/// The one line about an update, in the panel.
+///
+/// Says what is on offer and gives the single button that moves it forward -- never more than one,
+/// because the whole point of not using Sparkle's window is that this is a thing a reader may do
+/// when they feel like it rather than a question they have to answer now.
+struct UpdateRow: View {
+    @ObservedObject var updater: UpdaterService
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isFailure ? AnyShapeStyle(.orange) : AnyShapeStyle(.tint))
+                .accessibilityHidden(true)
+            Text(verbatim: title)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            if let action {
+                Button(action: action.run) {
+                    Text(LocalizedStringKey(action.titleKey))
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.tint)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private var isFailure: Bool { if case .failed = updater.state { return true } else { return false } }
+
+    private var icon: String {
+        switch updater.state {
+        case .failed: "exclamationmark.triangle.fill"
+        case .readyToInstall: "arrow.down.circle.fill"
+        default: "sparkles"
+        }
+    }
+
+    private var title: String {
+        switch updater.state {
+        case .available(let version):
+            String(format: String(localized: "update.available"), version)
+        case .readyToInstall(let version):
+            String(format: String(localized: "update.ready"), version)
+        case .failed(let message):
+            message
+        default:
+            ""
+        }
+    }
+
+    private struct Action {
+        let titleKey: String
+        let run: () -> Void
+    }
+
+    private var action: Action? {
+        switch updater.state {
+        case .available:
+            Action(titleKey: "update.action.install") { updater.install() }
+        case .readyToInstall:
+            Action(titleKey: "update.action.relaunch") { updater.install() }
+        case .failed:
+            Action(titleKey: "update.action.retry") { updater.check() }
+        default:
+            nil
+        }
+    }
 }

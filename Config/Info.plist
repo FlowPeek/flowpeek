@@ -36,8 +36,13 @@
     <string>https://github.com/FlowPeek/flowpeek/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>JxNKL7N4ydZGNSFrjODUHBpt+746seri2LLtfnVxQgk=</string>
+    <!-- Three hours. Sparkle enforces a floor of one hour in a release build and quietly raises
+         anything smaller, so this is well inside what it will honour; a day was long enough that a
+         Mac left on all day could sit a release behind for most of it. Each check is one request
+         for a small XML file, and an update that is found is fetched quietly and put in place the
+         next time FlowPeek starts, so a shorter interval costs the reader nothing. -->
     <key>SUScheduledCheckInterval</key>
-    <integer>86400</integer>
+    <integer>10800</integer>
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>

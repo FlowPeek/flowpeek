@@ -61,6 +61,88 @@ struct SettingsView: View {
         )
     }
 
+    /// The update block in the sidebar. Narrow, so it says one thing and offers one button.
+    private var updatePanel: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 5) {
+                // Decorative: the words beside it already say everything, and without this the
+                // glyph announces itself as "Sparkle", which is the name of a library the reader
+                // has never heard of.
+                Image(systemName: app.updater.state.wantsAttention ? "sparkles" : "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(app.updater.state.wantsAttention ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .accessibilityHidden(true)
+                Text("settings.updates")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Text(verbatim: updateSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if case .downloading(let fraction) = app.updater.state {
+                ProgressView(value: fraction ?? 0, total: 1)
+                    .progressViewStyle(.linear)
+                    .opacity(fraction == nil ? 0.5 : 1)
+            }
+            updateButton
+                .controlSize(.small)
+            Divider().opacity(0.5)
+            // Bound through the service rather than through `app`, whose `updater` is a `let`.
+            Toggle(isOn: Binding(
+                get: { app.updater.automatic },
+                set: { app.updater.automatic = $0 }
+            )) {
+                Text("settings.updates.automatic")
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            .disabled(!app.updater.canCheck)
+            .help("settings.updates.automatic.help")
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    /// What the update block says right now, in a sentence rather than a state name.
+    private var updateSummary: String {
+        switch app.updater.state {
+        case .idle:
+            String(
+                format: String(localized: "settings.updates.current"),
+                Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+            )
+        case .readyToInstall(let version) where app.updater.automatic:
+            // Staged rather than waiting on a press: say when it lands, or the button beside it
+            // reads as the only way to get it.
+            String(format: String(localized: "settings.updates.on-restart"), version)
+        case .checking: String(localized: "settings.updates.checking")
+        case .available(let version): String(format: String(localized: "update.available"), version)
+        case .downloading: String(localized: "settings.updates.downloading")
+        case .readyToInstall(let version): String(format: String(localized: "update.ready"), version)
+        case .installing: String(localized: "settings.updates.installing")
+        case .failed(let message): message
+        }
+    }
+
+    /// One button, whatever the state. Never a row of them: there is only ever one next step.
+    @ViewBuilder private var updateButton: some View {
+        switch app.updater.state {
+        case .available:
+            Button("update.action.install") { app.updater.install() }
+        case .readyToInstall:
+            Button("update.action.relaunch") { app.updater.install() }
+        case .checking, .downloading, .installing:
+            ProgressView().controlSize(.small)
+        case .idle, .failed:
+            Button("settings.updates.check") { app.updater.check() }
+                .disabled(!app.updater.canCheck)
+        }
+    }
+
     /// The key that opens Settings without the menu bar icon. Composed here, not written into the
     /// catalogue: a translated string must never carry a shortcut, because the shortcut is decided
     /// by the app and the string would go stale silently.
@@ -187,6 +269,12 @@ struct SettingsView: View {
             }
 
             Spacer()
+
+            // Beside the panes rather than inside one of them. An update is not a preference and
+            // does not belong filed under General: it is a thing that is either waiting or not, and
+            // a reader who came here to look for it should not have to guess which section keeps
+            // it. So it sits here, the same in every pane.
+            updatePanel
 
             Label("settings.sidebar.hint", systemImage: "hand.raised.fill")
                 .font(.caption)

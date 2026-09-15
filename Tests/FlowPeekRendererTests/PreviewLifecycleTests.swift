@@ -148,6 +148,42 @@ final class PreviewLifecycleTests: XCTestCase {
     /// heard the slot empty out would read FlowPeek's apology as a diagram the user finished with.
     /// The report says which of the two went away, because the only thing FlowPeek ever asks of a
     /// user has to follow the one and never the other.
+    /// A peek must not teach the app that a preview is the size of a shelf card.
+    ///
+    /// The grow and the shrink walk the panel's frame between the card and the panel, and every
+    /// size a quick panel takes is recorded as the one to reopen at. Reported from the shipped
+    /// build: resize a peek, close it, open another, and it came back tiny -- the reader's own size
+    /// thrown away by an animation they never performed.
+    func testAPeekAnimationIsNeverMistakenForAResize() async throws {
+        let defaults = UserDefaults.standard
+        let widthKey = PreviewSizeMemory.Surface.quick.widthKey
+        let heightKey = PreviewSizeMemory.Surface.quick.heightKey
+        let priorWidth = defaults.object(forKey: widthKey)
+        let priorHeight = defaults.object(forKey: heightKey)
+        defer {
+            if let priorWidth { defaults.set(priorWidth, forKey: widthKey) } else { defaults.removeObject(forKey: widthKey) }
+            if let priorHeight { defaults.set(priorHeight, forKey: heightKey) } else { defaults.removeObject(forKey: heightKey) }
+        }
+        defaults.set(1000.0, forKey: widthKey)
+        defaults.set(700.0, forKey: heightKey)
+
+        let pool = MermaidWebViewPool()
+        let coordinator = PreviewCoordinator(pool: pool)
+        let card = CGRect(x: 120, y: 200, width: 150, height: 96)
+        coordinator.peek(document: try document("Peeked"), from: card)
+        XCTAssertTrue(coordinator.isPeeking)
+        // The animations have to actually run: they are what emits the resize notifications, and a
+        // version of this test that asserted before they fired passed with the guard deleted.
+        try await Task.sleep(for: .milliseconds(400))
+        coordinator.endPeek()
+        try await Task.sleep(for: .milliseconds(600))
+
+        XCTAssertEqual(defaults.double(forKey: widthKey), 1000, accuracy: 0.5,
+                       "the peek animation overwrote the remembered width")
+        XCTAssertEqual(defaults.double(forKey: heightKey), 700, accuracy: 0.5,
+                       "the peek animation overwrote the remembered height")
+    }
+
     func testTheReportSaysWhetherTheSlotHeldADiagramOrAFailure() async throws {
         let scope = WindowScope()
         let pool = MermaidWebViewPool()

@@ -896,6 +896,16 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
     /// the new one, and that teardown ends a peek -- so the origin cannot be set until afterwards,
     /// and this is what tells the panel it is a peek in the meantime.
     private var raisingPeek = false
+    /// True while a peek is growing out of a card or shrinking back into it.
+    ///
+    /// The animation walks the panel's frame all the way down to the size of a shelf card, and
+    /// `windowDidResize` records every size a quick panel takes as the one to reopen at. So without
+    /// this, peeking once taught the app that a preview is 150 points wide, and the next one opened
+    /// that size -- the reader's own resize thrown away by an animation they did not perform.
+    ///
+    /// Deliberately not "while peeking": a resize the reader performs while the peek is up is a
+    /// real preference and is remembered like any other.
+    private var animatingPeek = false
     var isPeeking: Bool { peekOrigin != nil || raisingPeek }
 
     var acceptsDiagramInPlace: Bool {
@@ -923,6 +933,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         let target = panel.frame
         // Start as the card, end as the panel. `setFrame` before the first paint, so the grow is
         // the first thing seen rather than a full-size panel that then shrinks.
+        animatingPeek = true
         panel.setFrame(origin, display: false)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
@@ -931,6 +942,10 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().setFrame(target, display: true)
             panel.animator().alphaValue = 1
+        } completionHandler: { [weak self] in
+            // From here on the panel is at its real size and anything that changes it is the
+            // reader resizing it, which is worth remembering.
+            MainActor.assumeIsolated { self?.animatingPeek = false }
         }
     }
 
@@ -942,6 +957,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
             return
         }
         peekOrigin = nil
+        animatingPeek = true
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.peekDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -952,6 +968,7 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
             // raised its own preview during the shrink must not be closed by the end of this one.
             guard let self, self.quickPanel === panel else { return }
             self.closeQuick()
+            self.animatingPeek = false
             panel.alphaValue = 1
         }
     }
@@ -1187,6 +1204,9 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         guard let resized = notification.object as? NSWindow,
               let surface = surface(of: resized),
               shownSurfaces.contains(surface) else { return }
+        // A peek growing or shrinking is not a resize anybody asked for, and the sizes it passes
+        // through are the size of a shelf card.
+        guard !(surface == .quick && animatingPeek) else { return }
         let size = resized.frame.size
         trace("resize \(surface.rawValue) \(Int(size.width))x\(Int(size.height))")
         remember(size, for: surface, minimum: surface == .quick ? Self.quickMinSize : Self.windowMinSize)

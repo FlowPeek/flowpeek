@@ -18,6 +18,12 @@ struct MenuBarContent: View {
     /// perfectly capable of finishing one behind it -- has to appear in the list below, and an
     /// unobserved `shared` would leave the panel showing whatever was true when it was last drawn.
     @ObservedObject private var history = DiagramHistoryStore.shared
+    /// Observed in its own right. It is a separate object hanging off `AppState`, and SwiftUI does
+    /// not forward a nested object's changes through the one holding it -- so without this the
+    /// panel was built from whatever the state happened to be when it opened and never moved again.
+    /// That is what made pressing Check for Updates look like pressing nothing: the check ran, the
+    /// state changed, and no view was listening.
+    @ObservedObject private var updater = AppState.shared.updater
     /// Closes the panel. A system menu closes itself when an item is chosen; a panel does not, and
     /// one left hanging over the diagram it just opened is the panel getting in the way of the
     /// thing the user asked for. Every row that opens a window closes this first -- the switches
@@ -276,8 +282,8 @@ struct MenuBarContent: View {
             // News, where the reader already is. Only when there is something to say: a row that
             // is always present saying "up to date" is a row nobody reads, and then the one time it
             // says something else it is invisible too.
-            if app.updater.isNoteworthy {
-                UpdateRow(updater: app.updater)
+            if updater.isNoteworthy {
+                UpdateRow(updater: updater)
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
             }
@@ -287,8 +293,8 @@ struct MenuBarContent: View {
                 // Deliberately does NOT dismiss. It used to close the panel and post a
                 // notification, so pressing it looked exactly like pressing nothing: the one
                 // surface that could have shown the answer went away before there was one.
-                FooterButton("menu.update") { app.updater.check() }
-                    .disabled(!app.updater.canCheck || app.updater.state.isBusy)
+                FooterButton("menu.update") { updater.check() }
+                    .disabled(!updater.canCheck || updater.state.isBusy)
                 FooterButton("menu.about") { dismiss(); NSApp.orderFrontStandardAboutPanel(nil) }
                 Spacer(minLength: 0)
                 FooterButton("menu.quit") { NSApp.terminate(nil) }
@@ -460,12 +466,24 @@ extension Notification.Name {
 /// when they feel like it rather than a question they have to answer now.
 struct UpdateRow: View {
     @ObservedObject var updater: UpdaterService
+    /// Drives the turning glyph while something is in flight.
+    @State private var spinning = false
 
     var body: some View {
         HStack(spacing: 8) {
+            // The moving part, and deliberately the glyph rather than a `ProgressView` beside it.
+            // A progress view here is an AppKit control: it exposes nothing to the accessibility
+            // tree and cannot be drawn by anything that renders SwiftUI on its own, so there was no
+            // way to confirm it was ever on screen. A rotation SwiftUI performs itself can be seen
+            // and checked, and one turning glyph says "working" more plainly than two things do.
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(isFailure ? AnyShapeStyle(.orange) : AnyShapeStyle(.tint))
+                .rotationEffect(.degrees(spinning ? 360 : 0))
+                .animation(
+                    spinning ? .linear(duration: 1).repeatForever(autoreverses: false) : .default,
+                    value: spinning
+                )
                 .accessibilityHidden(true)
             Text(verbatim: title)
                 .font(.system(size: 11))
@@ -473,11 +491,6 @@ struct UpdateRow: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
-            if updater.state.isBusy {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.7)
-            }
             if let action {
                 Button(action: action.run) {
                     Text(LocalizedStringKey(action.titleKey))
@@ -490,6 +503,8 @@ struct UpdateRow: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .onAppear { spinning = updater.state.isBusy }
+        .onChange(of: updater.state.isBusy) { _, busy in spinning = busy }
     }
 
     private var isFailure: Bool { if case .failed = updater.state { return true } else { return false } }

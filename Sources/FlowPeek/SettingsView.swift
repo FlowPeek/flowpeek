@@ -42,6 +42,9 @@ struct SettingsView: View {
     /// since launch is the re-read below, not this: there is no notification for an application
     /// appearing on the disk, so the tab asks again every time somebody opens it.
     @ObservedObject private var integrations = AppIntegrationCenter.shared
+    /// Observed rather than reached through `app`: a nested observable's changes do not reach a
+    /// view through the object holding it, so the sidebar block would never have moved.
+    @ObservedObject private var updater = AppState.shared.updater
     @State private var selection: SettingsSection
     @State private var relaunchPrompt: RelaunchPrompt?
     let close: () -> Void
@@ -68,9 +71,9 @@ struct SettingsView: View {
                 // Decorative: the words beside it already say everything, and without this the
                 // glyph announces itself as "Sparkle", which is the name of a library the reader
                 // has never heard of.
-                Image(systemName: app.updater.state.wantsAttention ? "sparkles" : "checkmark.circle")
+                Image(systemName: updater.state.wantsAttention ? "sparkles" : "checkmark.circle")
                     .font(.caption)
-                    .foregroundStyle(app.updater.state.wantsAttention ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(updater.state.wantsAttention ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                     .accessibilityHidden(true)
                 Text("settings.updates")
                     .font(.caption.weight(.semibold))
@@ -80,7 +83,7 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if case .downloading(let fraction) = app.updater.state {
+            if case .downloading(let fraction) = updater.state {
                 ProgressView(value: fraction ?? 0, total: 1)
                     .progressViewStyle(.linear)
                     .opacity(fraction == nil ? 0.5 : 1)
@@ -90,8 +93,8 @@ struct SettingsView: View {
             Divider().opacity(0.5)
             // Bound through the service rather than through `app`, whose `updater` is a `let`.
             Toggle(isOn: Binding(
-                get: { app.updater.automatic },
-                set: { app.updater.automatic = $0 }
+                get: { updater.automatic },
+                set: { updater.automatic = $0 }
             )) {
                 Text("settings.updates.automatic")
                     .font(.caption)
@@ -99,7 +102,7 @@ struct SettingsView: View {
             }
             .toggleStyle(.checkbox)
             .controlSize(.small)
-            .disabled(!app.updater.canCheck)
+            .disabled(!updater.canCheck)
             .help("settings.updates.automatic.help")
         }
         .padding(11)
@@ -109,13 +112,13 @@ struct SettingsView: View {
 
     /// What the update block says right now, in a sentence rather than a state name.
     private var updateSummary: String {
-        switch app.updater.state {
+        switch updater.state {
         case .idle:
             String(
                 format: String(localized: "settings.updates.current"),
                 Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
             )
-        case .readyToInstall(let version) where app.updater.automatic:
+        case .readyToInstall(let version) where updater.automatic:
             // Staged rather than waiting on a press: say when it lands, or the button beside it
             // reads as the only way to get it.
             String(format: String(localized: "settings.updates.on-restart"), version)
@@ -130,16 +133,16 @@ struct SettingsView: View {
 
     /// One button, whatever the state. Never a row of them: there is only ever one next step.
     @ViewBuilder private var updateButton: some View {
-        switch app.updater.state {
+        switch updater.state {
         case .available:
-            Button("update.action.install") { app.updater.install() }
+            Button("update.action.install") { updater.install() }
         case .readyToInstall:
-            Button("update.action.relaunch") { app.updater.install() }
+            Button("update.action.relaunch") { updater.install() }
         case .checking, .downloading, .installing:
             ProgressView().controlSize(.small)
         case .idle, .failed:
-            Button("settings.updates.check") { app.updater.check() }
-                .disabled(!app.updater.canCheck)
+            Button("settings.updates.check") { updater.check() }
+                .disabled(!updater.canCheck)
         }
     }
 

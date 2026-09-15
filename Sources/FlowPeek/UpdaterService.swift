@@ -39,6 +39,21 @@ final class UpdaterService: ObservableObject {
         }
     }
 
+    /// True for a few seconds after a check the reader asked for came back with nothing.
+    ///
+    /// A check that finds nothing is still an answer, and pressing a button that gives none is how
+    /// a button comes to feel broken. It decays on its own, because a row that permanently says
+    /// "up to date" is a row nobody reads -- and then the one time it says something else it is
+    /// invisible too.
+    @Published private(set) var confirmedCurrent = false
+    private var confirmationTask: Task<Void, Never>?
+    /// How long that answer stays up. Long enough to read, short enough not to become furniture.
+    private static let confirmationLinger: Duration = .seconds(4)
+
+    /// Whether there is anything worth a row right now: something waiting, something happening, or
+    /// something just answered.
+    var isNoteworthy: Bool { state.wantsAttention || state.isBusy || confirmedCurrent }
+
     static let automaticKey = "flowpeek.updates.automatic"
     private static var storedAutomatic: Bool {
         UserDefaults.standard.object(forKey: automaticKey) as? Bool ?? true
@@ -90,6 +105,8 @@ final class UpdaterService: ObservableObject {
     /// Look now. Does nothing while something is already in flight, so a second press cannot start
     /// a second check on top of the first.
     func check() {
+        confirmationTask?.cancel()
+        confirmedCurrent = false
         guard let updater, !state.isBusy else { return }
         guard updater.canCheckForUpdates else {
             state = .failed(String(localized: "update.error.cannot-check"))
@@ -179,11 +196,23 @@ final class UpdaterService: ObservableObject {
         if code == Int(SUError.noUpdateError.rawValue) {
             state = .idle
             logger.info("no update found")
+            confirmCurrent()
             return
         }
         pendingChoice = nil
         state = .failed(error.localizedDescription)
         logger.error("update failed: \(error.localizedDescription, privacy: .public)")
+    }
+
+    /// Say "nothing to get" for a moment, then stop saying it.
+    private func confirmCurrent() {
+        confirmationTask?.cancel()
+        confirmedCurrent = true
+        confirmationTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.confirmationLinger)
+            guard !Task.isCancelled else { return }
+            self?.confirmedCurrent = false
+        }
     }
 
     fileprivate func finished() {

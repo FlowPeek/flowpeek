@@ -276,7 +276,7 @@ struct MenuBarContent: View {
             // News, where the reader already is. Only when there is something to say: a row that
             // is always present saying "up to date" is a row nobody reads, and then the one time it
             // says something else it is invisible too.
-            if app.updater.state.wantsAttention {
+            if app.updater.isNoteworthy {
                 UpdateRow(updater: app.updater)
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
@@ -284,12 +284,11 @@ struct MenuBarContent: View {
             // Quiet, and deliberately not in the accent colour: the one blue thing in this panel
             // should be the remedy in the header, which is the only row that is ever urgent.
             HStack(spacing: 4) {
-                FooterButton("menu.update") {
-                    dismiss()
-                    // Sparkle is wired in the Xcode distribution target when an appcast URL is
-                    // supplied.
-                    NotificationCenter.default.post(name: .flowPeekCheckForUpdates, object: nil)
-                }
+                // Deliberately does NOT dismiss. It used to close the panel and post a
+                // notification, so pressing it looked exactly like pressing nothing: the one
+                // surface that could have shown the answer went away before there was one.
+                FooterButton("menu.update") { app.updater.check() }
+                    .disabled(!app.updater.canCheck || app.updater.state.isBusy)
                 FooterButton("menu.about") { dismiss(); NSApp.orderFrontStandardAboutPanel(nil) }
                 Spacer(minLength: 0)
                 FooterButton("menu.quit") { NSApp.terminate(nil) }
@@ -474,6 +473,11 @@ struct UpdateRow: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
+            if updater.state.isBusy {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.7)
+            }
             if let action {
                 Button(action: action.run) {
                     Text(LocalizedStringKey(action.titleKey))
@@ -494,7 +498,9 @@ struct UpdateRow: View {
         switch updater.state {
         case .failed: "exclamationmark.triangle.fill"
         case .readyToInstall: "arrow.down.circle.fill"
-        default: "sparkles"
+        case .checking, .downloading, .installing: "arrow.triangle.2.circlepath"
+        case .idle: "checkmark.circle"
+        case .available: "sparkles"
         }
     }
 
@@ -503,11 +509,23 @@ struct UpdateRow: View {
         case .available(let version):
             String(format: String(localized: "update.available"), version)
         case .readyToInstall(let version):
-            String(format: String(localized: "update.ready"), version)
+            updater.automatic
+                ? String(format: String(localized: "settings.updates.on-restart"), version)
+                : String(format: String(localized: "update.ready"), version)
         case .failed(let message):
             message
-        default:
-            ""
+        case .checking:
+            String(localized: "settings.updates.checking")
+        case .downloading:
+            String(localized: "settings.updates.downloading")
+        case .installing:
+            String(localized: "settings.updates.installing")
+        case .idle:
+            // Only reachable while `confirmedCurrent` is holding the row up.
+            String(
+                format: String(localized: "settings.updates.current"),
+                Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+            )
         }
     }
 

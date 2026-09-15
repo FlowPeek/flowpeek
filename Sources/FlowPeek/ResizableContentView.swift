@@ -38,11 +38,29 @@ final class ResizableContentView: NSView {
 
     private var grab: Grab?
 
+    /// What this is wrapping. Held so a peek can pin it at one size while the window around it is
+    /// temporarily made big enough to hold the card the peek is growing out of.
+    private(set) var content: NSView
+
     init(content: NSView) {
+        self.content = content
         super.init(frame: content.frame)
         content.frame = bounds
         content.autoresizingMask = [.width, .height]
         addSubview(content)
+    }
+
+    /// Hold the content still at `frame` while the window is resized around it, so a peek can be
+    /// drawn outside the panel's own rectangle without being clipped by it.
+    func pinContent(to frame: CGRect) {
+        content.autoresizingMask = []
+        content.frame = frame
+    }
+
+    /// Give it back to the window.
+    func unpinContent() {
+        content.frame = bounds
+        content.autoresizingMask = [.width, .height]
     }
 
     @available(*, unavailable)

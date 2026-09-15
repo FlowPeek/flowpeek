@@ -963,23 +963,48 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         reversed: Bool,
         completion: @escaping @MainActor () -> Void
     ) {
-        guard let view = panel.contentView, target.width > 0, target.height > 0 else {
+        guard let container = panel.contentView as? ResizableContentView,
+              target.width > 0, target.height > 0 else {
             panel.alphaValue = reversed ? 0 : 1
             completion()
             return
         }
-        view.wantsLayer = true
-        guard let layer = view.layer else {
+        let host = container.content
+        host.wantsLayer = true
+        guard let layer = host.layer else {
             panel.alphaValue = reversed ? 0 : 1
             completion()
             return
         }
 
-        // The transform that makes the full-size panel look like the card: scale about the layer's
-        // centre, then carry that centre over to the card's.
-        let scaleX = max(origin.width / target.width, 0.05)
-        let scaleY = max(origin.height / target.height, 0.05)
-        var small = CATransform3DMakeTranslation(origin.midX - target.midX, origin.midY - target.midY, 0)
+        // The window is widened to hold BOTH rectangles for the duration, and the content is pinned
+        // at its real size inside it. A window cannot draw outside itself: scaling the content down
+        // onto a card that sits below the panel simply cut it off at the panel's edge, which is how
+        // the shrink came out clipped. Nothing here is outside the window, so nothing is clipped.
+        let stage = target.union(origin)
+        let hostFrame = CGRect(
+            x: target.minX - stage.minX,
+            y: target.minY - stage.minY,
+            width: target.width,
+            height: target.height
+        )
+        let cardFrame = CGRect(
+            x: origin.minX - stage.minX,
+            y: origin.minY - stage.minY,
+            width: origin.width,
+            height: origin.height
+        )
+        panel.setFrame(stage, display: false)
+        container.pinContent(to: hostFrame)
+
+        // Scaled about the layer's centre, then carried over to where the card is.
+        let scaleX = max(cardFrame.width / hostFrame.width, 0.05)
+        let scaleY = max(cardFrame.height / hostFrame.height, 0.05)
+        var small = CATransform3DMakeTranslation(
+            cardFrame.midX - hostFrame.midX,
+            cardFrame.midY - hostFrame.midY,
+            0
+        )
         small = CATransform3DScale(small, scaleX, scaleY, 1)
 
         let hadShadow = panel.hasShadow
@@ -1009,8 +1034,12 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
             // AppKit runs this on the main thread; saying so is what lets the panel and its layer
             // be touched from a closure the compiler sees as nonisolated.
             MainActor.assumeIsolated {
-                panel.contentView?.layer?.removeAnimation(forKey: "flowpeek.peek")
-                panel.contentView?.layer?.transform = CATransform3DIdentity
+                // Back to a window that is exactly its content, whichever way the zoom went.
+                let container = panel.contentView as? ResizableContentView
+                container?.content.layer?.removeAnimation(forKey: "flowpeek.peek")
+                container?.content.layer?.transform = CATransform3DIdentity
+                panel.setFrame(target, display: false)
+                container?.unpinContent()
                 panel.hasShadow = hadShadow
                 completion()
             }

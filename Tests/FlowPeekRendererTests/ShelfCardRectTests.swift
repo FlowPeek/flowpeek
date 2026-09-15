@@ -158,21 +158,7 @@ final class ShelfCardRectTests: XCTestCase {
     /// and a test that read that would pass over the very bug it is here to catch. Checked: with
     /// the scroll animated again, `peekOrigin` alone passes and this fails.
     private func zoomStart() -> CGRect? {
-        guard let panel = AppState.shared.previews.quickPanelForTesting,
-              let container = panel.contentView as? ResizableContentView,
-              let layer = container.content.layer,
-              let zoom = layer.animation(forKey: "flowpeek.peek") as? CABasicAnimation,
-              let from = (zoom.fromValue as? NSValue)?.caTransform3DValue else { return nil }
-        let frame = container.content.frame
-        let width = frame.width * from.m11
-        let height = frame.height * from.m22
-        let centre = CGPoint(x: frame.midX + from.m41, y: frame.midY + from.m42)
-        return CGRect(
-            x: panel.frame.minX + centre.x - width / 2,
-            y: panel.frame.minY + centre.y - height / 2,
-            width: width,
-            height: height
-        )
+        PeekZoomGeometry.start(of: AppState.shared.previews.quickPanelForTesting)
     }
 
     /// The path the test above never takes: Space pressed on a card with NO peek already up.

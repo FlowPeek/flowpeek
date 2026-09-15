@@ -1025,7 +1025,17 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         container.content.layoutSubtreeIfNeeded()
         panel.displayIfNeeded()
 
-        // Scaled about the layer's centre, then carried over to where the card is.
+        // Scaled about the layer's anchor point, then carried over to where the card is.
+        //
+        // The anchor is read rather than assumed, and that is the whole of it. AppKit positions a
+        // layer-backed view's layer by its BOTTOM-LEFT corner -- measured in the running app,
+        // `anchorPoint` is (0, 0) and `position` is the host frame's origin, the opposite of
+        // UIKit's centred default. Written for a centred anchor, the translation below carried the
+        // corner to where the centre was wanted, which put the shrunken picture most of a screen
+        // down and to the left of its card -- far enough outside the stage window to be invisible
+        // until the zoom had grown it back into view. That is the "always starts from the bottom
+        // left" every card appeared to share: what was being watched was the content re-entering
+        // the stage's own corner, which does not move when the selection does.
         //
         // Written out rather than composed from `CATransform3DScale(translate, …)`, which produces
         // exactly the same matrix -- checked, after a first guess that it did not. It is spelled
@@ -1033,11 +1043,17 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         // read this.
         let scaleX = max(cardFrame.width / hostFrame.width, 0.05)
         let scaleY = max(cardFrame.height / hostFrame.height, 0.05)
+        // Where the layer's own origin corner ends up: the anchor holds still under the scale, so
+        // the corner closes in on it by the anchor's share of the scaled size. Solved for the
+        // translation that lands that corner on the card. Reduces to the corner difference for the
+        // (0, 0) anchor AppKit actually uses, and stays correct if it is ever anything else.
+        let anchor = layer.anchorPoint
+        let bounds = layer.bounds
         var small = CATransform3DIdentity
         small.m11 = scaleX
         small.m22 = scaleY
-        small.m41 = cardFrame.midX - hostFrame.midX
-        small.m42 = cardFrame.midY - hostFrame.midY
+        small.m41 = cardFrame.minX - layer.position.x + anchor.x * bounds.width * scaleX
+        small.m42 = cardFrame.minY - layer.position.y + anchor.y * bounds.height * scaleY
 
         let hadShadow = panel.hasShadow
         panel.hasShadow = false

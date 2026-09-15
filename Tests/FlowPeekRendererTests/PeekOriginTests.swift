@@ -26,23 +26,7 @@ final class PeekOriginTests: XCTestCase {
     /// happened to look, and with a tolerance loose enough to survive that, the broken transform
     /// passed too. This value is exact and does not depend on timing at all.
     private func zoomStart(_ coordinator: PreviewCoordinator) -> CGRect? {
-        guard let panel = coordinator.quickPanelForTesting,
-              let container = panel.contentView as? ResizableContentView,
-              let layer = container.content.layer,
-              let zoom = layer.animation(forKey: "flowpeek.peek") as? CABasicAnimation,
-              let from = (zoom.fromValue as? NSValue)?.caTransform3DValue else { return nil }
-        // The layer is transformed about its own centre, so the drawn rectangle is the frame scaled
-        // about that centre and then moved by the matrix's translation.
-        let frame = container.content.frame
-        let width = frame.width * from.m11
-        let height = frame.height * from.m22
-        let centre = CGPoint(x: frame.midX + from.m41, y: frame.midY + from.m42)
-        return CGRect(
-            x: panel.frame.minX + centre.x - width / 2,
-            y: panel.frame.minY + centre.y - height / 2,
-            width: width,
-            height: height
-        )
+        PeekZoomGeometry.start(of: coordinator.quickPanelForTesting)
     }
 
     private func start(from card: CGRect) async throws -> CGRect? {

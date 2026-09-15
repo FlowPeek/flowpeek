@@ -729,6 +729,12 @@ final class TerminalPeekMonitor {
         let inferred: (grid: TerminalGrid, lineLengths: [Int])?
         /// Which rows the viewport shows. Rows, not lines, so only present alongside `inferred`.
         let visibleRows: ClosedRange<Int>?
+        /// How tall the pane says its whole content is.
+        ///
+        /// Kept so that the line-as-row fallback can tell whether it is entitled to run: a pane
+        /// whose content is taller than its lines can account for is a pane whose text wraps, and
+        /// there the fallback is not an approximation but a wrong answer.
+        let contentHeight: CGFloat
         /// Whether the pane has nothing above or below what is on screen.
         ///
         /// True of an editor painting on the alternate screen, which has no scrollback at all, and
@@ -751,6 +757,17 @@ final class TerminalPeekMonitor {
         /// Nil when the value could not be read or was implausibly large, and then everything below
         /// asks the terminal exactly as it did before.
         let buffer: String?
+        /// Whether the pane's text wraps, which is the one thing that makes a line number and a row
+        /// number different numbers.
+        ///
+        /// The pane reports how tall its whole content is, and that height is rows. More rows than
+        /// there are lines means lines are being broken across rows. Two rows of slack, because the
+        /// height carries the pane's padding and the row height may itself have been solved rather
+        /// than read.
+        var wraps: Bool {
+            guard rowHeight > 0, lineCount > 0 else { return false }
+            return contentHeight / rowHeight > CGFloat(lineCount) + 2
+        }
         /// How many columns wide the grid is, when the terminal said so.
         ///
         /// The scanner needs it for a different job from the row arithmetic above: a program that
@@ -934,7 +951,27 @@ final class TerminalPeekMonitor {
             )
         }
 
-        if let inferred = sieved, let rows = TerminalGridInference.visibleRows(
+        // The sieve is for terminals that will not say. Where the pty has said -- exact columns, an
+        // exact cell and the padding that follows from it -- there is nothing left to solve: the
+        // only other thing the row arithmetic needs is how long each line is, and the buffer that
+        // answers that is already in hand. Waiting for the sieve to agree anyway is what left a
+        // `cat` of a finished document unplaceable forever: its content height never changes again,
+        // so the sieve has no second measurement to narrow with and never converges. Measured on the
+        // 741-line document this was found with, thirty candidates survived every look, 167 through
+        // 196, while the pty had been answering 178 all along.
+        let resolved = sieved ?? cell.flatMap { cell -> (grid: TerminalGrid, lineLengths: [Int])? in
+            guard let buffer else { return nil }
+            return (
+                TerminalGrid(
+                    columns: cell.columns,
+                    rowHeight: cell.rowHeight,
+                    padding: cell.topPadding * 2
+                ),
+                TerminalGridInference.lineLengths(of: buffer)
+            )
+        }
+
+        if let inferred = resolved, let rows = TerminalGridInference.visibleRows(
             offset: offset,
             viewportHeight: viewport.height,
             grid: inferred.grid,
@@ -962,6 +999,7 @@ final class TerminalPeekMonitor {
                 visible: first...max(first, last),
                 inferred: inferred,
                 visibleRows: rows,
+                contentHeight: contentSize.height,
                 fillsViewport: fills,
                 buffer: buffer,
                 columns: inferred.grid.columns
@@ -988,6 +1026,7 @@ final class TerminalPeekMonitor {
                 visible: visible,
                 inferred: nil,
                 visibleRows: nil,
+                contentHeight: contentSize.height,
                 fillsViewport: fills,
                 buffer: buffer,
                 // Straight from `ioctl(TIOCGWINSZ)`: the number the program in the terminal was
@@ -1066,6 +1105,7 @@ final class TerminalPeekMonitor {
             visible: visible,
             inferred: nil,
             visibleRows: nil,
+            contentHeight: contentSize.height,
             fillsViewport: fills,
             buffer: buffer,
             // Nothing here published a column count: this is the height solved from two readings of
@@ -1423,6 +1463,13 @@ final class TerminalPeekMonitor {
                 ), rows.overlaps(visibleRows) else { return nil }
                 span = rows
             } else {
+                // Lines as rows, which is only the same arithmetic while nothing wraps. Where the
+                // pane says it holds more rows than lines, this is not an approximation: measured on
+                // a 741-line Korean document in a 178-column pane, every diagram came out 43 rows --
+                // 645 points, most of a viewport -- from where it really was, and the frame landed
+                // over unrelated text with a working button on it. No frame is the honest answer
+                // there; the sieve that would place it properly is what has to be fixed, and is.
+                guard !grid.wraps else { return nil }
                 guard lines.overlaps(grid.visible) else { return nil }
                 span = lines
             }
@@ -1476,6 +1523,7 @@ final class TerminalPeekMonitor {
         // `AXLineForIndex` counts, and adding `first` -- a number from the terminal -- to the
         // scanner's own line numbers mixed the two. The terminal is asked about the block's ends
         // directly instead, and the on-screen test compares its answers with its own visible range.
+        guard !grid.wraps else { return [] }
         return TerminalBufferScanner.blocks(in: text, columns: grid.columns).compactMap { block in
             guard let rows = TerminalPeekPolicy.rows(
                 ofBlockFrom: start + block.range.location,

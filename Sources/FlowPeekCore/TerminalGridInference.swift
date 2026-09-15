@@ -211,23 +211,31 @@ public enum TerminalGridInference {
         return abs(visible - visible.rounded()) <= tolerance && visible >= CGFloat(minimumVisibleRows)
     }
 
-    /// How long each line of a buffer is, in UTF-16 code units.
+    /// How wide each line of a buffer is, in the cells a terminal draws it in.
     ///
-    /// Counted in code units rather than characters because that is what the row arithmetic needs
-    /// to be cheap: `String.count` walks grapheme boundaries, which measured 5.5 ms over a
-    /// terminal-sized window, and this runs on every poll. It is also why a line of wide characters
-    /// -- CJK, emoji -- is measured shorter than the columns it fills: the grid then fails to
-    /// explain the height and the caller falls back rather than placing an outline from a count it
-    /// cannot trust.
+    /// Cells, not code units, and the difference is the whole reason this is here. A Hangul syllable
+    /// or a CJK ideograph occupies two cells, so counting units measured a Korean line at about half
+    /// the columns it really fills. What that cost was not a fallback but a wrong answer: measured
+    /// on a 741-line Korean document in a 178-column Ghostty pane, the pane's own content height
+    /// says 796 rows and unit counting can only explain that at 154 to 164 columns -- so the sieve
+    /// never agreed, `inferred` stayed nil for the life of the pane, and `place` fell through to
+    /// treating line numbers as row numbers. Every diagram was framed 43 rows out, 645 points, most
+    /// of a viewport. Counting cells, the same document comes to 790 rows at 178 columns, which is
+    /// the height the pane reports.
+    ///
+    /// Still walked by scalar rather than by `Character`: `String.count` walks grapheme boundaries,
+    /// which measured 5.5 ms over a terminal-sized window, and this runs on every poll. A grapheme's
+    /// width is its first scalar's, and every scalar after that in one is a combining mark, which is
+    /// zero -- so scalar by scalar comes to the same answer without the boundary walk.
     public static func lineLengths(of buffer: String) -> [Int] {
         var lengths: [Int] = []
         var run = 0
-        for unit in buffer.utf16 {
-            if unit == 0x0A {
+        for scalar in buffer.unicodeScalars {
+            if scalar.value == 0x0A {
                 lengths.append(run)
                 run = 0
-            } else if unit != 0x0D {
-                run += 1
+            } else if scalar.value != 0x0D {
+                run += RowContinuation.cellWidth(of: scalar)
             }
         }
         lengths.append(run)

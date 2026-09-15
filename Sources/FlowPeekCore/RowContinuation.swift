@@ -105,8 +105,13 @@ public enum RowContinuation {
         return width
     }
 
-    private static func cellWidth(of scalar: Unicode.Scalar) -> Int {
+    /// How many cells one scalar occupies. Shared with `TerminalGridInference`, which measures whole
+    /// buffers with it on every poll, hence the early return: everything below the first combining
+    /// mark is one cell wide, which is all of ASCII and most of what a terminal ever holds, and it
+    /// answers without touching the range table at all.
+    static func cellWidth(of scalar: Unicode.Scalar) -> Int {
         let value = scalar.value
+        if value < 0x0300 { return 1 }
         // Combining marks and the zero-width joiners sit on the character before them.
         if (0x0300...0x036F).contains(value) || value == 0x200B || value == 0x200D { return 0 }
         return wideRanges.contains { $0.contains(value) } ? 2 : 1

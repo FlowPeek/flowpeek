@@ -80,6 +80,13 @@ final class TerminalPeekMonitor {
     private let agentSessions = CodexSessionSources()
     /// The last file read, kept so a poll four times a second does not read it again for nothing.
     private var editorCache: (path: String, modified: Date, size: Int, lines: [String], text: String)?
+    /// The file wrapped to a pane's width, kept for as long as neither changes.
+    ///
+    /// Built from the whole file, so it is not something to do on every poll: measured, 5.3 ms for
+    /// a 741-line document and 80 ms at the size the route will still read, against a budget of
+    /// about five for the entire scan. A file the reader is looking at in an editor changes rarely
+    /// and its pane is resized more rarely still, so this is almost always a hit.
+    private var wrappedCache: (path: String, modified: Date, size: Int, columns: Int?, file: EditorWrappedFile)?
 
     private var isRunning = false
     /// The window the cached pane was found under, and the pane itself. Descending to the text area
@@ -1348,7 +1355,7 @@ final class TerminalPeekMonitor {
             guard let file = contents(of: candidate.path) else { continue }
             // Wrapped the way the editor wrapped it, and the same wrapping is used for the
             // alignment, the row spans and the exactness check -- three answers about one screen.
-            let wrapped = EditorWrappedFile(lines: file.lines, columns: grid.columns)
+            let wrapped = wrappedFile(of: candidate.path, lines: file.lines, columns: grid.columns)
             guard let placed = EditorViewportAlignment.placement(ofRows: rows, in: wrapped)
             else { continue }
             let located = TerminalBufferScanner.blocks(in: file.text).compactMap { block -> Located? in
@@ -1388,6 +1395,23 @@ final class TerminalPeekMonitor {
     }
 
     /// The file, read again only when it has changed.
+    /// The file drawn the way this pane draws it, remembered between polls.
+    ///
+    /// Keyed on the same three facts as `contents(of:)` -- the file cannot change without one of
+    /// them moving -- plus the width, because a resized pane wraps differently.
+    private func wrappedFile(of path: String, lines: [String], columns: Int?) -> EditorWrappedFile {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        let modified = attributes?[.modificationDate] as? Date ?? .distantPast
+        let size = (attributes?[.size] as? NSNumber)?.intValue ?? -1
+        if let cached = wrappedCache, cached.path == path, cached.modified == modified,
+           cached.size == size, cached.columns == columns {
+            return cached.file
+        }
+        let wrapped = EditorWrappedFile(lines: lines, columns: columns)
+        wrappedCache = (path, modified, size, columns, wrapped)
+        return wrapped
+    }
+
     private func contents(of path: String) -> (text: String, lines: [String])? {
         let attributes = try? FileManager.default.attributesOfItem(atPath: path)
         let modified = attributes?[.modificationDate] as? Date ?? .distantPast

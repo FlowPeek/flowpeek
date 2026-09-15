@@ -62,20 +62,33 @@ public struct EditorWrappedFile: Sendable {
         guard let columns, RowContinuation.columnRange.contains(columns), !line.isEmpty else {
             return [line]
         }
+        // Measured before anything is built, because almost every line fits and a line that fits
+        // is its own single row. Without this the whole file was taken apart character by
+        // character on every poll: 8.6 ms for a 741-line document and 80 ms at the size limit,
+        // against a read budget of about five. Measuring first costs one pass and no allocation.
+        var total = 0
+        for scalar in line.unicodeScalars {
+            total += RowContinuation.cellWidth(of: scalar)
+            if total > columns { break }
+        }
+        if total <= columns { return [line] }
+
+        // And the pieces are slices of the line rather than strings grown a character at a time.
         var pieces: [String] = []
-        var piece = ""
+        var start = line.startIndex
+        var index = line.startIndex
         var width = 0
-        for character in line {
-            let cell = character.unicodeScalars.first.map(RowContinuation.cellWidth(of:)) ?? 1
-            if width + cell > columns, !piece.isEmpty {
-                pieces.append(piece)
-                piece = ""
+        while index < line.endIndex {
+            let cell = line[index].unicodeScalars.first.map(RowContinuation.cellWidth(of:)) ?? 1
+            if width + cell > columns, index > start {
+                pieces.append(String(line[start..<index]))
+                start = index
                 width = 0
             }
-            piece.append(character)
             width += cell
+            index = line.index(after: index)
         }
-        if !piece.isEmpty || pieces.isEmpty { pieces.append(piece) }
+        pieces.append(String(line[start...]))
         return pieces
     }
 }

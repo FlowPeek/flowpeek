@@ -915,9 +915,12 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         (quickIsPinned || isPeeking) && quickPanelIsDiagram && quickModel != nil
     }
 
-    /// How long the grow and the shrink take. Short enough to feel like the panel came from the
-    /// card rather than that the card launched it.
-    private static let peekDuration: TimeInterval = 0.2
+    /// How long the grow and the shrink take.
+    ///
+    /// The shelf sits at the bottom of the screen and the preview opens in the middle of it, so the
+    /// travel is most of the screen's height. At 0.2s that read as something appearing rather than
+    /// as the card growing, which is the whole illusion.
+    private static let peekDuration: TimeInterval = 0.28
 
     /// Raise a preview out of `origin`, a rect in screen coordinates -- the card that was asked
     /// about. A peek already up takes the new diagram where it stands.
@@ -1009,7 +1012,11 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
 
         let hadShadow = panel.hasShadow
         panel.hasShadow = false
-        panel.alphaValue = reversed ? 1 : 0
+        // Opaque from the first frame on the way out. Fading the panel in while it grew meant the
+        // card-sized preview that is sitting exactly over the card was invisible at the moment it
+        // most needed to be seen -- so it read as a thing appearing from somewhere near the bottom
+        // of the screen rather than as the card the reader had selected becoming the preview.
+        panel.alphaValue = 1
 
         // An explicit animation, not an implicit one. A layer-backed NSView turns its layer's
         // implicit actions off, so assigning `transform` inside an animation group jumps straight
@@ -1023,16 +1030,26 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
         zoom.duration = Self.peekDuration
         zoom.timingFunction = CAMediaTimingFunction(name: reversed ? .easeIn : .easeOut)
         zoom.fillMode = .forwards
-        layer.transform = to
-        layer.add(zoom, forKey: "flowpeek.peek")
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.peekDuration
-            context.timingFunction = CAMediaTimingFunction(name: reversed ? .easeIn : .easeOut)
-            panel.animator().alphaValue = reversed ? 0 : 1
-        } completionHandler: {
-            // AppKit runs this on the main thread; saying so is what lets the panel and its layer
-            // be touched from a closure the compiler sees as nonisolated.
+        // The fade belongs to the shrink only, and it trails the shape rather than leading it: on
+        // the way back the picture is worth seeing until it has almost reached the card. Run on its
+        // own, because it is shorter than the zoom -- and a group whose duration is zero calls its
+        // completion handler at once, which tore the stage down before the zoom had moved.
+        if reversed {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Self.peekDuration * 0.8
+                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                panel.animator().alphaValue = 0
+            }
+        }
+
+        // The tidying up is tied to the zoom itself. An `NSAnimationContext` group with nothing
+        // animating in it calls its completion handler at once -- measured: the stage was torn back
+        // down forty milliseconds in, while the zoom still had two hundred to run.
+        CATransaction.begin()
+        CATransaction.setCompletionBlock {
+            // Core Animation runs this on the main thread; saying so is what lets the panel and its
+            // layer be touched from a closure the compiler sees as nonisolated.
             MainActor.assumeIsolated {
                 // Back to a window that is exactly its content, whichever way the zoom went.
                 let container = panel.contentView as? ResizableContentView
@@ -1044,6 +1061,9 @@ final class PreviewCoordinator: NSObject, NSWindowDelegate {
                 completion()
             }
         }
+        layer.transform = to
+        layer.add(zoom, forKey: "flowpeek.peek")
+        CATransaction.commit()
     }
 
     /// Shrink the peek back into the card it came from and let it go.

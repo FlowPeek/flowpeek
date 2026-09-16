@@ -40,6 +40,10 @@ final class IntegrationWatchMonitor {
     private let registry: IntegrationRegistry
     /// Every provider found on disk, whoever wrote it.
     private var watching: [IntegrationWatch.Manifest] = []
+    /// Application activation is the coarse gate. The 5 Hz file watch only exists while one of
+    /// the registered editors is actually in front; otherwise there is nothing it could discover.
+    private var activationObserver: NSObjectProtocol?
+    private var activeProvider: IntegrationWatch.Manifest?
     private var timer: Timer?
     /// Per integration, because more than one of these editors can be installed and the reader
     /// switches between them.
@@ -77,7 +81,7 @@ final class IntegrationWatchMonitor {
         registry.watched()
     }
 
-    var isRunning: Bool { timer != nil }
+    var isRunning: Bool { activationObserver != nil }
 
     /// Starts watching whatever has registered. The caller re-arms this when an integration is
     /// switched on or off, and every start re-reads the directory.
@@ -96,6 +100,24 @@ final class IntegrationWatchMonitor {
             stop()
             return
         }
+        let wasRunning = isRunning
+        if activationObserver == nil {
+            activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.frontmostChanged() }
+            }
+        }
+        // Also run when an integration was enabled or disabled while its editor stayed in front:
+        // there is no application activation for that change to wake the monitor.
+        frontmostChanged()
+        guard !wasRunning else { return }
+        logger.info("integration watch started for \(self.watching.count, privacy: .public) provider(s)")
+    }
+
+    private func resumePolling() {
         guard timer == nil else { return }
         let timer = Timer(timeInterval: Self.readInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
@@ -103,12 +125,21 @@ final class IntegrationWatchMonitor {
         timer.tolerance = Self.readInterval / 2
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
-        logger.info("integration watch started for \(self.watching.count, privacy: .public) provider(s)")
+    }
+
+    private func suspendPolling() {
+        timer?.invalidate()
+        timer = nil
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        let wasRunning = isRunning
+        suspendPolling()
+        if let activationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        }
+        activationObserver = nil
+        activeProvider = nil
         lastAsked = [:]
         lastAnswerDate = [:]
         lastAnswer = [:]
@@ -116,13 +147,35 @@ final class IntegrationWatchMonitor {
         watching.forEach(stopAsking)
         watching = []
         dismiss()
-        logger.info("integration watch stopped")
+        if wasRunning { logger.info("integration watch stopped") }
     }
 
     // MARK: - The loop
 
+    private func frontmostChanged() {
+        activeProvider = frontmostIntegration()
+        guard let activeProvider else {
+            suspendPolling()
+            for provider in watching where asking.contains(provider.id) {
+                stopAsking(provider)
+            }
+            dismiss()
+            return
+        }
+        // Start with an immediate look. Waiting one timer interval here is visible when switching
+        // into an editor, and the old implementation also kept its timer warm enough to answer in
+        // at most that interval.
+        resumePolling()
+        tick(activeProvider)
+    }
+
     private func tick() {
-        guard let active = frontmostIntegration(), isSuppressed?() != true else {
+        guard let activeProvider else { return }
+        tick(activeProvider)
+    }
+
+    private func tick(_ active: IntegrationWatch.Manifest) {
+        guard isSuppressed?() != true else {
             for provider in watching where asking.contains(provider.id) {
                 stopAsking(provider)
             }

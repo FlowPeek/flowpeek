@@ -33,7 +33,7 @@ final class SelectionMonitor {
         if mouseUpMonitor == nil {
             mouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp], handler: { [weak self] _ in
                 let location = NSEvent.mouseLocation
-                Task { @MainActor in
+                MainActor.assumeIsolated {
                     guard let self else { return }
                     // A drag that began on one of FlowPeek's own surfaces is not a text selection:
                     // resizing or moving the preview used to end here as a capture, which reported a
@@ -50,7 +50,7 @@ final class SelectionMonitor {
                 matching: [.scrollWheel, .rightMouseDown, .otherMouseDown, .leftMouseDown]
             ) { [weak self] event in
                 let location = NSEvent.mouseLocation
-                Task { @MainActor in
+                MainActor.assumeIsolated {
                     guard let self else { return }
                     let onOwnWindow = OwnWindowHitTest.contains(location)
                     if event.type == .leftMouseDown { self.dragBeganOnOwnWindow = onOwnWindow }
@@ -73,7 +73,7 @@ final class SelectionMonitor {
             // Only the key code is read here; nothing about the keystroke is retained or logged.
             globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
                 let isEscape = event.keyCode == 53
-                Task { @MainActor in
+                MainActor.assumeIsolated {
                     guard let self else { return }
                     // Typing destroys the selection the button belongs to, so the button goes too.
                     if isEscape { self.cancelPendingCapture(reason: "escape") } else { self.dismissOverlay(reason: "typing") }
@@ -89,7 +89,9 @@ final class SelectionMonitor {
                 let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
                 let bundleIdentifier = app?.bundleIdentifier
                 let pid = app?.processIdentifier
-                Task { @MainActor in self?.applicationDidActivate(bundleIdentifier: bundleIdentifier, pid: pid) }
+                MainActor.assumeIsolated {
+                    self?.applicationDidActivate(bundleIdentifier: bundleIdentifier, pid: pid)
+                }
             }
         }
         if terminationObserver == nil {
@@ -99,7 +101,7 @@ final class SelectionMonitor {
                 queue: .main
             ) { [weak self] note in
                 let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier
-                Task { @MainActor in
+                MainActor.assumeIsolated {
                     if let pid { self?.reader.forget(pid) }
                 }
             }

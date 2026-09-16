@@ -39,20 +39,20 @@ final class DoubleTapMonitor {
         guard monitors.isEmpty else { return }
         recogniser.forget()
         add(NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
-            Task { @MainActor in self?.flagsChanged(event) }
+            MainActor.assumeIsolated { self?.flagsChanged(event) }
         })
         // The global monitor never sees what is delivered to FlowPeek, and once a preview is open
         // that is where the keys go. Without this, the gesture stops working the moment it has
         // worked once.
         add(NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
-            Task { @MainActor in self?.flagsChanged(event) }
+            MainActor.assumeIsolated { self?.flagsChanged(event) }
             return event
         })
         add(NSEvent.addGlobalMonitorForEvents(matching: Self.interrupting) { [weak self] _ in
-            Task { @MainActor in self?.recogniser.interrupt() }
+            MainActor.assumeIsolated { self?.recogniser.interrupt() }
         })
         add(NSEvent.addLocalMonitorForEvents(matching: Self.interrupting) { [weak self] event in
-            Task { @MainActor in self?.recogniser.interrupt() }
+            MainActor.assumeIsolated { self?.recogniser.interrupt() }
             return event
         })
         logger.info("double tap armed at \(Int(self.recogniser.interval * 1000), privacy: .public)ms")

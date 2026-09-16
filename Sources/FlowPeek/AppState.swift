@@ -888,6 +888,10 @@ final class AppState: ObservableObject {
     /// normalized second copy of it; both used to sit in memory until the next selection replaced
     /// them, which for someone who selects once and then works elsewhere is the rest of the session.
     private func forgetSelection() {
+        // Global key and pointer monitors also call this while there is no selection. Assigning nil
+        // again would still emit through `@Published`, invalidating every view that observes the
+        // app for each ordinary keystroke or scroll in another application.
+        guard lastSelection != nil || lastDetection != nil else { return }
         overlay.hide()
         lastSelection = nil
         lastDetection = nil

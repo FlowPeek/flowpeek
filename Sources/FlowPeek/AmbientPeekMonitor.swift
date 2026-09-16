@@ -74,17 +74,17 @@ final class AmbientPeekMonitor {
         guard flagsMonitor == nil, localFlagsMonitor == nil else { return }
         flagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
             let engaged = event.modifierFlags.intersection(Self.significantModifiers) == Self.modifier
-            Task { @MainActor in self?.setEngaged(engaged) }
+            MainActor.assumeIsolated { self?.setEngaged(engaged) }
         }
         // The global monitor is blind to events delivered to FlowPeek itself, which is exactly the
         // case once a preview has opened, so the same change is observed locally too.
         localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
             let engaged = event.modifierFlags.intersection(Self.significantModifiers) == Self.modifier
-            Task { @MainActor in self?.setEngaged(engaged) }
+            MainActor.assumeIsolated { self?.setEngaged(engaged) }
             return event
         }
         moveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
-            Task { @MainActor in self?.pointerMoved() }
+            MainActor.assumeIsolated { self?.pointerMoved() }
         }
         logger.info("ambient peek armed")
     }

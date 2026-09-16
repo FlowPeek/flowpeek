@@ -208,13 +208,13 @@ final class AmbientHighlightCoordinator {
             pointerMonitor = NSEvent.addGlobalMonitorForEvents(
                 matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
             ) { [weak self] _ in
-                Task { @MainActor in self?.updateReveal(NSEvent.mouseLocation) }
+                MainActor.assumeIsolated { self?.updateReveal(NSEvent.mouseLocation) }
             }
         }
         guard flagsMonitor == nil else { return }
         flagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
             let armed = Self.isArming(event.modifierFlags)
-            Task { @MainActor in self?.setArmed(armed) }
+            MainActor.assumeIsolated { self?.setArmed(armed) }
         }
     }
 

@@ -54,7 +54,7 @@ final class MenuBarRevealMonitor {
         announced = hold.isRevealed
         onChange?(hold.isRevealed)
         let timer = Timer.scheduledTimer(withTimeInterval: Self.interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.look() }
+            MainActor.assumeIsolated { self?.look() }
         }
         // The menu this reveals is tracked in its own run loop mode, and a timer on the default
         // mode alone stops firing for as long as one is open -- which is exactly when the icon must

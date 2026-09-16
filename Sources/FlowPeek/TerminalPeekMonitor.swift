@@ -175,7 +175,7 @@ final class TerminalPeekMonitor {
         // around whatever has slid into its place -- so it goes, and the next read puts it back a
         // quarter of a second after the scrolling stops. Costs nothing: no accessibility call.
         scrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.scrollWheel]) { [weak self] _ in
-            Task { @MainActor in self?.scrolled() }
+            MainActor.assumeIsolated { self?.scrolled() }
         }
         frontmostChanged()
         logger.info("terminal watch armed")

@@ -16,7 +16,7 @@ final class SelectionMonitor {
     static let settlingLadder = [70, 130, 220, 500, 900, 1500]
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Selection")
-    private let reader = AccessibilitySelectionReader()
+    private let reader = AccessibilitySelectionWorker()
     private var mouseUpMonitor: Any?
     private var dismissalMonitor: Any?
     private var localKeyMonitor: Any?
@@ -102,7 +102,8 @@ final class SelectionMonitor {
             ) { [weak self] note in
                 let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier
                 MainActor.assumeIsolated {
-                    if let pid { self?.reader.forget(pid) }
+                    guard let self, let pid else { return }
+                    Task { await self.reader.forget(pid) }
                 }
             }
         }
@@ -135,7 +136,7 @@ final class SelectionMonitor {
         activationObserver = nil
         if let terminationObserver { NSWorkspace.shared.notificationCenter.removeObserver(terminationObserver) }
         terminationObserver = nil
-        reader.releaseAccessibilityTrees()
+        Task { await reader.releaseAccessibilityTrees() }
         generation += 1
     }
 
@@ -158,7 +159,7 @@ final class SelectionMonitor {
             return
         }
         dismissOverlay(reason: "app activated")
-        if let pid { reader.warmUp(pid) }
+        if let pid { Task { await reader.warmUp(pid) } }
     }
 
     private func captureAfterSettling() {
@@ -178,7 +179,17 @@ final class SelectionMonitor {
                     return
                 }
                 logger.debug("capture #\(current) rung \(rung) (+\(delay) ms)")
-                if let snapshot = reader.currentSelection(at: mouseLocation) {
+                let application = NSWorkspace.shared.frontmostApplication
+                let context = AccessibilitySelectionReader.Context(
+                    processIdentifier: application?.processIdentifier ?? 0,
+                    applicationName: application?.localizedName,
+                    screenFrames: NSScreen.screens.map(\.frame)
+                )
+                if let snapshot = await reader.currentSelection(at: mouseLocation, context: context) {
+                    guard current == generation else {
+                        logger.debug("capture #\(current) superseded while its accessibility read was in flight")
+                        return
+                    }
                     logger.debug("Captured \(snapshot.text.count) selected characters from \(snapshot.applicationName ?? "unknown", privacy: .public) at rung \(rung)")
                     onSelection?(snapshot)
                     return
@@ -189,6 +200,24 @@ final class SelectionMonitor {
             // so the button that belonged to it has to go too.
             onDismiss?()
         }
+    }
+}
+
+/// Serialises the target application's accessibility traffic away from the main actor. A second
+/// mouse-up can supersede the first while its IPC is still returning, but it cannot make two trees
+/// mutate the shared warm-up state or the system-wide accessibility element at once.
+private actor AccessibilitySelectionWorker {
+    private let reader = AccessibilitySelectionReader()
+
+    func warmUp(_ pid: pid_t) { reader.warmUp(pid) }
+    func forget(_ pid: pid_t) { reader.forget(pid) }
+    func releaseAccessibilityTrees() { reader.releaseAccessibilityTrees() }
+
+    func currentSelection(
+        at mouseLocation: CGPoint,
+        context: AccessibilitySelectionReader.Context
+    ) -> SelectionSnapshot? {
+        reader.currentSelection(at: mouseLocation, context: context)
     }
 }
 
@@ -205,12 +234,12 @@ final class SelectionMonitor {
 /// repeating one message, never a claim about who owns the switch -- `release()` is called when the
 /// selection monitor stops, which is not the same moment the ambient monitor stops, and each
 /// ambient read warms the app it is about to read for exactly that reason.
-@MainActor
-final class AccessibilityTreeWarmUp {
+final class AccessibilityTreeWarmUp: @unchecked Sendable {
     static let shared = AccessibilityTreeWarmUp()
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Selection")
     private var memo = AccessibilityWarmUpMemo()
+    private let lock = NSLock()
 
     /// `deadline` is the clock of the read this is warming for, when there is one. The set is a
     /// synchronous message like every other, so it may not spend more of that read than the read
@@ -220,7 +249,11 @@ final class AccessibilityTreeWarmUp {
         guard pid > 0, pid != ProcessInfo.processInfo.processIdentifier else { return }
         let now = Date()
         let remaining = deadline.timeIntervalSince(now)
-        guard remaining > 0, memo.shouldSend(pid: pid, now: now) else { return }
+        guard remaining > 0 else { return }
+        lock.lock()
+        let shouldSend = memo.shouldSend(pid: pid, now: now)
+        lock.unlock()
+        guard shouldSend else { return }
         let app = AXUIElementCreateApplication(pid)
         _ = AXUIElementSetMessagingTimeout(app, min(AccessibilitySelectionReader.messagingTimeout, Float(remaining)))
         let error = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
@@ -232,23 +265,29 @@ final class AccessibilityTreeWarmUp {
         // empty groups for the rest of its life while both routes believed it was awake -- and not
         // remembering it at all sends the same doomed message on every single read, which is the
         // answer every app that is not Chromium gives.
+        lock.lock()
         memo.note(pid: pid, succeeded: error == .success, now: now)
+        lock.unlock()
     }
 
     func forget(_ pid: pid_t) {
+        lock.lock()
         let wasEnabled = memo.isEnabled(pid: pid)
         memo.forget(pid: pid)
+        lock.unlock()
         if wasEnabled { logger.debug("pruned accessibility memo for terminated pid \(pid)") }
     }
 
     func release() {
-        for pid in memo.drain() {
+        lock.lock()
+        let enabled = memo.drain()
+        lock.unlock()
+        for pid in enabled {
             _ = AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXManualAccessibility" as CFString, kCFBooleanFalse)
         }
     }
 }
 
-@MainActor
 final class AccessibilitySelectionReader {
     /// The system default was measured at ~1.52 s per call; a wedged target app blocked one full read for
     /// 4.58 s, which outlives several rungs of the settling ladder.
@@ -257,6 +296,12 @@ final class AccessibilitySelectionReader {
     static let attemptBudget: TimeInterval = 0.75
     private static let ancestorHopLimit = 24
     private static let webAreaSearchLimit = 400
+
+    struct Context: Sendable {
+        let processIdentifier: pid_t
+        let applicationName: String?
+        let screenFrames: [CGRect]
+    }
 
     fileprivate let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Selection")
     private lazy var systemWide: AXUIElement = {
@@ -277,9 +322,8 @@ final class AccessibilitySelectionReader {
 
     // MARK: - Reading
 
-    func currentSelection(at mouseLocation: CGPoint) -> SelectionSnapshot? {
-        let running = NSWorkspace.shared.frontmostApplication
-        let pid = running?.processIdentifier ?? 0
+    func currentSelection(at mouseLocation: CGPoint, context: Context) -> SelectionSnapshot? {
+        let pid = context.processIdentifier
         guard pid != ProcessInfo.processInfo.processIdentifier else {
             logger.debug("skipping read: FlowPeek is frontmost")
             return nil
@@ -294,7 +338,7 @@ final class AccessibilitySelectionReader {
         _ = AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
         warmUp(pid, before: deadline)
 
-        let flip = ScreenGeometry.flipReference(screenFrames: NSScreen.screens.map(\.frame))
+        let flip = ScreenGeometry.flipReference(screenFrames: context.screenFrames)
         let provider = AXProbe(reader: self, application: app, flipReference: flip, deadline: deadline)
         let candidates = SelectionGatherer.candidates(
             using: provider,
@@ -307,14 +351,14 @@ final class AccessibilitySelectionReader {
         }
 
         guard let best = SelectionCandidateScoring.best(from: candidates, mouseLocation: mouseLocation) else {
-            logger.debug("no candidate produced selected text in \(running?.localizedName ?? "unknown", privacy: .public)")
+            logger.debug("no candidate produced selected text in \(context.applicationName ?? "unknown", privacy: .public)")
             return nil
         }
         logger.debug("selected candidate \(best.kind.description, privacy: .public) with \(best.text.count) characters out of \(candidates.count) candidate(s)")
         return SelectionSnapshot(
             text: best.text,
             screenBounds: best.bounds,
-            applicationName: running?.localizedName,
+            applicationName: context.applicationName,
             processIdentifier: pid,
             anchorPoint: mouseLocation
         )
@@ -515,7 +559,6 @@ final class AccessibilitySelectionReader {
 
 /// Binds `SelectionGatherer`'s abstract probe to the real accessibility API. Every AX call lives on
 /// this side of the protocol so the gatherer's ordering, budget and fallback branches stay testable.
-@MainActor
 private final class AXProbe: AccessibilityProbing {
     typealias Element = AXUIElement
 

@@ -14,7 +14,6 @@ public struct ProbedSelection: Equatable, Sendable {
 /// The accessibility surface `SelectionGatherer` needs. `AccessibilitySelectionReader` supplies the
 /// real `AXUIElement` implementation; a fake supplies deterministic elements so the candidate
 /// ordering, the wall-clock budget and the `AXWebArea` fallback are testable without a live AX target.
-@MainActor
 public protocol AccessibilityProbing: AnyObject {
     associatedtype Element
 
@@ -45,7 +44,6 @@ public enum SelectionGatherer {
     /// Roots in descending order of trust: the hit-tested element, the focused element (unless it is
     /// the same object), then the application. If none of them yields text, the `AXWebArea` under the
     /// focused window is tried last — Chromium answers there when nothing above it does.
-    @MainActor
     public static func candidates<Provider: AccessibilityProbing>(
         using provider: Provider,
         mouseLocation: CGPoint,
@@ -83,7 +81,6 @@ public enum SelectionGatherer {
 
     /// The element itself, then up to `hopLimit` ancestors. The walk only ascends, so it can never
     /// reach the `AXWebArea` that owns the marker range — the fallback above covers that case.
-    @MainActor
     private static func walk<Provider: AccessibilityProbing>(
         from element: Provider.Element,
         kind: SelectionCandidateKind,

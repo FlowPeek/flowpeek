@@ -278,4 +278,38 @@ final class DiagramHistoryArchiveTests: XCTestCase {
         let reopened = DiagramHistoryStore(archive: nil, defaults: defaults)
         XCTAssertEqual(reopened.limit, 5)
     }
+
+    @MainActor
+    func testTheSharedLoadingPathPublishesTheArchiveAfterItsBackgroundRead() async throws {
+        let suite = "flowpeek.history.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let archive = DiagramHistoryArchive(url: directory.appendingPathComponent("background.json"))
+        archive.save([entry("Loaded away from the UI")])
+        let store = DiagramHistoryStore(
+            archive: archive,
+            thumbnails: nil,
+            defaults: defaults,
+            loadsInBackground: true
+        )
+
+        let deadline = Date().addingTimeInterval(2)
+        while store.isLoading, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(store.isLoading)
+        XCTAssertEqual(store.entries.map(\.title), ["Loaded away from the UI"])
+    }
+
+    @MainActor
+    func testRememberingPreferenceDoesNotNeedToOpenAnArchive() throws {
+        let suite = "flowpeek.history.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertTrue(DiagramHistoryStore.isRemembering(in: defaults))
+        defaults.set(DiagramHistory.off, forKey: DiagramHistoryStore.limitDefaultsKey)
+        XCTAssertFalse(DiagramHistoryStore.isRemembering(in: defaults))
+    }
 }

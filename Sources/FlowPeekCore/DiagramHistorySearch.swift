@@ -46,6 +46,31 @@ public enum DiagramHistorySearch {
         public var isEmpty: Bool { matched.isEmpty && related.isEmpty }
     }
 
+    /// Holds the answer for one shelf state.
+    ///
+    /// SwiftUI can ask for the same derived value several times while laying out one frame, and it
+    /// also rebuilds the shelf for focus, hover and card-geometry changes that have nothing to do
+    /// with search. Semantic ranking is the expensive half of this work: at the history limit it can
+    /// ask the on-device embedding for one hundred distances. Keeping that answer here makes the
+    /// search depend on the two things that actually change it rather than on every view update.
+    public final class Cache {
+        private let index: (any DiagramSemanticIndex)?
+        private var previous: (entries: [DiagramHistoryEntry], query: String, results: Results)?
+
+        public init(index: (any DiagramSemanticIndex)? = nil) {
+            self.index = index
+        }
+
+        public func results(for entries: [DiagramHistoryEntry], query: String) -> Results {
+            if let previous, previous.query == query, previous.entries == entries {
+                return previous.results
+            }
+            let results = DiagramHistorySearch.search(entries, query: query, index: index)
+            previous = (entries, query, results)
+            return results
+        }
+    }
+
     public static func search(
         _ entries: [DiagramHistoryEntry],
         query: String,

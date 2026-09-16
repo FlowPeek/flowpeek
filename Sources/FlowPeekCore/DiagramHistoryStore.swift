@@ -13,7 +13,7 @@ import Foundation
 @MainActor
 public final class DiagramHistoryStore: ObservableObject {
     public static let shared: DiagramHistoryStore = {
-        let store = DiagramHistoryStore()
+        let store = DiagramHistoryStore(loadsInBackground: true)
         hasOpenedShared = true
         return store
     }()
@@ -31,6 +31,9 @@ public final class DiagramHistoryStore: ObservableObject {
 
     /// Newest first. Published, so a list drawn from it follows a recording made while it is open.
     @Published public private(set) var entries: [DiagramHistoryEntry] = []
+    /// True only for the shared store's bounded initial archive read. An empty list while this is
+    /// true is not an empty history, and surfaces use this to avoid making that false claim.
+    @Published public private(set) var isLoading = false
 
     private var history: DiagramHistory
     private let archive: DiagramHistoryArchive?
@@ -42,12 +45,15 @@ public final class DiagramHistoryStore: ObservableObject {
     /// One queue, so writes happen in the order they were asked for and `flush` can wait on all of
     /// them by putting one more behind them.
     private let writes = DispatchQueue(label: "com.selenehyun.FlowPeek.diagram-history", qos: .utility)
+    private var initialLoad: BackgroundLoad?
+    private var changedWhileLoading = false
+    private var discardLoadedHistory = false
 
     /// - Parameters:
     ///   - archive: where the list is kept. Nil is a working store with no file behind it, which is
     ///     what the app falls back to if Application Support cannot be reached at all — better a
     ///     history that lasts the session than a feature that is missing.
-    public init(
+    public convenience init(
         archive: DiagramHistoryArchive? = DiagramHistoryArchive.defaultURL(
             bundleIdentifier: Bundle.main.bundleIdentifier
         ).map(DiagramHistoryArchive.init(url:)),
@@ -56,20 +62,50 @@ public final class DiagramHistoryStore: ObservableObject {
         ).map(DiagramThumbnailArchive.init(directory:)),
         defaults: UserDefaults = .standard
     ) {
+        self.init(
+            archive: archive,
+            thumbnails: thumbnails,
+            defaults: defaults,
+            loadsInBackground: false
+        )
+    }
+
+    private convenience init(loadsInBackground: Bool) {
+        self.init(
+            archive: DiagramHistoryArchive.defaultURL(bundleIdentifier: Bundle.main.bundleIdentifier)
+                .map(DiagramHistoryArchive.init(url:)),
+            thumbnails: DiagramThumbnailArchive.defaultURL(bundleIdentifier: Bundle.main.bundleIdentifier)
+                .map(DiagramThumbnailArchive.init(directory:)),
+            defaults: .standard,
+            loadsInBackground: loadsInBackground
+        )
+    }
+
+    init(
+        archive: DiagramHistoryArchive?,
+        thumbnails: DiagramThumbnailArchive?,
+        defaults: UserDefaults,
+        loadsInBackground: Bool
+    ) {
         self.archive = archive
         self.thumbnails = thumbnails
         self.defaults = defaults
         let limit = defaults.object(forKey: Self.limitDefaultsKey) as? Int ?? DiagramHistory.defaultLimit
         let age = (defaults.string(forKey: Self.ageDefaultsKey)).flatMap(DiagramHistory.Age.init(rawValue:))
             ?? .forever
-        // Read here rather than in the background, because the first thing that touches this store
-        // is a user action — opening the history, or the AI window recording a diagram — and a list
-        // that fills in a moment later is a list the user has already been shown as empty. What
-        // makes that safe is `DiagramHistoryArchive.maximumFileBytes`: the read is bounded by a
-        // number rather than by whatever is on disk.
-        let loaded = archive?.load() ?? []
+        let loaded = loadsInBackground ? [] : (archive?.load() ?? [])
         history = DiagramHistory(entries: loaded, limit: limit, age: age)
         entries = history.entries
+        if loadsInBackground, history.isRemembering, let archive {
+            let load = BackgroundLoad(archive: archive)
+            initialLoad = load
+            isLoading = true
+            Task.detached(priority: .utility) { [weak self, load] in
+                let entries = load.wait() ?? []
+                await self?.finishInitialLoad(entries)
+            }
+            return
+        }
         // A file written when the maximum was higher, or reordered by hand, is put right by the
         // initialiser above — and then written back, so the list in memory and the list on disk
         // agree from the first moment rather than from the next recording.
@@ -90,6 +126,14 @@ public final class DiagramHistoryStore: ObservableObject {
         }
     }
 
+    /// Reads the preference without opening the archive. Startup only needs to decide whether the
+    /// history shortcut is active; making that question instantiate `shared` used to pull the whole
+    /// archive read onto the main actor before any history surface existed.
+    public static func isRemembering(in defaults: UserDefaults = .standard) -> Bool {
+        let limit = defaults.object(forKey: limitDefaultsKey) as? Int ?? DiagramHistory.defaultLimit
+        return DiagramHistory.clamp(limit) > DiagramHistory.off
+    }
+
     /// How long a diagram is kept. Shortening it forgets what is already too old now, not at the
     /// next recording.
     public var age: DiagramHistory.Age {
@@ -101,6 +145,7 @@ public final class DiagramHistoryStore: ObservableObject {
             objectWillChange.send()
             history.setAge(newValue)
             defaults.set(newValue.rawValue, forKey: Self.ageDefaultsKey)
+            if isLoading { changedWhileLoading = true }
             publish()
         }
     }
@@ -129,10 +174,15 @@ public final class DiagramHistoryStore: ObservableObject {
             objectWillChange.send()
             history.setLimit(clamped)
             defaults.set(clamped, forKey: Self.limitDefaultsKey)
+            if isLoading { changedWhileLoading = true }
             guard clamped == DiagramHistory.off else { return publish() }
             // Switching it off is a statement about the disk, not just about the list, so the file
             // goes the same way it does for Clear History rather than being rewritten empty.
             entries = []
+            if isLoading {
+                discardLoadedHistory = true
+                return
+            }
             if let thumbnails { writes.async { thumbnails.removeAll() } }
             guard let archive else { return }
             writes.async { archive.removeFile() }
@@ -211,9 +261,14 @@ public final class DiagramHistoryStore: ObservableObject {
     }
 
     public func removeAll() {
-        guard !history.entries.isEmpty else { return }
+        guard !history.entries.isEmpty || isLoading else { return }
         history.removeAll()
         entries = []
+        if isLoading {
+            changedWhileLoading = true
+            discardLoadedHistory = true
+            return
+        }
         // The files go rather than being rewritten empty: a history the user cleared that is still
         // readable on disk is not cleared, and its pictures are the readable part.
         if let thumbnails { writes.async { thumbnails.removeAll() } }
@@ -230,10 +285,15 @@ public final class DiagramHistoryStore: ObservableObject {
     /// Bounded, and it has to be: this blocks while the app is being torn down, so a write that is
     /// somehow not finishing must not be able to hold the quit open.
     public func flush(timeout: TimeInterval = 2) {
+        let deadline = Date().addingTimeInterval(timeout)
+        if let initialLoad {
+            guard let loaded = initialLoad.wait(until: deadline) else { return }
+            finishInitialLoad(loaded)
+        }
         guard archive != nil else { return }
         let drained = DispatchSemaphore(value: 0)
         writes.async { drained.signal() }
-        _ = drained.wait(timeout: .now() + timeout)
+        _ = drained.wait(timeout: .now() + max(0, deadline.timeIntervalSinceNow))
     }
 
     /// The same wait, for the one caller that has no reason to have opened the store yet.
@@ -246,7 +306,11 @@ public final class DiagramHistoryStore: ObservableObject {
         guard entries != history.entries else { return }
         let dropped = Set(entries.map(\.id)).subtracting(history.entries.map(\.id))
         entries = history.entries
-        save()
+        if isLoading {
+            changedWhileLoading = true
+        } else {
+            save()
+        }
         // Whatever fell off the end -- trimmed by the maximum, or folded into another row -- takes
         // its picture with it.
         guard let thumbnails, !dropped.isEmpty else { return }
@@ -257,5 +321,66 @@ public final class DiagramHistoryStore: ObservableObject {
         guard let archive else { return }
         let snapshot = history.entries
         writes.async { archive.save(snapshot) }
+    }
+
+    private func finishInitialLoad(_ loaded: [DiagramHistoryEntry]) {
+        guard initialLoad != nil else { return }
+        initialLoad = nil
+        isLoading = false
+
+        if discardLoadedHistory || !history.isRemembering {
+            if let thumbnails { writes.async { thumbnails.removeAll() } }
+            if let archive { writes.async { archive.removeFile() } }
+            return
+        }
+
+        let current = history.entries
+        history = DiagramHistory(
+            entries: current + loaded,
+            limit: history.limit,
+            age: history.age
+        )
+        entries = history.entries
+        if changedWhileLoading || history.entries != loaded { save() }
+        if let thumbnails {
+            let kept = history.entries.map(\.id)
+            writes.async { thumbnails.prune(keeping: kept) }
+        }
+    }
+
+    /// One bounded archive read with a synchronous escape hatch for quit. The normal path waits on
+    /// a utility thread and publishes on the main actor; `flush` waits only when the process is
+    /// already leaving and has to make an in-flight recording and the loaded archive meet first.
+    private final class BackgroundLoad: @unchecked Sendable {
+        private let condition = NSCondition()
+        private var result: [DiagramHistoryEntry]?
+
+        init(archive: DiagramHistoryArchive) {
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                guard let self else { return }
+                let loaded = archive.load()
+                condition.lock()
+                result = loaded
+                condition.broadcast()
+                condition.unlock()
+            }
+        }
+
+        func wait(until deadline: Date? = nil) -> [DiagramHistoryEntry]? {
+            condition.lock()
+            while result == nil {
+                if let deadline {
+                    guard condition.wait(until: deadline) else {
+                        condition.unlock()
+                        return nil
+                    }
+                } else {
+                    condition.wait()
+                }
+            }
+            let loaded = result
+            condition.unlock()
+            return loaded
+        }
     }
 }

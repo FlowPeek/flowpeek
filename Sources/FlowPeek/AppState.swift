@@ -689,7 +689,7 @@ final class AppState: ObservableObject {
                 aiEnabled: aiEnabled,
                 ambientPeekEnabled: ambientPeekEnabled,
                 accessibilityGranted: accessibilityGranted,
-                historyEnabled: DiagramHistoryStore.shared.isRemembering
+                historyEnabled: DiagramHistoryStore.isRemembering()
             )
         )
         refreshMenuBarStatus()

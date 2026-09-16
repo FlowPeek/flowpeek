@@ -3,6 +3,12 @@ import ApplicationServices
 import FlowPeekCore
 import OSLog
 
+private func makeAmbientSystemWideElement() -> AXUIElement {
+    let element = AXUIElementCreateSystemWide()
+    _ = AXUIElementSetMessagingTimeout(element, 0.15)
+    return element
+}
+
 /// Hold the peek modifier and FlowPeek reads whatever text sits under the pointer; if it parses as
 /// Mermaid it outlines that block. Nothing happens unless the modifier is down, so the cost is
 /// paid only when asked for and no ordinary keystroke is ever intercepted.
@@ -13,7 +19,7 @@ import OSLog
 /// nothing under the pointer to read and is served by the caret fallback instead. Apps that render
 /// text themselves (a canvas terminal) expose neither; the clipboard watch covers those.
 @MainActor
-final class AmbientPeekMonitor {
+final class AmbientPeekMonitor: @unchecked Sendable {
     var onCandidate: ((AmbientCandidate) -> Void)?
     var onDismiss: (() -> Void)?
     /// A gesture that read an application and found no diagram. Not an error in itself: most of the
@@ -47,13 +53,13 @@ final class AmbientPeekMonitor {
     private static let significantModifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
 
     /// Five levels reached the whole page in measurement; four keeps the climb inside a block.
-    private static let ancestorLimit = 4
+    nonisolated private static let ancestorLimit = 4
     /// Two pieces on the same visual line differed by well under a point; a new line differs by a
     /// full line height.
-    private static let lineTolerance: CGFloat = 3
+    nonisolated private static let lineTolerance: CGFloat = 3
     /// Under `AmbientPeekPolicy.readBudget`, so a single hung reply cannot on its own overrun the
     /// budget for the whole read. A responsive app answers in well under a millisecond.
-    private static let messagingTimeout: Float = 0.15
+    nonisolated private static let messagingTimeout: Float = 0.15
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "FlowPeek", category: "Ambient")
     private var flagsMonitor: Any?
@@ -63,12 +69,10 @@ final class AmbientPeekMonitor {
     private var lastPointer: CGPoint?
     private var lastRead: Date?
     private var showing = false
+    private var readInFlight = false
+    private var evaluateAfterRead = false
     private var backoff = AmbientPeekPolicy.ReadBackoff()
-    private lazy var systemWide: AXUIElement = {
-        let element = AXUIElementCreateSystemWide()
-        _ = AXUIElementSetMessagingTimeout(element, Self.messagingTimeout)
-        return element
-    }()
+    private nonisolated(unsafe) let systemWide = makeAmbientSystemWideElement()
 
     func start() {
         guard flagsMonitor == nil, localFlagsMonitor == nil else { return }
@@ -114,6 +118,10 @@ final class AmbientPeekMonitor {
 
     private func pointerMoved() {
         guard isEngaged else { return }
+        if readInFlight {
+            evaluateAfterRead = true
+            return
+        }
         evaluate()
     }
 
@@ -142,6 +150,10 @@ final class AmbientPeekMonitor {
     }
 
     private func evaluate() {
+        guard !readInFlight else {
+            evaluateAfterRead = true
+            return
+        }
         // Belt and braces for the same missed-key-up problem: whatever the monitors saw, the live
         // modifier state is the truth, so a stale engagement corrects itself on the next event
         // rather than persisting until the app is relaunched.
@@ -205,13 +217,42 @@ final class AmbientPeekMonitor {
         // with the read still reporting `.nothing`, which clears the backoff instead of engaging it.
         // Charged here, a wedged app spends the budget it was given, the read comes back
         // `.abandoned`, and three holds put it away for ten seconds.
-        let deadline = Date() + AmbientPeekPolicy.readBudget
-        AccessibilityTreeWarmUp.shared.warmUp(pid, before: deadline)
+        readInFlight = true
+        let name = application.localizedName
+        let frames = NSScreen.screens.map(\.frame)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            let deadline = Date() + AmbientPeekPolicy.readBudget
+            AccessibilityTreeWarmUp.shared.warmUp(pid, before: deadline)
+            let outcome = self.read(
+                at: pointer,
+                processIdentifier: pid,
+                applicationName: name,
+                screenFrames: frames,
+                deadline: deadline
+            )
+            await self.finishRead(outcome, processIdentifier: pid, applicationName: name)
+        }
+    }
 
-        let outcome = read(at: pointer, in: application, deadline: deadline)
+    private func finishRead(_ outcome: Read, processIdentifier pid: pid_t, applicationName: String?) {
+        readInFlight = false
         // Stamped when the read *finishes*: timed from the start, a 200 ms read would already be
         // past the debounce by the time it returned and the next pointer move would re-run it.
         lastRead = Date()
+
+        guard isEngaged,
+              NSEvent.modifierFlags.intersection(Self.significantModifiers) == Self.modifier else {
+            retire()
+            evaluateAfterRead = false
+            return
+        }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+            retire()
+            lastPointer = nil
+            scheduleEvaluationAfterRead()
+            return
+        }
 
         switch outcome {
         case .found(let candidate):
@@ -221,26 +262,38 @@ final class AmbientPeekMonitor {
         case .nothing:
             backoff.noteCompleted(pid: pid)
             retire()
-            onSilent?(application)
+            if let application = NSRunningApplication(processIdentifier: pid) { onSilent?(application) }
         case .abandoned:
             // Deliberately neither retiring nor showing: an unfinished read is not the answer "no
             // diagram here". Retiring would fire onDismiss, drop the candidate an activation needs,
             // and blink the outline off and on for as long as the app stayed slow.
-            if backoff.noteAbandoned(pid: pid, now: now) {
+            if backoff.noteAbandoned(pid: pid, now: Date()) {
                 logger.info(
                     """
-                    ambient reads paused for \(application.localizedName ?? "an app", privacy: .public): \
+                    ambient reads paused for \(applicationName ?? "an app", privacy: .public): \
                     the accessibility read kept running out of its \
                     \(Int(AmbientPeekPolicy.readBudget * 1000), privacy: .public) ms budget
                     """
                 )
             }
         }
+        if evaluateAfterRead {
+            scheduleEvaluationAfterRead()
+        }
+    }
+
+    private func scheduleEvaluationAfterRead() {
+        evaluateAfterRead = false
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(AmbientPeekPolicy.debounce))
+            guard let self, isEngaged, !readInFlight else { return }
+            evaluate()
+        }
     }
 
     // MARK: - Reading
 
-    private enum Read {
+    private enum Read: Sendable {
         case found(AmbientCandidate)
         case nothing
         /// The budget ran out before the read could finish, so what is under the pointer is unknown.
@@ -269,8 +322,13 @@ final class AmbientPeekMonitor {
         }
     }
 
-    private func read(at pointer: CGPoint, in application: NSRunningApplication, deadline: Date) -> Read {
-        let frames = NSScreen.screens.map(\.frame)
+    private nonisolated func read(
+        at pointer: CGPoint,
+        processIdentifier: pid_t,
+        applicationName: String?,
+        screenFrames frames: [CGRect],
+        deadline: Date
+    ) -> Read {
         guard let flip = ScreenGeometry.flipReference(screenFrames: frames) else { return .nothing }
 
         let screen = ScreenGeometry.visibleFrame(containing: pointer, visibleFrames: frames)?.size
@@ -301,10 +359,11 @@ final class AmbientPeekMonitor {
         // is no such focused document, this costs two attributes and falls straight through: in a
         // browser the focused element is the web area, whose role is not a text area, and the climb
         // is what answers.
-        if ownsHit(hit, application),
+        if ownsHit(hit, processIdentifier: processIdentifier),
            case .found(let candidate) = caretRead(
                at: pointer,
-               in: application,
+               processIdentifier: processIdentifier,
+               applicationName: applicationName,
                screen: screen,
                flip: flip,
                frames: frames,
@@ -348,7 +407,7 @@ final class AmbientPeekMonitor {
                 text: text,
                 bounds: bounds,
                 screen: screen,
-                applicationName: application.localizedName
+                applicationName: applicationName
             ) { return .found(candidate) }
         }
         return .nothing
@@ -359,9 +418,9 @@ final class AmbientPeekMonitor {
     /// where the pointer has never been. `AXUIElementGetPid` is a local lookup rather than a message
     /// to the other process. The other half -- that the pointer is over the editor rather than
     /// merely over the same application -- needs the editor's own rectangle and belongs to the read.
-    private func ownsHit(_ hit: AXUIElement, _ application: NSRunningApplication) -> Bool {
+    private nonisolated func ownsHit(_ hit: AXUIElement, processIdentifier: pid_t) -> Bool {
         var owner: pid_t = 0
-        return AXUIElementGetPid(hit, &owner) == .success && owner == application.processIdentifier
+        return AXUIElementGetPid(hit, &owner) == .success && owner == processIdentifier
     }
 
     /// The read the descent cannot do. VS Code's editor exposes the whole file as the focused
@@ -378,15 +437,16 @@ final class AmbientPeekMonitor {
     /// Kept as a fallback and never a primary read: in Chrome the same marker attributes answer,
     /// but with no newlines between block elements ("Introduction#Event Modeling (EM) is..."), which
     /// is worse than what the descent already gets there.
-    private func caretRead(
+    private nonisolated func caretRead(
         at pointer: CGPoint,
-        in application: NSRunningApplication,
+        processIdentifier: pid_t,
+        applicationName: String?,
         screen: CGSize,
         flip: CGFloat,
         frames: [CGRect],
         deadline: Date
     ) -> Read {
-        let app = AXUIElementCreateApplication(application.processIdentifier)
+        let app = AXUIElementCreateApplication(processIdentifier)
         _ = AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
         guard let focused = element(app, kAXFocusedUIElementAttribute as String, before: deadline) else {
             return Date() < deadline ? .nothing : .abandoned
@@ -457,12 +517,12 @@ final class AmbientPeekMonitor {
                 slice: slice,
                 bounds: grown,
                 screen: screen,
-                applicationName: application.localizedName
+                applicationName: applicationName
             ) else { continue }
             // Offsets and sizes only: the document itself is never logged.
             logger.debug(
                 """
-                caret anchor in \(application.localizedName ?? "an app", privacy: .public): \
+                caret anchor in \(applicationName ?? "an app", privacy: .public): \
                 \(slice.range.length, privacy: .public) characters at offset \
                 \(slice.range.location, privacy: .public) of \(document.utf16.count, privacy: .public)
                 """
@@ -481,7 +541,7 @@ final class AmbientPeekMonitor {
     /// at (703,219)), and then the pane around it, the editor's rectangle. Both of those were
     /// already read to place the pointer, so this spends one more message only when it is the one
     /// that wins. None of the three is the diagram's own box; no attribute reports that.
-    private func outlineBounds(
+    private nonisolated func outlineBounds(
         of focused: AXUIElement,
         line: CGRect?,
         pane: CGRect?,
@@ -527,7 +587,7 @@ final class AmbientPeekMonitor {
     /// line but the caret's, which is why the geometry has to be computed at all, but it answers the
     /// right *text*, and that is enough to catch a document whose rows and lines have stopped
     /// matching. One extra accessibility message, only on the caret route.
-    private func blockBounds(
+    private nonisolated func blockBounds(
         of focused: AXUIElement,
         caretLine: CGRect,
         document: String,
@@ -551,7 +611,7 @@ final class AmbientPeekMonitor {
     /// Whether the editor puts the same text on `line` as the document string does. Line numbers are
     /// zero-based here and one-based everywhere else in this file, which is the only reason the
     /// conversion is spelled out.
-    private func agreesOnLine(
+    private nonisolated func agreesOnLine(
         _ line: Int,
         of focused: AXUIElement,
         in document: String,
@@ -578,7 +638,7 @@ final class AmbientPeekMonitor {
     /// Rebuilds lines from the pieces' own frames. Joining every piece with a newline splits a
     /// line that arrives as several pieces -- two, in the measured case -- and mermaid then fails
     /// mid-statement. Pieces sharing a baseline are one line; a new baseline starts a new one.
-    private func text(under element: AXUIElement, descent: inout Descent) -> String? {
+    private nonisolated func text(under element: AXUIElement, descent: inout Descent) -> String? {
         var pieces: [(text: String, frame: CGRect?)] = []
         collectText(element, depth: 0, descent: &descent, into: &pieces)
         guard !pieces.isEmpty else { return nil }
@@ -617,7 +677,7 @@ final class AmbientPeekMonitor {
     /// syntax-highlighted `AXStaticText` descendants; collecting both concatenates the diagram to
     /// itself, and mermaid then fails on the second starter. Measured on mermaid.ai's own docs: one
     /// `AXTextArea` yielded 884 characters, which is the 442-character diagram exactly twice.
-    private func collectText(
+    private nonisolated func collectText(
         _ element: AXUIElement,
         depth: Int,
         descent: inout Descent,
@@ -646,35 +706,35 @@ final class AmbientPeekMonitor {
     // wrappers stay because this file's call sites read better without a type name in front of
     // every message, and because the deadline belongs to one read rather than to the monitor.
 
-    private func parent(of element: AXUIElement, before deadline: Date) -> AXUIElement? {
+    private nonisolated func parent(of element: AXUIElement, before deadline: Date) -> AXUIElement? {
         AccessibilityRead.element(element, kAXParentAttribute as String, before: deadline)
     }
 
-    private func element(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> AXUIElement? {
+    private nonisolated func element(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> AXUIElement? {
         AccessibilityRead.element(element, attribute, before: deadline)
     }
 
-    private func attribute(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CFTypeRef? {
+    private nonisolated func attribute(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CFTypeRef? {
         AccessibilityRead.attribute(element, attribute, before: deadline)
     }
 
-    private func string(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> String? {
+    private nonisolated func string(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> String? {
         AccessibilityRead.string(element, attribute, before: deadline)
     }
 
-    private func number(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> Int? {
+    private nonisolated func number(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> Int? {
         AccessibilityRead.number(element, attribute, before: deadline)
     }
 
-    private func rect(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CGRect? {
+    private nonisolated func rect(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CGRect? {
         AccessibilityRead.rect(element, attribute, before: deadline)
     }
 
-    private func range(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CFRange? {
+    private nonisolated func range(_ element: AXUIElement, _ attribute: String, before deadline: Date) -> CFRange? {
         AccessibilityRead.range(element, attribute, before: deadline)
     }
 
-    private func attribute(
+    private nonisolated func attribute(
         _ element: AXUIElement,
         parameterized attribute: String,
         argument: CFTypeRef,
@@ -683,7 +743,7 @@ final class AmbientPeekMonitor {
         AccessibilityRead.attribute(element, parameterized: attribute, argument: argument, before: deadline)
     }
 
-    private func string(
+    private nonisolated func string(
         _ element: AXUIElement,
         parameterized attribute: String,
         argument: CFTypeRef,
@@ -692,7 +752,7 @@ final class AmbientPeekMonitor {
         AccessibilityRead.string(element, parameterized: attribute, argument: argument, before: deadline)
     }
 
-    private func rect(
+    private nonisolated func rect(
         _ element: AXUIElement,
         parameterized attribute: String,
         argument: CFTypeRef,

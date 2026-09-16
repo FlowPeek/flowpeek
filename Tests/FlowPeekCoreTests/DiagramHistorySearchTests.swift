@@ -14,6 +14,15 @@ private struct StubIndex: DiagramSemanticIndex {
     }
 }
 
+private final class CountingIndex: DiagramSemanticIndex, @unchecked Sendable {
+    private(set) var calls = 0
+
+    func distance(_ query: String, _ candidate: String) -> Double? {
+        calls += 1
+        return 0.5
+    }
+}
+
 final class DiagramHistorySearchTests: XCTestCase {
     private func entry(_ title: String, _ source: String, minutesAgo: Int = 0) -> DiagramHistoryEntry {
         DiagramHistoryEntry(
@@ -109,6 +118,24 @@ final class DiagramHistorySearchTests: XCTestCase {
         let index = StubIndex(distances: [:])
         let found = DiagramHistorySearch.search([wanted, other], query: "결제", index: index)
         XCTAssertEqual(found.matched.map(\.id), [wanted.id])
+    }
+
+    func testCacheReusesTheAnswerUntilTheQueryOrEntriesChange() {
+        let one = entry("Checkout", "flowchart LR\n  Cart --> Pay")
+        let two = entry("Deploy", "flowchart LR\n  Build --> Ship")
+        let index = CountingIndex()
+        let cache = DiagramHistorySearch.Cache(index: index)
+
+        let first = cache.results(for: [one], query: "unmatched")
+        XCTAssertEqual(index.calls, 1)
+        XCTAssertEqual(cache.results(for: [one], query: "unmatched"), first)
+        XCTAssertEqual(index.calls, 1)
+
+        _ = cache.results(for: [one], query: "another")
+        XCTAssertEqual(index.calls, 2)
+
+        _ = cache.results(for: [one, two], query: "another")
+        XCTAssertEqual(index.calls, 4)
     }
 
     func testTheHaystackIsTheWordsWithoutTheSyntax() {

@@ -79,7 +79,16 @@ final class TerminalPeekMonitor {
     private let editorFiles = TerminalEditorFile()
     private let agentSessions = CodexSessionSources()
     /// The last file read, kept so a poll four times a second does not read it again for nothing.
-    private var editorCache: (path: String, modified: Date, size: Int, lines: [String], text: String)?
+    /// Carries the metadata that admitted it so every downstream cache uses the same snapshot rather
+    /// than asking the filesystem for the same path again in the same poll.
+    private struct EditorFileSnapshot {
+        let path: String
+        let modified: Date
+        let size: Int
+        let lines: [String]
+        let text: String
+    }
+    private var editorCache: EditorFileSnapshot?
     /// The file wrapped to a pane's width, kept for as long as neither changes.
     ///
     /// Built from the whole file, so it is not something to do on every poll: measured, 5.3 ms for
@@ -1355,7 +1364,7 @@ final class TerminalPeekMonitor {
             guard let file = contents(of: candidate.path) else { continue }
             // Wrapped the way the editor wrapped it, and the same wrapping is used for the
             // alignment, the row spans and the exactness check -- three answers about one screen.
-            let wrapped = wrappedFile(of: candidate.path, lines: file.lines, columns: grid.columns)
+            let wrapped = wrappedFile(of: file, columns: grid.columns)
             guard let placed = EditorViewportAlignment.placement(ofRows: rows, in: wrapped)
             else { continue }
             let located = TerminalBufferScanner.blocks(in: file.text).compactMap { block -> Located? in
@@ -1399,32 +1408,30 @@ final class TerminalPeekMonitor {
     ///
     /// Keyed on the same three facts as `contents(of:)` -- the file cannot change without one of
     /// them moving -- plus the width, because a resized pane wraps differently.
-    private func wrappedFile(of path: String, lines: [String], columns: Int?) -> EditorWrappedFile {
-        let attributes = try? FileManager.default.attributesOfItem(atPath: path)
-        let modified = attributes?[.modificationDate] as? Date ?? .distantPast
-        let size = (attributes?[.size] as? NSNumber)?.intValue ?? -1
-        if let cached = wrappedCache, cached.path == path, cached.modified == modified,
-           cached.size == size, cached.columns == columns {
+    private func wrappedFile(of snapshot: EditorFileSnapshot, columns: Int?) -> EditorWrappedFile {
+        if let cached = wrappedCache, cached.path == snapshot.path, cached.modified == snapshot.modified,
+           cached.size == snapshot.size, cached.columns == columns {
             return cached.file
         }
-        let wrapped = EditorWrappedFile(lines: lines, columns: columns)
-        wrappedCache = (path, modified, size, columns, wrapped)
+        let wrapped = EditorWrappedFile(lines: snapshot.lines, columns: columns)
+        wrappedCache = (snapshot.path, snapshot.modified, snapshot.size, columns, wrapped)
         return wrapped
     }
 
-    private func contents(of path: String) -> (text: String, lines: [String])? {
+    private func contents(of path: String) -> EditorFileSnapshot? {
         let attributes = try? FileManager.default.attributesOfItem(atPath: path)
         let modified = attributes?[.modificationDate] as? Date ?? .distantPast
         let size = (attributes?[.size] as? NSNumber)?.intValue ?? -1
         if let cached = editorCache, cached.path == path, cached.modified == modified, cached.size == size {
-            return (cached.text, cached.lines)
+            return cached
         }
         // The same size a window is held to. A file past it is one the scanner would refuse anyway.
         guard size >= 0, size <= TerminalBufferScanner.maximumWindowCharacters,
               let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
         let lines = text.components(separatedBy: "\n")
-        editorCache = (path, modified, size, lines, text)
-        return (text, lines)
+        let snapshot = EditorFileSnapshot(path: path, modified: modified, size: size, lines: lines, text: text)
+        editorCache = snapshot
+        return snapshot
     }
 
     /// The window this path has always scanned: the visible lines and `lineMargin` either side.

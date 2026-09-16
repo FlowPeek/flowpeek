@@ -54,15 +54,21 @@ struct DiagramShelfView: View {
         case search
         case card(DiagramHistoryEntry.ID)
     }
-    /// Made once and kept for as long as the shelf is open: loading a language model is tens of
-    /// milliseconds, and it must not happen on a keystroke.
-    private let semantics = SemanticIndex()
+    /// Made once and kept for as long as the shelf is open. Besides keeping the language models,
+    /// this keeps the result for the current entries and query: SwiftUI reevaluates this view for
+    /// focus, hover and card geometry too, none of which is a reason to rank a hundred diagrams
+    /// again.
+    private let searchCache = DiagramHistorySearch.Cache(index: SemanticIndex())
 
     var body: some View {
         FlowPeekGlassSurface(cornerRadius: 20) {
             VStack(alignment: .leading, spacing: 0) {
                 header
-                if store.entries.isEmpty {
+                if store.isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if store.entries.isEmpty {
                     empty
                 } else if results.isEmpty {
                     noMatches
@@ -246,7 +252,7 @@ struct DiagramShelfView: View {
     /// underneath it: a diagram recorded while the shelf is open belongs in the results if it
     /// matches.
     private var results: DiagramHistorySearch.Results {
-        DiagramHistorySearch.search(store.entries, query: query, index: semantics)
+        searchCache.results(for: store.entries, query: query)
     }
 
     private var noMatches: some View {

@@ -470,14 +470,23 @@
       // whose shape mermaid changes in a later version is left alone rather than reshaped blind.
       var pointsForward = /^M 0 0 L 10 5 L 0 10 z$/.test(d);
       var pointsBack = /^M 0 5 L 10 10 L 10 0 z$/.test(d);
-      if (!pointsForward && !pointsBack) return;
+      // Sequence draws its own head, and a bigger one: 12x12 with no viewBox at all, so its path
+      // coordinates are the marker's own space. Measured beside a flowchart's, it is half again as
+      // large on a diagram whose lines are no heavier. Same triangle, one point further left.
+      var isSequenceHead = /^M -1 0 L 10 5 L 0 10 z$/.test(d);
+      if (!pointsForward && !pointsBack && !isSequenceHead) return;
+      if (isSequenceHead) pointsForward = true;
 
+      // The span the old path was drawn across, which is the viewBox where there is one and the
+      // path's own extent where there is not -- sequence's head carries no viewBox, so its refX is
+      // already in the same units as its coordinates.
       var oldBox = String(marker.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+      if (oldBox.length !== 4) oldBox = [0, 0, 10, 10];
       var oldRefX = parseFloat(marker.getAttribute("refX"));
       marker.setAttribute("viewBox", "0 0 " + ARROW.width + " " + ARROW.height);
       marker.setAttribute("markerWidth", String(ARROW.width));
       marker.setAttribute("markerHeight", String(ARROW.height));
-      if (oldBox.length === 4 && oldBox[2] > 0 && isFinite(oldRefX)) {
+      if (oldBox[2] > 0 && isFinite(oldRefX)) {
         marker.setAttribute("refX", String((oldRefX / oldBox[2]) * ARROW.width));
       }
       marker.setAttribute("refY", String(ARROW.height / 2));

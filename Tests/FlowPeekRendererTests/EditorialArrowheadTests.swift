@@ -65,6 +65,34 @@ final class EditorialArrowheadTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(Double(attribute("refY", of: marker) ?? "")), 3, accuracy: 0.01)
     }
 
+    /// Sequence draws its own head, and a bigger one: 12x12 with no viewBox at all. Left alone it
+    /// was half again the size of a flowchart's on a diagram whose lines are no heavier.
+    func testTheSequenceArrowheadIsBroughtToTheSameSize() async throws {
+        let pool = MermaidWebViewPool()
+        let engine = try pool.checkOut()
+        defer { pool.evict(engine) }
+        let svg = try await engine.render(
+            MermaidRenderRequest(
+                source: "sequenceDiagram\n    A->>B: go\n    B-->>A: done",
+                theme: MermaidThemeCatalogue.theme(
+                    .editorial, appearance: .light, accentHex: "#0A84FF", increaseContrast: false
+                ),
+                seed: "fp-seqhead", renderID: "fp-seqhead"
+            )
+        ).svg
+        let parts: [String] = svg.components(separatedBy: "<marker")
+        let head = try XCTUnwrap(
+            parts.first { attribute("id", of: $0)?.hasSuffix("-arrowhead") == true },
+            "the sequence arrowhead was not found"
+        )
+        XCTAssertEqual(attribute("markerWidth", of: head), "8", "mermaid's own is 12")
+        XCTAssertEqual(attribute("markerHeight", of: head), "6")
+        XCTAssertTrue(head.contains("M 0 0 L 8 3 L 0 6 z"))
+        // It carries no viewBox of its own, so one has to be given or the path keeps being read in
+        // the marker's old 12-unit space.
+        XCTAssertEqual(attribute("viewBox", of: head), "0 0 8 6")
+    }
+
     /// And the system theme keeps mermaid's, because 124 goldens say what it looks like.
     func testTheSystemThemeKeepsMermaidsArrowhead() async throws {
         let all = try await markers(.system)

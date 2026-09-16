@@ -56,9 +56,11 @@ def app_name(configuration_name)
 end
 # Carried by SPM's `.process("Resources")` rule, not by the app bundle.
 EXCLUDED_RESOURCES = ["placeholder.txt", ".DS_Store"].freeze
-# What the Quick Look extension needs a copy of. Only the engine: it draws one diagram and says
-# nothing, so it carries no catalogue and no icon.
-QUICKLOOK_RESOURCES = ["mermaid.min.js", "flowpeek-glue.js"].freeze
+# What the Quick Look extension needs a copy of. Only what draws: it shows one diagram and says
+# nothing, so it carries no catalogue and no icon -- but it carries all three render scripts,
+# because a preview drawn by a different renderer than the app's is a preview of a different
+# diagram.
+QUICKLOOK_RESOURCES = ["mermaid.min.js", "flowpeek-flow.js", "flowpeek-glue.js"].freeze
 
 root = File.expand_path("..", __dir__)
 project_path = File.join(root, "FlowPeek.xcodeproj")

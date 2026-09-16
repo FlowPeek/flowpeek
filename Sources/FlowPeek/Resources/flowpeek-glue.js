@@ -6,6 +6,10 @@
   var GLUE_VERSION = "1";
   var CANARY_SOURCE = "flowchart TD\n  A[Start] --> B[End]";
   var MAX_MESSAGE = 2000;
+  // One number, two readers: mermaid refuses a graph past it with its own `Edge limit exceeded`
+  // placeholder, and FlowPeek's renderer declines past it so the two never disagree about which
+  // graphs are drawable.
+  var MAX_EDGES = 2000;
   // What a diagram may not decide for itself. `theme` and `themeVariables` are deliberately absent:
   // choosing a palette is the whole point of Mermaid's theming, and blocking them made every
   // `%%{init: {"theme": ...}}%%` directive and every front-matter `config: theme:` silently do
@@ -116,7 +120,7 @@
       secure: SECURE_KEYS.slice(),
       suppressErrorRendering: true,
       maxTextSize: 120000,
-      maxEdges: 2000,
+      maxEdges: MAX_EDGES,
       deterministicIds: true,
       deterministicIDSeed: String(p.seed || "flowpeek"),
       // 'base' is a blank canvas: only the variables we hand over get applied, so any diagram type
@@ -833,6 +837,107 @@
     return { nodes: nodes.length, edges: edges.length, zones: zones.length, rungs: counts };
   }
 
+  // ---------------------------------------------------------------------------
+  // FlowPeek's own flowchart renderer, tried in front of mermaid.
+  //
+  // The seam is between mermaid.parse() and mermaid.render() and nowhere else (RENDERER-SPEC.md
+  // §2). parse() is what produces `diagramType`, and it is the only thing that produces the error
+  // carrying `e.hash.loc.first_line` that Swift turns into a quotable line number -- so a malformed
+  // source still fails in mermaid's own wording, before this is consulted at all.
+  //
+  // The renderer declines rather than fails. A decline is a route, not a fault: the reader gets
+  // the diagram mermaid would have drawn and is told nothing, which is why `MermaidGlueCode` has
+  // no "fell back" value and must not grow one.
+  // ---------------------------------------------------------------------------
+
+  // flowchart-v2 only. `flowchart-elk` is a different layout engine and `swimlane` is a different
+  // diagram; both are in LADDER_TYPES because the DOM sweep can read their edge endpoints, which
+  // says nothing about whether this renderer can lay them out.
+  var FLOW_TYPES = { "flowchart-v2": 1 };
+
+  // The renderer touches no DOM at all, so this callback is its only window into how text really
+  // paints (RENDERER-SPEC.md §3.2). It measures an SVG <text> with getBBox() rather than a 2D
+  // canvas because the app runs with htmlLabels:false and every label the renderer emits *is* an
+  // SVG <text>: same element type, same document, same font stack, same letter-spacing. A canvas
+  // is a different text pipeline -- TextMetrics reports no line box and engines disagree about
+  // letter-spacing -- which would produce boxes that fit in the measurement and clip on screen.
+  function makeMeasurer() {
+    var host = document.getElementById("measure");
+    if (!host) return null;
+    var NS = "http://www.w3.org/2000/svg";
+    // Built per render, because wipeMeasure() empties #measure after every one, success or not.
+    var svg = document.createElementNS(NS, "svg");
+    var text = document.createElementNS(NS, "text");
+    svg.appendChild(text);
+    host.appendChild(svg);
+    var cache = Object.create(null);
+    function measure(str, style) {
+      var key = style.fontSizePX + "|" + style.fontWeight + "|" + style.letterSpacing + "|" + str;
+      var hit = cache[key];
+      if (hit !== undefined) return hit;
+      text.setAttribute(
+        "style",
+        "font-family:" + style.fontFamily + ";font-size:" + style.fontSizePX + "px;"
+          + "font-weight:" + style.fontWeight + ";letter-spacing:" + style.letterSpacing
+      );
+      text.textContent = str;
+      // getBBox is already patched above, which is what owes an empty line its line-box height:
+      // WebKit answers 0x0 there where the renderer needs the em, and the compensation belongs to
+      // this adapter rather than to the renderer.
+      var box = text.getBBox();
+      var out = { width: box.width, height: box.height };
+      cache[key] = out;
+      return out;
+    }
+    // The scratch element is torn down again on a decline, because mermaid then renders into this
+    // same #measure container and it is not owed our debris.
+    return { measure: measure, dispose: function () { svg.remove(); } };
+  }
+
+  // The payload is already the shape `buildFlowTheme` projects from, so it is handed over whole
+  // rather than copied field by field: a theme key added in MacMermaidTheme.swift then reaches the
+  // renderer with no edit here. The edge limit is the glue's own, so the two agree about which
+  // graphs are too big -- a graph the renderer declined for size would otherwise be drawn by a
+  // mermaid that also refuses it, and the reader would see the engine's limit message either way.
+  function flowInput(p, diagramType, measurer) {
+    return {
+      source: p.source,
+      renderID: String(p.renderID || "fp-0"),
+      seed: String(p.seed || ""),
+      diagramType: String(diagramType || ""),
+      theme: p,
+      measureText: measurer,
+      limits: { maxEdges: MAX_EDGES }
+    };
+  }
+
+  // Tries the renderer, or says why it did not. Never throws: a throw from this file's own
+  // renderer is a bug, and the reader's diagram is not the place to find out about it.
+  function tryFlowRenderer(p, diagramType) {
+    var flow;
+    try {
+      flow = window.__flowpeekFlow || null;
+    } catch (e) {
+      return { ok: false, reason: "no-renderer" };
+    }
+    if (!flow || typeof flow.render !== "function") return { ok: false, reason: "no-renderer" };
+    if (!FLOW_TYPES[String(diagramType || "")]) return { ok: false, reason: "wrong-type" };
+    // The load-bearing clause. A theme with no `.fp-` rules cannot paint what this renderer tags,
+    // and it is the same opt-in the editorial passes read -- which is what keeps the system theme,
+    // and therefore its 124 goldens, entirely on mermaid.
+    if (String(p.themeCSS || "").indexOf(LADDER_MARKER) === -1) return { ok: false, reason: "no-ladder" };
+    var measurer = makeMeasurer();
+    if (!measurer) return { ok: false, reason: "no-measure-host" };
+    var out;
+    try {
+      out = flow.render(flowInput(p, diagramType, measurer.measure)) || { ok: false, reason: "no-result" };
+    } catch (e) {
+      out = { ok: false, reason: "threw:" + String((e && e.message) || e) };
+    }
+    if (out.ok !== true) measurer.dispose();
+    return out;
+  }
+
   async function render(rawPayload) {
     var p;
     try {
@@ -870,23 +975,46 @@
       if (diagramType && needsTypedConfig(p, diagramType)) {
         mm.initialize(buildConfig(p, diagramType));
       }
-      // Render into an attached, off-screen box rather than mermaid's default container: a
-      // renderer that measures with getBBox() needs a live render tree, and without this
-      // eventmodeling's data blocks throw "svg element not in render tree".
-      var measure = document.getElementById("measure");
-      var r = await mm.render(String(p.renderID || "fp-0"), p.source, measure || undefined);
-      var doc = new DOMParser().parseFromString("<!doctype html><body>" + r.svg, "text/html");
+      var attempt = tryFlowRenderer(p, diagramType);
+      var flowOut = attempt.ok === true ? attempt : null;
+      var rendererName = flowOut ? "flowpeek-flow" : "mermaid";
+      var rendererFallback = flowOut ? null : String(attempt.reason || "declined").slice(0, 200);
+
+      var svgText, reportedType;
+      if (flowOut) {
+        svgText = flowOut.svg;
+        reportedType = flowOut.diagramType;
+      } else {
+        // Render into an attached, off-screen box rather than mermaid's default container: a
+        // renderer that measures with getBBox() needs a live render tree, and without this
+        // eventmodeling's data blocks throw "svg element not in render tree".
+        var measure = document.getElementById("measure");
+        var r = await mm.render(String(p.renderID || "fp-0"), p.source, measure || undefined);
+        svgText = r.svg;
+        reportedType = r.diagramType;
+      }
+      var doc = new DOMParser().parseFromString("<!doctype html><body>" + svgText, "text/html");
       var svg = doc.body.querySelector("svg");
-      if (!svg) { wipeMeasure(); return fail("render-no-svg", "mermaid returned no <svg> element"); }
+      if (!svg) { wipeMeasure(); return fail("render-no-svg", "the renderer returned no <svg> element"); }
       var node = document.importNode(svg, true);
+      // Kept for flow output too, and not as a formality: it is the boundary that does not move
+      // when the renderer is edited, and `scrubbed` is the channel the host turns into a reader-
+      // visible notice. On correct flow output it finds nothing, which is itself worth asserting.
       var scrubbed = scrub(node);
-      // Structural rungs, on the detached node: this pass touches no layout, so it costs nothing
-      // here, and it must run before makeLabelsReadable(), which reads computed fills.
-      tagStructure(node, String(p.renderID || "fp-0"), r.diagramType, p.themeCSS);
-      // After the rungs and before anything measures the drawing: this only rewrites `d`, so no
-      // geometry the viewBox depends on moves.
-      roundEdges(node, p.themeCSS, r.diagramType);
-      reshapeArrowheads(node, p.themeCSS);
+      // The three editorial passes are mermaid's repairs, and FlowPeek's renderer does not need
+      // repairing: it tags the rungs, routes on the axes and emits the specified arrowhead from
+      // the start. Guarding all three rather than the one that matters -- tagStructure would
+      // re-tag every node and clone a second set of markers; the other two happen to be inert on
+      // this output, which is an accident of pattern matching and not something to lean on.
+      if (!flowOut) {
+        // Structural rungs, on the detached node: this pass touches no layout, so it costs nothing
+        // here, and it must run before makeLabelsReadable(), which reads computed fills.
+        tagStructure(node, String(p.renderID || "fp-0"), reportedType, p.themeCSS);
+        // After the rungs and before anything measures the drawing: this only rewrites `d`, so no
+        // geometry the viewBox depends on moves.
+        roundEdges(node, p.themeCSS, reportedType);
+        reshapeArrowheads(node, p.themeCSS);
+      }
       diagram.replaceChildren(node);
 
       // Post-condition: an <svg> is really in the live DOM, or this is a failure.
@@ -916,7 +1044,7 @@
       wipeMeasure();
       return J({
         ok: true,
-        diagramType: String(r.diagramType || ""),
+        diagramType: String(reportedType || ""),
         width: geometry.width,
         height: geometry.height,
         scrubbed: scrubbed,
@@ -928,7 +1056,14 @@
         // to supply because WebKit refused them, and the source the SVG's size was
         // finally read from. Swift keys its "size estimated" notice off the latter's
         // marker and shows the rest as engine detail.
-        measurementFallbacks: measurementFallbacks.concat(geometry.measurementFallbacks)
+        measurementFallbacks: measurementFallbacks.concat(geometry.measurementFallbacks),
+        // Which renderer drew this, and why the other one did not. Deliberately not in
+        // `measurementFallbacks`: that array is a reader-visible notice channel keyed on "bbox",
+        // and a fallback is a route rather than a degraded render. Nothing about provenance goes
+        // into the markup either -- `normalised()` erases only `fp-[0-9]+`, so a marker there
+        // would move every golden the day a flowchart is recorded under a ladder theme.
+        renderer: rendererName,
+        rendererFallback: rendererFallback
       });
     } catch (e) {
       diagram.replaceChildren();

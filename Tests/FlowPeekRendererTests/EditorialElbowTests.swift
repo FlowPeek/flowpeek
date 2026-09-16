@@ -14,13 +14,21 @@ import XCTest
 /// What is checked is the drawn path, not the setting that produced it.
 @MainActor
 final class EditorialElbowTests: XCTestCase {
-    /// Nodes that do not line up, so every edge has to turn a corner to reach its target.
+    /// Nodes far enough off the gateway's centre line that an edge cannot reach one from the other
+    /// without turning.
+    ///
+    /// Three in and three out rather than two and two: port placement lines a connector up whenever
+    /// both faces can reach the coordinate halfway between their two boxes, so a two-wide fan on
+    /// 80px boxes comes out as five straight segments and there is no corner left to check. At three
+    /// wide the outer leaves are past the gateway's face and four of the seven edges turn.
     private static let source = """
     flowchart TD
         web[Web App] --> gw{{API Gateway}}
         mob[Mobile App] --> gw
+        cli[CLI Client] --> gw
         gw --> auth[Auth Service]
         gw --> orders[Order Service]
+        gw --> search[Search Service]
         orders --> pg[(Postgres)]
     """
 

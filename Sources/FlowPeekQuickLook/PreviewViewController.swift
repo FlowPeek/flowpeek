@@ -78,14 +78,17 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         return text
     }
 
-    /// The engine and the glue as user scripts in FlowPeek's own content world, and a page that can
-    /// reach nothing: `default-src 'none'` is in the document itself.
+    /// The engine, FlowPeek's own flowchart renderer and the glue, as user scripts in FlowPeek's
+    /// own content world, on a page that can reach nothing: `default-src 'none'` is in the document
+    /// itself. All three, because a preview drawn by a different set of scripts than the app's is a
+    /// preview of a different diagram.
     private static func makeWebView(frame: CGRect) throws -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         let world = WKContentWorld.world(name: MermaidEnginePage.contentWorldName)
         for name in [
             (MermaidEnginePage.engineResourceName, MermaidEnginePage.engineResourceExtension),
+            (MermaidEnginePage.flowResourceName, MermaidEnginePage.flowResourceExtension),
             (MermaidEnginePage.glueResourceName, MermaidEnginePage.glueResourceExtension),
         ] {
             guard let url = Bundle.main.url(forResource: name.0, withExtension: name.1),

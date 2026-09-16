@@ -426,11 +426,14 @@ final class MermaidWebViewPool {
     }
 
     /// Parsing 3.5 MB is the expensive part, so the sources — and the `WKUserScript`s built from
-    /// them — are read once per process and shared by every view.
+    /// them — are read once per process and shared by every view. The order is the injection
+    /// order: mermaid, then FlowPeek's own flowchart renderer, then the glue that chooses
+    /// between them.
     private func userScripts() throws(MermaidRenderError) -> [WKUserScript] {
         if let cachedScripts { return cachedScripts }
         let sources = [
             try MermaidEngineAssets.engineSource(),
+            try MermaidEngineAssets.flowSource(),
             try MermaidEngineAssets.glueSource(),
         ]
         let scripts = sources.map {
@@ -475,6 +478,12 @@ enum MermaidEngineAssets {
 
     static func glueSource() throws(MermaidRenderError) -> String {
         try source(MermaidEnginePage.glueResourceName, MermaidEnginePage.glueResourceExtension)
+    }
+
+    /// Missing is `.engineMissing`, the same as the other two: a build that shipped two of the
+    /// three scripts is broken, and a flowchart silently drawn by mermaid would hide it.
+    static func flowSource() throws(MermaidRenderError) -> String {
+        try source(MermaidEnginePage.flowResourceName, MermaidEnginePage.flowResourceExtension)
     }
 
     private static func source(_ name: String, _ extension: String) throws(MermaidRenderError) -> String {

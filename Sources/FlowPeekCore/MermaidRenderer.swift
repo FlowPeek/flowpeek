@@ -191,6 +191,13 @@ public struct MermaidRenderResult: Sendable, Equatable {
     /// How many labels were given readable ink. Zero for almost every diagram, and zero always when
     /// the reader has the switch off, so a number here says the drawing named its own fills.
     public let labelsCorrected: Int
+    /// Which renderer drew this: `"flowpeek-flow"` for FlowPeek's own flowchart renderer,
+    /// `"mermaid"` for everything else. Diagnostic only -- nothing the reader sees depends on it,
+    /// which is the point: a fallback must look like no fallback.
+    public let renderer: String
+    /// Why FlowPeek's renderer did not draw this one -- an anonymous slug such as `"wrong-type"`,
+    /// `"no-ladder"` or `"unsupported:click"`, never source text. `nil` when it did draw.
+    public let rendererFallback: String?
 
     public init(
         svg: String,
@@ -201,7 +208,9 @@ public struct MermaidRenderResult: Sendable, Equatable {
         durationMS: Int,
         cspViolations: [String] = [],
         measurementFallbacks: [String] = [],
-        labelsCorrected: Int = 0
+        labelsCorrected: Int = 0,
+        renderer: String = "mermaid",
+        rendererFallback: String? = nil
     ) {
         self.svg = svg
         self.diagramType = diagramType
@@ -212,6 +221,8 @@ public struct MermaidRenderResult: Sendable, Equatable {
         self.cspViolations = cspViolations
         self.measurementFallbacks = measurementFallbacks
         self.labelsCorrected = labelsCorrected
+        self.renderer = renderer
+        self.rendererFallback = rendererFallback
     }
 
     public var size: CGSize { CGSize(width: width, height: height) }
@@ -432,6 +443,8 @@ public struct MermaidGlueResponse: Codable, Equatable, Sendable {
     public var cspViolations: [String]?
     public var measurementFallbacks: [String]?
     public var labelsCorrected: Int?
+    public var renderer: String?
+    public var rendererFallback: String?
 
     public init(
         ok: Bool,
@@ -447,7 +460,9 @@ public struct MermaidGlueResponse: Codable, Equatable, Sendable {
         engineVersion: String? = nil,
         cspViolations: [String]? = nil,
         measurementFallbacks: [String]? = nil,
-        labelsCorrected: Int? = nil
+        labelsCorrected: Int? = nil,
+        renderer: String? = nil,
+        rendererFallback: String? = nil
     ) {
         self.ok = ok
         self.code = code
@@ -463,6 +478,8 @@ public struct MermaidGlueResponse: Codable, Equatable, Sendable {
         self.cspViolations = cspViolations
         self.measurementFallbacks = measurementFallbacks
         self.labelsCorrected = labelsCorrected
+        self.renderer = renderer
+        self.rendererFallback = rendererFallback
     }
 }
 
@@ -517,7 +534,10 @@ public enum MermaidGlueDecoder {
             durationMS: response.durationMS ?? 0,
             cspViolations: response.cspViolations ?? [],
             measurementFallbacks: response.measurementFallbacks ?? [],
-            labelsCorrected: response.labelsCorrected ?? 0
+            labelsCorrected: response.labelsCorrected ?? 0,
+            // A glue too old to say defaults to mermaid, which is what it would have been.
+            renderer: response.renderer ?? "mermaid",
+            rendererFallback: response.rendererFallback
         )
     }
 

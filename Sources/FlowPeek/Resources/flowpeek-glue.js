@@ -439,6 +439,59 @@
   var LADDER_TYPES = { "flowchart-v2": 1, "flowchart-elk": 1, "swimlane": 1 };
 
   // ---------------------------------------------------------------------------
+  // Arrowheads.
+  //
+  // The source specifies one, exactly: markerWidth 8, markerHeight 6, polygon "0 0, 8 3, 0 6".
+  // Mermaid draws an 8x8 triangle instead -- measured, viewBox "0 0 10 10" with markerWidth and
+  // markerHeight both 8 -- which is a third stubbier than the source's and sits on every arrow in
+  // the diagram. A marker's geometry is attributes rather than CSS, so the stylesheet cannot reach
+  // it and this is rewritten here.
+  //
+  // The viewBox is rewritten alongside the size rather than relying on a stretch: with the default
+  // `preserveAspectRatio`, a 10x10 box asked to fill 8x6 scales uniformly to fit and comes out
+  // 6x6 -- the wrong shape, centred, with the tip pulled back off the line end.
+  //
+  // `refX` moves with it. Mermaid puts the reference point at the middle of its triangle, which is
+  // where the path stops so the head's own body covers the last few points of the line; the same
+  // fraction of the new box keeps that relationship rather than leaving a gap or an overshoot.
+  var ARROW = { width: 8, height: 6 };
+
+  function reshapeArrowheads(svg, themeCSS) {
+    if (String(themeCSS || "").indexOf(LADDER_MARKER) === -1) return;
+    svg.querySelectorAll("marker").forEach(function (marker) {
+      // The triangular heads only. A circle end (`--o`) and a cross (`--x`) are the author asking
+      // for a different terminator, and a diamond belongs to ER and class diagrams; reshaping any
+      // of those to a triangle would be changing what the diagram says.
+      var shape = marker.querySelector("path, polygon");
+      if (!shape) return;
+      var d = String(shape.getAttribute("d") || shape.getAttribute("points") || "").trim();
+      // The two triangles mermaid draws in a 10x10 box: the head at the end of an arrow, and the
+      // one a `<--` puts at its start. Matched by their exact path rather than by id, so a marker
+      // whose shape mermaid changes in a later version is left alone rather than reshaped blind.
+      var pointsForward = /^M 0 0 L 10 5 L 0 10 z$/.test(d);
+      var pointsBack = /^M 0 5 L 10 10 L 10 0 z$/.test(d);
+      if (!pointsForward && !pointsBack) return;
+
+      var oldBox = String(marker.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+      var oldRefX = parseFloat(marker.getAttribute("refX"));
+      marker.setAttribute("viewBox", "0 0 " + ARROW.width + " " + ARROW.height);
+      marker.setAttribute("markerWidth", String(ARROW.width));
+      marker.setAttribute("markerHeight", String(ARROW.height));
+      if (oldBox.length === 4 && oldBox[2] > 0 && isFinite(oldRefX)) {
+        marker.setAttribute("refX", String((oldRefX / oldBox[2]) * ARROW.width));
+      }
+      marker.setAttribute("refY", String(ARROW.height / 2));
+      shape.setAttribute(
+        "d",
+        pointsForward
+          ? "M 0 0 L " + ARROW.width + " " + (ARROW.height / 2) + " L 0 " + ARROW.height + " z"
+          : "M 0 " + (ARROW.height / 2) + " L " + ARROW.width + " " + ARROW.height
+            + " L " + ARROW.width + " 0 z"
+      );
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Rounded elbows.
   //
   // diagram-design's connector rule is the strictest thing in its spec: "rounded right-angle
@@ -790,6 +843,7 @@
       // After the rungs and before anything measures the drawing: this only rewrites `d`, so no
       // geometry the viewBox depends on moves.
       roundEdges(node, p.themeCSS);
+      reshapeArrowheads(node, p.themeCSS);
       diagram.replaceChildren(node);
 
       // Post-condition: an <svg> is really in the live DOM, or this is a failure.

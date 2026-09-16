@@ -4,9 +4,15 @@
   "scripts": {
     "vendor:mermaid": "cp node_modules/mermaid/dist/mermaid.min.js Sources/FlowPeek/Resources/mermaid.min.js",
     "conformance": "node Scripts/conformance.mjs",
-    "verify:xcodeproj": "before=$(shasum FlowPeek.xcodeproj/project.pbxproj); ruby Scripts/generate_xcodeproj.rb >/dev/null; test \"$before\" = \"$(shasum FlowPeek.xcodeproj/project.pbxproj)\" || { echo \"FAIL FlowPeek.xcodeproj is stale - re-run ruby Scripts/generate_xcodeproj.rb and commit the result\"; exit 1; }"
+    "verify:xcodeproj": "before=$(shasum FlowPeek.xcodeproj/project.pbxproj); ruby Scripts/generate_xcodeproj.rb >/dev/null; test \"$before\" = \"$(shasum FlowPeek.xcodeproj/project.pbxproj)\" || { echo \"FAIL FlowPeek.xcodeproj is stale - re-run ruby Scripts/generate_xcodeproj.rb and commit the result\"; exit 1; }",
+    "test:flow": "vitest run",
+    "test:flow:watch": "vitest",
+    "vendor:mermaid-tests": "node Scripts/vendor-mermaid-tests.mjs"
   },
   "dependencies": {
     "mermaid": "11.17.2"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
   }
 }

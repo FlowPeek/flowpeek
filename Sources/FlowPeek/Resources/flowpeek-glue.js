@@ -438,6 +438,87 @@
   // ("edge0"), and about half the supported types emit no edge metadata at all.
   var LADDER_TYPES = { "flowchart-v2": 1, "flowchart-elk": 1, "swimlane": 1 };
 
+  // ---------------------------------------------------------------------------
+  // Rounded elbows.
+  //
+  // diagram-design's connector rule is the strictest thing in its spec: "rounded right-angle
+  // (orthogonal) connectors are mandatory ... every bend must be a quarter-arc with r=8 ... diagonal
+  // connectors are an automatic fail". Mermaid gives half of that and only half. Its `rounded` curve
+  // rounds the bends but still lets dagre run an edge diagonally between two ranks; its `step` curve
+  // routes every edge on the axes but turns square corners. Neither alone is the rule.
+  //
+  // So the theme asks for `step` -- the routing is the half only the layout engine can do -- and the
+  // corners are rounded here, which is the half only a path rewrite can do. Each interior vertex of
+  // the polyline becomes a quadratic whose control point is the corner itself, which is the same
+  // construction mermaid's own `rounded` curve emits, and the radius shrinks on a short segment so a
+  // tight elbow bends rather than overshooting into its neighbour.
+  //
+  // Gated on the same theme marker as the structural sweep: a theme that cannot paint a ladder does
+  // not get its edges rewritten either, so the system theme's goldens are untouched.
+  var ELBOW_RADIUS = 8;
+
+  // "M x,y L x,y L x,y" -> the points, or null for anything else. Deliberately strict: an edge whose
+  // `d` holds an arc or a cubic was not drawn by `step`, and guessing at it would be a way to damage
+  // a path this was never meant to touch.
+  function polylinePoints(d) {
+    var text = String(d || "").trim();
+    if (!/^M[-0-9.,\sL]+$/.test(text)) return null;
+    var parts = text.replace(/^M/, "").split(/L/);
+    var points = [];
+    for (var i = 0; i < parts.length; i++) {
+      var pair = parts[i].trim().split(/[\s,]+/);
+      if (pair.length !== 2) return null;
+      var x = parseFloat(pair[0]), y = parseFloat(pair[1]);
+      if (!isFinite(x) || !isFinite(y)) return null;
+      // d3's step emits the same point twice at the ends; a zero-length segment has no direction
+      // and would make the corner maths divide by nothing.
+      var last = points[points.length - 1];
+      if (last && Math.abs(last[0] - x) < 0.001 && Math.abs(last[1] - y) < 0.001) continue;
+      points.push([x, y]);
+    }
+    return points.length >= 2 ? points : null;
+  }
+
+  function roundElbows(d, radius) {
+    var points = polylinePoints(d);
+    if (!points || points.length < 3) return null;
+    var out = "M" + points[0][0] + "," + points[0][1];
+    for (var i = 1; i < points.length - 1; i++) {
+      var prev = points[i - 1], here = points[i], next = points[i + 1];
+      var inX = here[0] - prev[0], inY = here[1] - prev[1];
+      var outX = next[0] - here[0], outY = next[1] - here[1];
+      var inLen = Math.sqrt(inX * inX + inY * inY);
+      var outLen = Math.sqrt(outX * outX + outY * outY);
+      if (inLen < 0.001 || outLen < 0.001) continue;
+      // Collinear: no corner to round, and rounding one would bow a straight run.
+      if (Math.abs(inX * outY - inY * outX) < 0.001) continue;
+      // A third of each neighbour at most, not a half. Half is the bound that merely stops two
+      // corners overlapping, and at that bound a short segment is entirely arc: mermaid packs its
+      // ranks tightly, so the 19-point dogleg dagre routes between two ranks came out as an S with
+      // no straight run left in it, which reads as a curve rather than as a right angle. A third
+      // keeps a visible straight between the corners, and a long run still gets the source's own
+      // r=8 -- the radius only gives way where the geometry cannot hold it.
+      var r = Math.min(radius, inLen / 3, outLen / 3);
+      var startX = here[0] - (inX / inLen) * r, startY = here[1] - (inY / inLen) * r;
+      var endX = here[0] + (outX / outLen) * r, endY = here[1] + (outY / outLen) * r;
+      out += "L" + startX + "," + startY + "Q" + here[0] + "," + here[1] + " " + endX + "," + endY;
+    }
+    var last = points[points.length - 1];
+    return out + "L" + last[0] + "," + last[1];
+  }
+
+  // Only the edges. A node's own outline lives in the same document and is emphatically not a
+  // connector, so the selector names the classes mermaid puts on edge paths and nothing wider.
+  var EDGE_SELECTOR = "path.flowchart-link, g.edgePaths path.path, path.relation, path.transition";
+
+  function roundEdges(svg, themeCSS) {
+    if (String(themeCSS || "").indexOf(LADDER_MARKER) === -1) return;
+    svg.querySelectorAll(EDGE_SELECTOR).forEach(function (path) {
+      var rounded = roundElbows(path.getAttribute("d"), ELBOW_RADIUS);
+      if (rounded) path.setAttribute("d", rounded);
+    });
+  }
+
   function tagStructure(svg, renderID, diagramType, themeCSS) {
     if (String(themeCSS || "").indexOf(LADDER_MARKER) === -1) return null;
     if (!LADDER_TYPES[String(diagramType || "")]) return null;
@@ -706,6 +787,9 @@
       // Structural rungs, on the detached node: this pass touches no layout, so it costs nothing
       // here, and it must run before makeLabelsReadable(), which reads computed fills.
       tagStructure(node, String(p.renderID || "fp-0"), r.diagramType, p.themeCSS);
+      // After the rungs and before anything measures the drawing: this only rewrites `d`, so no
+      // geometry the viewBox depends on moves.
+      roundEdges(node, p.themeCSS);
       diagram.replaceChildren(node);
 
       // Post-condition: an <svg> is really in the live DOM, or this is a failure.

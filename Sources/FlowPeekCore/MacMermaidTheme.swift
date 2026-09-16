@@ -414,7 +414,12 @@ public struct MacMermaidTheme: Equatable, Sendable {
                 rankSpacing: 40,
                 padding: 16,
                 diagramPadding: 24,
-                curve: "rounded",
+                // Orthogonal routing, which is the half of the source's connector rule that only
+                // the layout engine can do. Its `rounded` curve rounds the bends but leaves dagre
+                // free to run an edge diagonally between ranks, and "diagonal connectors are an
+                // automatic fail" there. The square corners `step` leaves are rounded into
+                // quarter-arcs by `roundEdges` in the glue -- the half only a path rewrite can do.
+                curve: "step",
                 wrappingWidth: 160
             ),
             // A repainted label lands on the theme's own two ends.

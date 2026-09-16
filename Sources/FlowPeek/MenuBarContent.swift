@@ -129,11 +129,16 @@ struct MenuBarContent: View {
         VStack(alignment: .leading, spacing: 1) {
             sectionTitle("menu.recent")
             if history.isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .accessibilityLabel(Text("menu.recent"))
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("menu.recent.loading")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 21)
+                .padding(.vertical, 6)
+                .accessibilityElement(children: .combine)
             } else if recentEntries.isEmpty {
                 Text("menu.recent.empty")
                     .font(.system(size: 11))

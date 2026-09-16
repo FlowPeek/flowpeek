@@ -58,16 +58,14 @@ struct DiagramShelfView: View {
     /// this keeps the result for the current entries and query: SwiftUI reevaluates this view for
     /// focus, hover and card geometry too, none of which is a reason to rank a hundred diagrams
     /// again.
-    private let searchCache = DiagramHistorySearch.Cache(index: SemanticIndex())
+    @State private var searchCache = DiagramHistorySearch.Cache(index: SemanticIndex())
 
     var body: some View {
         FlowPeekGlassSurface(cornerRadius: 20) {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 if store.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    loading
                 } else if store.entries.isEmpty {
                     empty
                 } else if results.isEmpty {
@@ -165,13 +163,15 @@ struct DiagramShelfView: View {
         HStack(spacing: 10) {
             Text("history.window.title")
                 .font(.system(size: 13, weight: .semibold))
-            Text(verbatim: String(
-                format: String(localized: "history.count"),
-                store.entries.count,
-                store.limit
-            ))
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
+            if !store.isLoading {
+                Text(verbatim: String(
+                    format: String(localized: "history.count"),
+                    store.entries.count,
+                    store.limit
+                ))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            }
             Spacer(minLength: 12)
             if !store.entries.isEmpty {
                 search
@@ -195,6 +195,17 @@ struct DiagramShelfView: View {
         } message: {
             Text(verbatim: String(format: String(localized: "history.clear.message"), store.entries.count))
         }
+    }
+
+    private var loading: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("history.loading")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     /// Searching is the point of a list this long, and it has to be one keystroke away: the field

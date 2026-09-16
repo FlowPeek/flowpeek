@@ -15,6 +15,7 @@
 "menu.recent" = "Recent Diagrams";
 "menu.recent.all" = "Show All…";
 "menu.recent.empty" = "Nothing yet";
+"menu.recent.loading" = "Loading recent diagrams…";
 "menu.update" = "Check for Updates…";
 "menu.about" = "About";
 "menu.quit" = "Quit";
@@ -416,6 +417,7 @@
 /* Diagram history */
 "history.window.title" = "Diagram History";
 "history.subtitle" = "Newest first";
+"history.loading" = "Loading history…";
 "history.search" = "Search";
 "history.search.clear" = "Clear the search";
 "history.search.related" = "No exact match. The closest by meaning:";
@@ -427,7 +429,7 @@
 "history.copied" = "Copied";
 "history.card.hint" = "Return opens it, Command-C copies the diagram, Delete forgets it.";
 "history.search.none.title" = "Nothing Matches";
-"history.search.none.message" = "No remembered diagram has those words in it, and none of them looked close enough to suggest. Matching by meaning needs a language model macOS ships; for Korean and others it matches the words themselves.";
+"history.search.none.message" = "No remembered diagram contains those words, and there are no close suggestions. Semantic search depends on the language models available on this Mac.";
 "history.count" = "%1$lld of %2$lld kept";
 "history.open.help" = "Open this diagram in a preview window";
 "history.remove" = "Forget This Diagram";

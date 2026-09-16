@@ -15,6 +15,7 @@
 "menu.recent" = "최근 다이어그램";
 "menu.recent.all" = "모두 보기…";
 "menu.recent.empty" = "아직 없음";
+"menu.recent.loading" = "최근 다이어그램 불러오는 중…";
 "menu.update" = "업데이트 확인…";
 "menu.about" = "정보";
 "menu.quit" = "종료";
@@ -416,6 +417,7 @@
 /* 다이어그램 기록 */
 "history.window.title" = "다이어그램 기록";
 "history.subtitle" = "최신순";
+"history.loading" = "기록 불러오는 중…";
 "history.search" = "검색";
 "history.search.clear" = "검색어 지우기";
 "history.search.related" = "정확히 일치하는 것이 없습니다. 의미가 가까운 것:";
@@ -426,8 +428,8 @@
 "history.keys.close" = "닫기";
 "history.copied" = "복사됨";
 "history.card.hint" = "Return으로 열고, Command-C로 다이어그램을 복사하고, Delete로 삭제합니다.";
-"history.search.none.title" = "일치하는 것이 없음";
-"history.search.none.message" = "그 단어가 들어 있는 다이어그램도, 제안할 만큼 가까운 다이어그램도 없습니다. 의미로 찾는 기능은 macOS가 제공하는 언어 모델이 필요하며, 한국어 등에서는 단어 자체로 찾습니다.";
+"history.search.none.title" = "검색 결과가 없습니다";
+"history.search.none.message" = "해당 단어가 포함된 다이어그램을 찾지 못했습니다. 의미 검색은 macOS가 지원하는 언어에서만 사용할 수 있습니다.";
 "history.count" = "%2$lld개 중 %1$lld개 보관 중";
 "history.open.help" = "이 다이어그램을 미리보기 창으로 열기";
 "history.remove" = "이 다이어그램 지우기";

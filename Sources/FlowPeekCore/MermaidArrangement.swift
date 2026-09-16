@@ -29,6 +29,15 @@ public struct MermaidArrangement: Codable, Equatable, Sendable {
     /// How edges are drawn between the points dagre routed them through: "basis" (mermaid's
     /// default), "linear", "step", "stepAfter", "stepBefore", "rounded".
     public var curve: String?
+    /// The curve a true flowchart gets, where it should differ from `curve`.
+    ///
+    /// mermaid keeps one curve setting and more than one diagram family reads it: a state diagram
+    /// renders through the same dagre code and takes whatever `flowchart.curve` says. So a theme
+    /// that wants orthogonal routing in a flowchart cannot simply set `curve` -- measured, `step`
+    /// there left every state transition's arrowhead detached from its box and pointing the wrong
+    /// way. This is the value that reaches a flowchart only; `curve` keeps reaching everything, so
+    /// the families that were never meant to change do not.
+    public var flowchartCurve: String?
     /// Where a label longer than this wraps, in points.
     public var wrappingWidth: Int?
 
@@ -38,6 +47,7 @@ public struct MermaidArrangement: Codable, Equatable, Sendable {
         padding: Int? = nil,
         diagramPadding: Int? = nil,
         curve: String? = nil,
+        flowchartCurve: String? = nil,
         wrappingWidth: Int? = nil
     ) {
         self.nodeSpacing = nodeSpacing
@@ -45,6 +55,7 @@ public struct MermaidArrangement: Codable, Equatable, Sendable {
         self.padding = padding
         self.diagramPadding = diagramPadding
         self.curve = curve
+        self.flowchartCurve = flowchartCurve
         self.wrappingWidth = wrappingWidth
     }
 

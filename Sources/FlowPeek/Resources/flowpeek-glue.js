@@ -99,7 +99,16 @@
     return p;
   }
 
-  function buildConfig(p) {
+  // Whether knowing the type would change the config at all. Without this every render would
+  // initialize twice; with it, only a diagram whose type unlocks something pays for the second.
+  function needsTypedConfig(p, diagramType) {
+    var a = p.arrangement;
+    if (!a || typeof a !== "object") return false;
+    return typeof a.flowchartCurve === "string" && !!a.flowchartCurve
+      && !!LADDER_TYPES[String(diagramType || "")];
+  }
+
+  function buildConfig(p, diagramType) {
     var cfg = {
       startOnLoad: false,
       securityLevel: "strict",
@@ -122,7 +131,7 @@
       themeCSS: p.themeCSS || ""
     };
     if (p.fontFamily) cfg.fontFamily = p.fontFamily;
-    applyArrangement(cfg, p.arrangement);
+    applyArrangement(cfg, p.arrangement, diagramType);
     return cfg;
   }
 
@@ -136,7 +145,7 @@
   // Deliberately not a loop over the payload's own keys: this is the second guard, after the typed
   // struct on the Swift side, that a theme can only reach spacing. Anything not named here does not
   // arrive, whatever the payload says.
-  function applyArrangement(cfg, a) {
+  function applyArrangement(cfg, a, diagramType) {
     if (!a || typeof a !== "object") return;
     var num = function (v) { return typeof v === "number" && isFinite(v) ? v : null; };
     var flowchart = {}, sequence = {}, state = {}, classDiagram = {};
@@ -153,7 +162,17 @@
       state.diagramPadding = diagramPadding;
       classDiagram.diagramPadding = diagramPadding;
     }
+    // One curve setting, read by more than one family: a state diagram renders through the same
+    // dagre code and takes whatever `flowchart.curve` says. So `curve` is written for everyone,
+    // exactly as before, and `flowchartCurve` overrides it for the families that are really
+    // flowcharts. Measured, giving everyone `step` left every state transition's arrowhead
+    // detached from its box and pointing the wrong way, because the path `step` interpolates does
+    // not meet the boundary where the renderer clipped it.
     if (typeof a.curve === "string" && a.curve) { flowchart.curve = a.curve; }
+    if (typeof a.flowchartCurve === "string" && a.flowchartCurve
+        && LADDER_TYPES[String(diagramType || "")]) {
+      flowchart.curve = a.flowchartCurve;
+    }
     var wrappingWidth = num(a.wrappingWidth);
     if (wrappingWidth !== null) { flowchart.wrappingWidth = wrappingWidth; sequence.wrap = true; }
 
@@ -573,8 +592,13 @@
   // connector, so the selector names the classes mermaid puts on edge paths and nothing wider.
   var EDGE_SELECTOR = "path.flowchart-link, g.edgePaths path.path, path.relation, path.transition";
 
-  function roundEdges(svg, themeCSS) {
+  function roundEdges(svg, themeCSS, diagramType) {
     if (String(themeCSS || "").indexOf(LADDER_MARKER) === -1) return;
+    // The same types the `step` curve is given to, and for the same reason: this rounds the corners
+    // of the polyline `step` produces. A state diagram's transitions are polylines too but were
+    // routed by mermaid's own curve, and rounding those bowed every straight diagonal into an arc
+    // -- a different drawing, not a more orthogonal one.
+    if (!LADDER_TYPES[String(diagramType || "")]) return;
     svg.querySelectorAll(EDGE_SELECTOR).forEach(function (path) {
       var rounded = roundElbows(path.getAttribute("d"), ELBOW_RADIUS);
       if (rounded) path.setAttribute("d", rounded);
@@ -834,8 +858,18 @@
       if (m) m.replaceChildren();
     };
     try {
-      mm.initialize(buildConfig(p));
-      await mm.parse(p.source); // deliberately no options object - we want parse() to throw
+      // Part of the config depends on which diagram this is -- see `applyArrangement` -- and the
+      // type is only known once the source has been parsed. So the config is built twice: once to
+      // parse with, and again with the type in hand, and the second one only when it would say
+      // something different. `mermaid.parse` returns the type as `{diagramType}`; `detectType`
+      // looks like the direct answer but is not the public one here -- measured, it returns null
+      // for a source `parse` places as "flowchart-v2".
+      mm.initialize(buildConfig(p, null));
+      var parsed = await mm.parse(p.source); // deliberately no options object - we want parse() to throw
+      var diagramType = (parsed && typeof parsed === "object" && parsed.diagramType) || null;
+      if (diagramType && needsTypedConfig(p, diagramType)) {
+        mm.initialize(buildConfig(p, diagramType));
+      }
       // Render into an attached, off-screen box rather than mermaid's default container: a
       // renderer that measures with getBBox() needs a live render tree, and without this
       // eventmodeling's data blocks throw "svg element not in render tree".
@@ -851,7 +885,7 @@
       tagStructure(node, String(p.renderID || "fp-0"), r.diagramType, p.themeCSS);
       // After the rungs and before anything measures the drawing: this only rewrites `d`, so no
       // geometry the viewBox depends on moves.
-      roundEdges(node, p.themeCSS);
+      roundEdges(node, p.themeCSS, r.diagramType);
       reshapeArrowheads(node, p.themeCSS);
       diagram.replaceChildren(node);
 

@@ -414,12 +414,16 @@ public struct MacMermaidTheme: Equatable, Sendable {
                 rankSpacing: 40,
                 padding: 16,
                 diagramPadding: 24,
-                // Orthogonal routing, which is the half of the source's connector rule that only
-                // the layout engine can do. Its `rounded` curve rounds the bends but leaves dagre
-                // free to run an edge diagonally between ranks, and "diagonal connectors are an
-                // automatic fail" there. The square corners `step` leaves are rounded into
-                // quarter-arcs by `roundEdges` in the glue -- the half only a path rewrite can do.
-                curve: "step",
+                // What every family that reads mermaid's one curve setting gets, unchanged.
+                curve: "rounded",
+                // And what a true flowchart gets instead: orthogonal routing, which is the half of
+                // the source's connector rule only the layout engine can do. `rounded` rounds the
+                // bends but leaves dagre free to run an edge diagonally between ranks, and
+                // "diagonal connectors are an automatic fail" there. The square corners `step`
+                // leaves are rounded into quarter-arcs by `roundEdges` in the glue -- the half only
+                // a path rewrite can do. Kept off every other family: a state diagram renders
+                // through the same dagre code, and `step` there detached every arrowhead.
+                flowchartCurve: "step",
                 wrappingWidth: 160
             ),
             // A repainted label lands on the theme's own two ends.

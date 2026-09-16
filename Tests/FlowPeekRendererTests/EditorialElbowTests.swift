@@ -110,6 +110,62 @@ final class EditorialElbowTests: XCTestCase {
         )
     }
 
+    /// The orthogonal routing belongs to flowcharts and stops there.
+    ///
+    /// mermaid keeps one curve setting and more than one family reads it: a state diagram renders
+    /// through the same dagre code and takes whatever `flowchart.curve` says. Given `step` there,
+    /// the path it interpolates does not meet the boundary the renderer clipped to, and every
+    /// transition's arrowhead came away from its box pointing the wrong way -- seen on screen, on
+    /// a five-state diagram, before the theme's one curve was split into two.
+    ///
+    /// Measured either side of the split, on this diagram's `Draft --> Review`:
+    ///
+    ///     with the gate   M54.671,102.156 L36.469,128.891 Q… L54.671,170.313
+    ///     without it      M54.671,102.156 L43.070,102.156 L43.070,136.234 … L54.671,170.313
+    ///
+    /// The second has no diagonal left in it, which is what `step` does and what a state diagram
+    /// must not be given.
+    func testAStateDiagramKeepsTheCurveItAlwaysHad() async throws {
+        let pool = MermaidWebViewPool()
+        let engine = try pool.checkOut()
+        defer { pool.evict(engine) }
+        let svg = try await engine.render(
+            MermaidRenderRequest(
+                source: """
+                stateDiagram-v2
+                    [*] --> Draft
+                    Draft --> Review: submit
+                    Review --> Draft: reject
+                """,
+                theme: MermaidThemeCatalogue.theme(
+                    .editorial, appearance: .light, accentHex: "#0A84FF", increaseContrast: false
+                ),
+                seed: "fp-state", renderID: "fp-state"
+            )
+        ).svg
+
+        // The same split the flowchart tests use: a transition's class list opens with the
+        // thickness and carries the word `transition` after it.
+        let parts: [String] = svg.components(separatedBy: "class=\"edge-thickness-normal")
+        let paths = parts.dropFirst().compactMap { chunk -> String? in
+            guard let s = chunk.range(of: " d=\"") else { return nil }
+            guard let e = chunk[s.upperBound...].firstIndex(of: "\"") else { return nil }
+            return String(chunk[s.upperBound..<e])
+        }
+        XCTAssertGreaterThanOrEqual(paths.count, 2, "the two bent transitions were not found")
+
+        // The two that bend. `[*] --> Draft` drops straight down and is axis-aligned whatever the
+        // curve is, so it says nothing either way and is not what is counted.
+        let bent = paths.filter { straightRuns($0).count > 1 || $0.contains("Q") || $0.contains("C") }
+        XCTAssertFalse(bent.isEmpty, "no transition bent at all")
+        for d in bent {
+            XCTAssertTrue(
+                straightRuns(d).contains { abs($0.0) > 0.5 && abs($0.1) > 0.5 },
+                "a transition came out with no diagonal run, so the flowchart's curve reached it: \(d)"
+            )
+        }
+    }
+
     /// The rewrite is the editorial theme's, and the system theme's goldens depend on it staying
     /// that way -- 124 of them. Its edges are mermaid's own splines, which are not axis-aligned.
     func testTheSystemThemeKeepsItsOwnEdges() async throws {

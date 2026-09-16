@@ -49,182 +49,1721 @@
 
   // ===========================================================================
   // Text handling.
+  //
+  // mermaid puts every label through DOMPurify before the database ever sees it. Under
+  // `securityLevel: 'strict'` its `sanitizeText` is, in full,
+  // `DOMPurify.sanitize(DOMPurify.sanitize(txt), { FORBID_TAGS: ['style'] })` -- `removeScript` out
+  // of `sanitizeMore`, then a second pass that also forbids `style`. So a label is not a string
+  // mermaid copied; it is a string a browser parsed as a whole HTML document, an allowlist filtered,
+  // and the HTML serializer wrote back out of `body`.
+  //
+  // What used to stand here was a regex that kept anything shaped like a tag, which meant
+  // `A[<script>a</script>]` and `A[<img src=x onerror=1>]` arrived in `vertex.text` intact. Labels
+  // are destined for markup, so that was an injection into our own SVG that we were performing on
+  // ourselves. There is no DOM here and no dependency to reach for, so the three stages are written
+  // out below: a tokenizer, DOMPurify's own allowlists, and a serializer.
+  //
+  // Diffed against real mermaid 11.17.2 driven under jsdom: 2,264 sources built from 163 payloads
+  // carried as node labels, quoted labels, edge labels, subgraph titles, tooltips, accTitle,
+  // accDescr, front-matter titles and `@{ label: }` metadata, of which mermaid accepts 1,885 and
+  // 1,814 agree -- 96% of what it was shown, not all of it, and the 71 that differ are enumerated
+  // below. Feeding this filter its own output leaves the output unchanged across 60,550 inputs, so
+  // a second pass of THIS filter is a no-op on everything measured. That is not the same claim as
+  // mermaid's second `sanitize` having nothing left to do: what DOMPurify makes of this filter's
+  // output has never been measured here, and only that would settle it.
+  //
+  // Reproduced: script, iframe, style and the rest of FORBID_CONTENTS removed along with their
+  // contents; unknown elements unwrapped and their text kept; event handlers and every other
+  // attribute outside ALLOWED_ATTR dropped; `javascript:` dropped from href and src, along with
+  // every entity spelling of it a character reference can reach -- `java&Tab;script:`,
+  // `javascript&colon;`, `&#106;avascript:`, `&Tab;javascript:` in leading position, and the two
+  // combined as `&Tab;javascript&colon;`. The last two each escaped a version of this check that
+  // the round before had read as complete, so `uriIsAllowed` below carries the readings it uses now
+  // together with what each of them was measured against;
+  // `<image>` renamed to `<img>`; void elements normalised, so `<br/>` and `<BR>` both become
+  // `<br>`; unclosed elements closed; and an unterminated tag discarded along with everything it had
+  // swallowed, which is why `A[a<b]` is `a` and not `a&lt;b`.
+  //
+  // The 71 that still differ are three shapes:
+  //   - No character-reference decoding. A run already shaped like a reference is copied through
+  //     instead, so mermaid stores `©` for `&copy;` where this stores `&copy;`, and `&amp;zz;` for
+  //     an unknown `&zz;` where this stores `&zz;`. Both spellings render the same character
+  //     wherever the label is put back into markup, which is the only place it goes. The one thing
+  //     decoding really decides is a URL's scheme, and that is settled at the check itself.
+  //   - No tree construction past the implied end tags below. `<p>a<p>b` comes out as mermaid's
+  //     `<p>a</p><p>b</p>`, but the `<tbody>` the tree builder inserts into a bare `<table><tr>`
+  //     does not appear, and neither does the adoption agency's untangling of `<b><p>x</b>y`.
+  //   - `<noscript>` before anything has opened the body. jsdom parses with scripting disabled and
+  //     hoists the children out, keeping `n` from `<noscript>n</noscript>`; WebKit, where the app
+  //     actually runs mermaid, treats the content as raw text and drops it, which is what this
+  //     does. The two reference engines disagree here, so only one of them can be matched.
+  //
+  // Three more the sweep did not reach but a direct probe against DOMPurify did, each costing a
+  // table larger than the case looked worth: the SVG camelCase tag adjustment, so
+  // `<svg><feGaussianBlur/></svg>` keeps a lowercase name; the HTML-element breakout from foreign
+  // content, so `<svg><div>x</div></svg>` keeps the div inside the svg where mermaid lifts it out;
+  // and DOMPurify's SANITIZE_DOM clobber check, which drops an `id` or `name` whose value collides
+  // with a property of `document` or of a form element, so `<a id=body>` keeps its id here.
+  //
+  // The last two of those are open gaps rather than settled trade-offs. Foreign-content breakout
+  // and DOM clobbering are the shapes real DOMPurify bypasses are built from, and nothing measured
+  // here shows either to be reachable through this parser, or shows that it is not.
+  //
+  // What those six cover, and what they do not: they are the divergences two sweeps found -- the
+  // 2,264-source diff against mermaid above, and a direct probe of DOMPurify for the three the diff
+  // could not reach -- so they are what was looked for and seen, never a proof that the list closed.
+  // Twice now a round has read its own list as closed and been wrong. The first time a seventh sat
+  // outside it, `&Tab;javascript:` in an href. That was fixed, and the URL dimension was then swept
+  // on its own terms -- 9,400 attribute values against real DOMPurify -- after which one shape
+  // survived, a semicolon-less `&nbsp`, measured not to be a live scheme. An adversarial pass then
+  // found an eighth that the sweep had not generated: `&Tab;javascript&colon;`, two references
+  // doing two different jobs, which is what the per-reference reading at `uriIsAllowed` exists for.
+  //
+  // So read the six as a floor, and read the sweep counts as what was looked for rather than as what
+  // is there. The dimensions other than URL have had no sweep of their own at all.
   // ===========================================================================
 
-  // mermaid sanitizes every label through DOMPurify, which we have neither the DOM nor the budget
-  // for. What the corpus actually pins is narrow: `A(<)` must come out `&lt;` (flow.spec.js:128)
-  // while `A <br> end` must survive untouched (flow-singlenode.spec.js:147 and three siblings), and
-  // `&`, `>` and `=` must pass through -- the `charTest('>', '&gt;')` and `charTest('=', '&equals;')`
-  // cases sit commented out in the vendored file precisely because DOMPurify does not escape them.
-  // So the rule is DOMPurify's own early exit plus one distinction: text with no `<` is returned
-  // byte-for-byte, and a `<` that does not open a tag DOMPurify would keep becomes an entity.
-  var TAG_AT_START = /^<\/?[A-Za-z][^<>]*>/;
+  function nameSet(names) {
+    var out = Object.create(null);
+    var list = names.split(" ");
+    for (var i = 0; i < list.length; i += 1) if (list[i]) out[list[i]] = true;
+    return out;
+  }
 
-  function sanitizeText(txt) {
-    if (!txt || txt.indexOf("<") === -1) return txt;
-    var out = "";
-    var i = 0;
-    while (i < txt.length) {
-      if (txt.charAt(i) !== "<") {
-        out += txt.charAt(i);
-        i += 1;
+  // DOMPurify's default ALLOWED_TAGS -- its html, svg, svgFilters and mathMl lists, lowercased the
+  // way `addToSet` lowercases them -- less four names. `style` goes because mermaid's second pass
+  // forbids it. `html`, `head` and `body` go because a fragment parsed into a body never builds
+  // them: the start tag is dropped and the children carry on where they were, which is what
+  // unwrapping already does.
+  var ALLOWED_TAGS = nameSet(
+    "a abbr acronym address altglyph altglyphdef altglyphitem animatecolor animatemotion " +
+    "animatetransform area article aside audio b bdi bdo big blink blockquote br button " +
+    "canvas caption center circle cite clippath code col colgroup content data datalist dd " +
+    "decorator defs del desc details dfn dialog dir div dl dt element ellipse em enterkeyhint " +
+    "exportparts feblend fecolormatrix fecomponenttransfer fecomposite feconvolvematrix " +
+    "fediffuselighting fedisplacementmap fedistantlight fedropshadow feflood fefunca fefuncb " +
+    "fefuncg fefuncr fegaussianblur feimage femerge femergenode femorphology feoffset " +
+    "fepointlight fespecularlighting fespotlight fetile feturbulence fieldset figcaption " +
+    "figure filter font footer form g glyph glyphref h1 h2 h3 h4 h5 h6 header hgroup hkern hr " +
+    "i image img input inputmode ins kbd label legend li line lineargradient main map mark " +
+    "marker marquee mask math menclose menu menuitem merror metadata meter mfenced mfrac " +
+    "mglyph mi mlabeledtr mmultiscripts mn mo mover mpadded mpath mphantom mprescripts mroot " +
+    "mrow ms mspace msqrt mstyle msub msubsup msup mtable mtd mtext mtr munder munderover nav " +
+    "nobr ol optgroup option output p part path pattern picture polygon polyline pre progress " +
+    "q radialgradient rect rp rt ruby s samp search section select shadow slot small source " +
+    "spacer span stop strike strong sub summary sup svg switch symbol table tbody td template " +
+    "text textarea textpath tfoot th thead time title tr track tref tspan tt u ul var video " +
+    "view vkern wbr"
+  );
+
+  // DOMPurify's default ALLOWED_ATTR, same four lists. Nothing beginning `on` is in it, which is
+  // the whole of why `<img src=x onerror=1>` loses its handler and keeps its source.
+  var ALLOWED_ATTR = nameSet(
+    "accent accent-height accentunder accept accumulate action additive align " +
+    "alignment-baseline alt amplitude ascent attributename attributetype autocapitalize " +
+    "autocomplete autopictureinpicture autoplay azimuth background basefrequency " +
+    "baseline-shift begin bevelled bgcolor bias border by capture cellpadding cellspacing " +
+    "checked cite class clear clip clip-path clip-rule clippathunits close color " +
+    "color-interpolation color-interpolation-filters color-profile color-rendering cols " +
+    "colspan columnalign columnlines columnspacing columnspan command commandfor controls " +
+    "controlslist coords crossorigin cx cy d datetime decoding default denomalign depth " +
+    "diffuseconstant dir direction disabled disablepictureinpicture disableremoteplayback " +
+    "display displaystyle divisor dominant-baseline download draggable dur dx dy edgemode " +
+    "elevation encoding enctype end enterkeyhint exponent exportparts face fence fill " +
+    "fill-opacity fill-rule filter filterunits flood-color flood-opacity font-family " +
+    "font-size font-size-adjust font-stretch font-style font-variant font-weight for frame fx " +
+    "fy g1 g2 glyph-name glyphref gradienttransform gradientunits headers height hidden high " +
+    "href hreflang id image-rendering in in2 inert inputmode integrity intercept ismap k k1 " +
+    "k2 k3 k4 kernelmatrix kernelunitlength kerning keypoints keysplines keytimes kind label " +
+    "lang largeop length lengthadjust letter-spacing lighting-color linethickness list " +
+    "loading local loop low lquote lspace marker-end marker-mid marker-start markerheight " +
+    "markerunits markerwidth mask mask-type maskcontentunits maskunits mathbackground " +
+    "mathcolor mathsize mathvariant max maxlength maxsize media method min minlength minsize " +
+    "mode movablelimits multiple muted name nonce noshade notation novalidate nowrap numalign " +
+    "numoctaves offset opacity open operator optimum order orient orientation origin overflow " +
+    "paint-order part path pathlength pattern patterncontentunits patterntransform " +
+    "patternunits placeholder playsinline pointer-events points popover popovertarget " +
+    "popovertargetaction poster preload preservealpha preserveaspectratio primitiveunits " +
+    "pubdate r radiogroup radius readonly refx refy rel repeatcount repeatdur required " +
+    "restart result rev reversed role rotate rowalign rowlines rows rowspacing rowspan rquote " +
+    "rspace rx ry scale scope scriptlevel scriptminsize scriptsizemultiplier seed selected " +
+    "selection separator separators shape shape-rendering size sizes slope slot span " +
+    "specularconstant specularexponent spellcheck spreadmethod src srclang srcset start " +
+    "startoffset stddeviation step stitchtiles stop-color stop-opacity stretchy stroke " +
+    "stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit " +
+    "stroke-opacity stroke-width style subscriptshift summary supscriptshift surfacescale " +
+    "symmetric systemlanguage tabindex tablevalues targetx targety text-anchor " +
+    "text-decoration text-orientation text-rendering textlength title transform " +
+    "transform-origin translate type u1 u2 unicode usemap valign value values vector-effect " +
+    "version vert-adv-y vert-origin-x vert-origin-y viewbox visibility voffset width " +
+    "word-spacing wrap writing-mode x x1 x2 xchannelselector xlink:href xlink:title xml:id " +
+    "xml:space xmlns xmlns:xlink y y1 y2 ychannelselector z zoomandpan"
+  );
+
+  // The elements DOMPurify deletes outright instead of unwrapping: its FORBID_CONTENTS, minus the
+  // names that are also in ALLOWED_TAGS and therefore never removed in the first place, plus
+  // `style` for mermaid's second pass. Without this list `<script>a</script>` would surrender its
+  // tags and keep its `a`.
+  var DROP_WITH_CONTENT = nameSet(
+    "annotation-xml foreignobject iframe noembed noframes noscript plaintext script " +
+    "selectedcontent style xmp"
+  );
+
+  var TRANSPARENT_TAGS = nameSet("html head body");
+
+  var VOID_TAGS = nameSet(
+    "area base basefont bgsound br col embed frame hr img input keygen link meta param source " +
+    "track wbr"
+  );
+
+  // Elements whose content the tokenizer must not read as markup. `noscript` is deliberately absent:
+  // it is raw text only where scripting is enabled, and DROP_WITH_CONTENT removes it whole under
+  // either reading, so the only thing the distinction would change is how a nested `<noscript>` is
+  // counted on the way out.
+  var RAW_TEXT_TAGS = nameSet("script style iframe noembed noframes xmp textarea title");
+
+  // The "generate implied end tags" cases a label can plausibly reach. The rest of tree
+  // construction is not here; see the divergence note above.
+  var IMPLIED_CLOSE = {
+    li: nameSet("li"),
+    dt: nameSet("dt dd"),
+    dd: nameSet("dt dd"),
+    option: nameSet("option"),
+    optgroup: nameSet("option optgroup")
+  };
+  var CLOSES_P = nameSet(
+    "address article aside blockquote center details dialog dir div dl fieldset figcaption " +
+    "figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr listing main menu nav ol p " +
+    "plaintext pre search section summary table ul xmp"
+  );
+  var OPEN_P = nameSet("p");
+  // Where the search for an element to imply-close has to stop, standing in for the spec's several
+  // flavours of scope.
+  var SCOPE_BOUNDARY = nameSet("button caption marquee math object svg table td template th");
+
+  // DOMPurify parses into a whole document with DOMParser and then serializes only `body`, so an
+  // element the tree builder routes into `<head>` never reaches the output at all. Everything on
+  // that list except these two is already dropped here by the allowlist or by DROP_WITH_CONTENT, so
+  // only `title` and `template` need the distinction -- and they need it only until something opens
+  // the body, after which the same tags are kept: `<title>t</title>b` sanitizes to `b` and
+  // `b<title>t</title>` to `b<title>t</title>`.
+  var HEAD_ROUTED = nameSet("template title");
+  var HEAD_ELEMENTS = nameSet(
+    "base basefont bgsound link meta noframes noscript script style template title"
+  );
+
+  // Table scaffolding is ignored outright by the "in body" insertion mode, which is why
+  // `<colgroup><col></colgroup>` sanitizes to nothing while `<thead><tr><td>x` keeps its `x`. Inside
+  // an open `<table>` the same tags are real, so the check is conditional.
+  var TABLE_SCAFFOLD = nameSet("caption col colgroup frame tbody td tfoot th thead tr");
+
+  // Names DOMPurify allows but only in their own namespace. An element with one of these names in
+  // HTML content fails `_checkHtmlNamespace` -- `!ALL_MATHML_TAGS[tag] && (COMMON_SVG_AND_HTML_ELEMENTS[tag]
+  // || !ALL_SVG_TAGS[tag])` -- and is force-removed with its subtree rather than unwrapped, so
+  // `<path>p</path>` sanitizes to nothing where the unknown `<foo>bar</foo>` keeps its `bar`. The
+  // list is the allowlist intersected with DOMPurify's SVG and MathML names, less its five
+  // COMMON_SVG_AND_HTML_ELEMENTS and less `svg` and `math`, which are what open foreign content.
+  var FOREIGN_ONLY_TAGS = nameSet(
+    "altglyph altglyphdef altglyphitem animatecolor animatemotion animatetransform circle " +
+    "clippath defs desc ellipse enterkeyhint exportparts feblend fecolormatrix " +
+    "fecomponenttransfer fecomposite feconvolvematrix fediffuselighting fedisplacementmap " +
+    "fedistantlight fedropshadow feflood fefunca fefuncb fefuncg fefuncr fegaussianblur " +
+    "feimage femerge femergenode femorphology feoffset fepointlight fespecularlighting " +
+    "fespotlight fetile feturbulence filter g glyph glyphref hkern image inputmode line " +
+    "lineargradient marker mask menclose merror metadata mfenced mfrac mglyph mi mlabeledtr " +
+    "mmultiscripts mn mo mover mpadded mpath mphantom mprescripts mroot mrow ms mspace " +
+    "msqrt mstyle msub msubsup msup mtable mtd mtext mtr munder munderover part path " +
+    "pattern polygon polyline radialgradient rect stop switch symbol text textpath tref " +
+    "tspan view vkern"
+  );
+
+  var URI_SAFE_ATTR = nameSet(
+    "alt class for id label name pattern placeholder role style summary title value xmlns"
+  );
+  var DATA_URI_TAGS = nameSet("audio image img source track video");
+  var IS_ALLOWED_URI =
+    /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+  var ATTR_WHITESPACE = /[\u0000-\u0020\u00A0\u1680\u180E\u2000-\u2029\u205F\u3000]/g;
+  var DATA_ATTR = /^data-[\-\w.\u00B7-\uFFFF]+$/;
+  var ARIA_ATTR = /^aria-[\-\w]+$/;
+
+  var CHAR_REF = /&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/g;
+  var NUMERIC_REF = /&#(?:([0-9]+)|[xX]([0-9a-fA-F]+));/g;
+  var SPACE = /[\t\n\f\r ]/;
+
+  function isAlpha(c) {
+    return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z");
+  }
+
+  // Reads one tag starting at the first character of its name. Returns null for the spec's
+  // "eof-in-tag": the tokenizer emits nothing, so the tag and every character it had consumed are
+  // simply gone, and that is the whole reason `A[a<b]` comes out as `a`.
+  function readTag(src, p, isEnd) {
+    var n = src.length;
+    var name = "";
+    while (p < n && !SPACE.test(src.charAt(p)) && src.charAt(p) !== "/" && src.charAt(p) !== ">") {
+      name += src.charAt(p);
+      p += 1;
+    }
+    var attrs = [];
+    var seen = Object.create(null);
+    var self = false;
+    for (;;) {
+      while (p < n && SPACE.test(src.charAt(p))) p += 1;
+      if (p >= n) return null;
+      var c = src.charAt(p);
+      if (c === ">") { p += 1; break; }
+      if (c === "/") {
+        p += 1;
+        if (p < n && src.charAt(p) === ">") { self = true; p += 1; break; }
         continue;
       }
-      var tag = TAG_AT_START.exec(txt.slice(i));
-      if (tag) {
-        out += tag[0];
-        i += tag[0].length;
+      var aname = "";
+      while (p < n && !SPACE.test(src.charAt(p)) &&
+             src.charAt(p) !== "/" && src.charAt(p) !== ">" && src.charAt(p) !== "=") {
+        aname += src.charAt(p);
+        p += 1;
+      }
+      if (p >= n) return null;
+      while (p < n && SPACE.test(src.charAt(p))) p += 1;
+      if (p >= n) return null;
+      var value = "";
+      if (src.charAt(p) === "=") {
+        p += 1;
+        while (p < n && SPACE.test(src.charAt(p))) p += 1;
+        if (p >= n) return null;
+        var quote = src.charAt(p);
+        if (quote === '"' || quote === "'") {
+          p += 1;
+          while (p < n && src.charAt(p) !== quote) { value += src.charAt(p); p += 1; }
+          if (p >= n) return null;
+          p += 1;
+        } else {
+          while (p < n && !SPACE.test(src.charAt(p)) && src.charAt(p) !== ">") {
+            value += src.charAt(p);
+            p += 1;
+          }
+          if (p >= n) return null;
+        }
+      }
+      aname = aname.toLowerCase();
+      // The DOM keeps the first of a repeated attribute, not the last.
+      if (aname && !seen[aname]) { seen[aname] = true; attrs.push([aname, value]); }
+    }
+    return { end: p, name: name.toLowerCase(), attrs: attrs, self: self, kind: isEnd ? "end" : "start" };
+  }
+
+  // Skips a comment, a doctype, a processing instruction or a bogus comment. None of them survives:
+  // DOMPurify's default ALLOWED_TAGS has no `#comment`, and a doctype inside a body fragment is
+  // dropped by the tree builder, so all four cases are the same case here.
+  function skipDeclaration(src, i) {
+    var n = src.length;
+    if (src.substr(i, 4) === "<!--") {
+      // `-->` and `--!>` both end a comment, so whichever comes first does.
+      var end = src.indexOf("-->", i + 4);
+      var bang = src.indexOf("--!>", i + 4);
+      if (end === -1 || (bang !== -1 && bang < end)) return bang === -1 ? n : bang + 4;
+      return end + 3;
+    }
+    var gt = src.indexOf(">", i);
+    return gt === -1 ? n : gt + 1;
+  }
+
+  function tokenize(src) {
+    var toks = [];
+    var text = "";
+    var i = 0;
+    var n = src.length;
+    while (i < n) {
+      if (src.charAt(i) !== "<") { text += src.charAt(i); i += 1; continue; }
+      var after = src.charAt(i + 1);
+      var isEnd = after === "/";
+      var first = src.charAt(i + (isEnd ? 2 : 1));
+      if (after === "!" || after === "?" || (isEnd && !isAlpha(first))) {
+        i = skipDeclaration(src, i);
+        continue;
+      }
+      if (!isAlpha(first)) { text += "<"; i += 1; continue; }
+      var tag = readTag(src, i + (isEnd ? 2 : 1), isEnd);
+      if (!tag) break;
+      if (text) { toks.push({ kind: "text", value: text }); text = ""; }
+      toks.push(tag);
+      i = tag.end;
+      if (tag.kind === "start" && !tag.self && RAW_TEXT_TAGS[tag.name]) {
+        var close = new RegExp("</" + tag.name + "[\\t\\n\\f\\r />]", "i").exec(src.slice(i));
+        var raw = close ? src.substr(i, close.index) : src.slice(i);
+        if (raw) toks.push({ kind: "text", value: raw });
+        i += raw.length;
+      } else if (tag.kind === "start" && tag.name === "plaintext") {
+        if (i < n) toks.push({ kind: "text", value: src.slice(i) });
+        i = n;
+      }
+    }
+    if (text) toks.push({ kind: "text", value: text });
+    return toks;
+  }
+
+  // The HTML serializer's "escaping a string", which is what `innerHTML` runs on the way out. A run
+  // already spelling a character reference is copied rather than re-escaped: decoding it and
+  // re-encoding it is the identity for every reference this escaper itself produces, and for the
+  // rest it costs the byte difference recorded in the divergence note.
+  function escapeText(s, attribute) {
+    var out = "";
+    for (var i = 0; i < s.length; i += 1) {
+      var c = s.charAt(i);
+      if (c === "&") {
+        CHAR_REF.lastIndex = i;
+        var ref = CHAR_REF.exec(s);
+        if (ref && ref.index === i) { out += ref[0]; i += ref[0].length - 1; continue; }
+        out += "&amp;";
+      } else if (c === "\u00a0") {
+        out += "&nbsp;";
+      } else if (attribute) {
+        out += c === '"' ? "&quot;" : c;
       } else {
-        out += "&lt;";
-        i += 1;
+        out += c === "<" ? "&lt;" : c === ">" ? "&gt;" : c;
       }
     }
     return out;
   }
 
-  // mermaid routes a `click ... href` target through @braintree/sanitize-url whenever the security
-  // level is anything but loose. The package's whole job is the scheme check below; the interspersed
-  // whitespace in the pattern is how `java\tscript:` gets caught.
-  var UNSAFE_SCHEME = /^[\u0000-\u0020]*(?:j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t|d\s*a\s*t\s*a|v\s*b\s*s\s*c\s*r\s*i\s*p\s*t)\s*:/i;
+  // DOMPurify decides a URL attribute on the fully decoded value, and this does not decode. Numeric
+  // references are cheap to resolve so they are; a named one is answered by reading the value once
+  // per decoding that could change the verdict and refusing unless every reading is safe.
+  //
+  // Those decodings are a short list rather than a guess. IS_ALLOWED_URI looks at the leading run of
+  // scheme characters `[a-z+.-]` and the colon that ends it, and nothing after, so a reference
+  // matters only if it lands in that run and decodes to whitespace ATTR_WHITESPACE then deletes, to
+  // a colon, or to more scheme characters. Walking the binary trie that parse5 and therefore jsdom
+  // decode with -- `entities/src/generated/decode-data-html.ts`, 2,125 names plus the 106 that also
+  // decode without their semicolon, matching the spec's 2,231 -- says which names those are: 54
+  // decode to ATTR_WHITESPACE (`&Tab;` and `&NewLine;`, but also `&hellip;` and `&bull;`, because
+  // DOMPurify's class runs U+2000 to U+2029), one to a colon (`&colon;`), and three to scheme
+  // characters (`&period;`, `&plus;`, and `&fjlig;`, the sole name whose decoding contains ASCII
+  // letters -- "fj"). Every other name decodes to a character that ends the run exactly where the
+  // literal `&` ends it, so the literal reading already decides it. Hence REF_READINGS, and hence
+  // no table of two thousand entity names here.
+  //
+  // What was here read the value only twice, literally and with a colon substituted, and that let a
+  // leading reference through: `&Tab;javascript:alert(1)` reads as `&...` literally and
+  // `:javascript:...` with the colon, and IS_ALLOWED_URI's `[^a-z]` branch blesses any value whose
+  // first character is not a letter, so neither reading refused and the href survived to re-parse as
+  // `protocol === 'javascript:'`. Mid-word the colon substitution happened to break the scheme, so
+  // `java&Tab;script:` was refused all along and only the leading spelling leaked. The empty reading
+  // is what closes it.
+  //
+  // Measured against real DOMPurify 3.4.14 under jsdom, 2,350 values carried on href, src, datetime
+  // and cite for 9,400 pairs: 1,993 stricter, 8 looser. Stricter costs a dropped attribute --
+  // `datetime="Jan&nbsp;1"` is the everyday one -- where looser would cost a live scheme, so the
+  // asymmetry is the one to have.
+  //
+  // The 8 are one shape, `data&nbsp:text/html,x` and `file&nbsp:///etc/passwd`: a legacy reference
+  // spelled without its semicolon, which HTML still decodes in an attribute when the next character
+  // is neither `=` nor alphanumeric. CHAR_REF requires the semicolon and widening it would refuse
+  // ordinary relative links carrying a query, `p?a&b` among them, which is the worse trade. Neither
+  // is a live scheme, and that is checked rather than assumed: of the 106 semicolon-optional names
+  // none decodes to a colon or to a character the WHATWG URL parser strips, `&nbsp` decodes to
+  // U+00A0, which that parser keeps, and jsdom's URL reads both values back as `protocol: 'http:'`,
+  // a relative path. DOMPurify is stricter than the URL parser requires here rather than safer.
+  var REF_READINGS = ["", ":", ".", "fj"];
+
+  function uriIsAllowed(value) {
+    var decoded = value.replace(NUMERIC_REF, function (_, dec, hex) {
+      var code = dec ? parseInt(dec, 10) : parseInt(hex, 16);
+      return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : _;
+    });
+    if (!schemeIsAllowed(decoded)) return false;
+    if (decoded.indexOf("&") === -1) return true;
+    for (var i = 0; i < REF_READINGS.length; i += 1) {
+      if (!schemeIsAllowed(decoded.replace(CHAR_REF, REF_READINGS[i]))) return false;
+    }
+    // Every reference read the same way is not enough, because the attack that got through gave two
+    // references two different jobs: `&Tab;javascript&colon;alert(1)` needs the first to vanish and
+    // the second to become a colon, and no single reading produces both at once -- read as nothing
+    // there is no colon, read as a colon the value starts with one and IS_ALLOWED_URI's non-letter
+    // branch waves it through. Measured after the previous round closed `&Tab;javascript:`: this
+    // spelling kept its href on all five URL attributes and re-parsed to protocol "javascript:".
+    //
+    // So the references are also read the way that attack reads them -- one of them the colon, the
+    // rest gone. That is one pass per reference rather than the four-to-the-N of every combination,
+    // and it is the only combination that matters: a scheme is a run of letters then a colon, so the
+    // references before the colon have to disappear for the run to be unbroken, and exactly one has
+    // to supply the colon itself.
+    var refs = decoded.match(CHAR_REF);
+    if (!refs || refs.length < 2) return true;
+    for (var colon = 0; colon < refs.length; colon += 1) {
+      var seen = -1;
+      var reading = decoded.replace(CHAR_REF, function () {
+        seen += 1;
+        return seen === colon ? ":" : "";
+      });
+      if (!schemeIsAllowed(reading)) return false;
+    }
+    return true;
+  }
+
+  function schemeIsAllowed(value) {
+    return IS_ALLOWED_URI.test(value.replace(ATTR_WHITESPACE, ""));
+  }
+
+  function attrIsAllowed(tag, name, value) {
+    // Declarative partial updates: `for` links an element to a patch target anywhere but on a
+    // <label> or an <output>, and `patchsrc` fetches markup. DOMPurify refuses both unconditionally.
+    if (name === "patchsrc" || (name === "for" && tag !== "label" && tag !== "output")) return false;
+    if (DATA_ATTR.test(name) || ARIA_ATTR.test(name)) return true;
+    if (!ALLOWED_ATTR[name]) return false;
+    if (URI_SAFE_ATTR[name]) return true;
+    if (uriIsAllowed(value)) return true;
+    if ((name === "src" || name === "href" || name === "xlink:href") && tag !== "script" &&
+        value.indexOf("data:") === 0 && DATA_URI_TAGS[tag]) {
+      return true;
+    }
+    return !value;
+  }
+
+  function openTag(tag) {
+    var out = "<" + tag.name;
+    for (var i = 0; i < tag.attrs.length; i += 1) {
+      var name = tag.attrs[i][0];
+      var value = tag.attrs[i][1];
+      if (attrIsAllowed(tag.name, name, value)) out += " " + name + '="' + escapeText(value, true) + '"';
+    }
+    return out + ">";
+  }
+
+  function popTo(open, out, index) {
+    while (open.length > index) {
+      var el = open.pop();
+      if (el.kept) out.push("</" + el.name + ">");
+    }
+  }
+
+  function impliedClose(open, out, targets) {
+    for (var i = open.length - 1; i >= 0; i -= 1) {
+      if (targets[open[i].name]) { popTo(open, out, i); return; }
+      if (SCOPE_BOUNDARY[open[i].name]) return;
+    }
+  }
+
+  function hasOpen(open, name) {
+    for (var i = open.length - 1; i >= 0; i -= 1) if (open[i].name === name) return true;
+    return false;
+  }
+
+  function inForeignContent(open, name) {
+    if (name === "svg" || name === "math") return true;
+    for (var i = open.length - 1; i >= 0; i -= 1) {
+      if (open[i].name === "svg" || open[i].name === "math") return true;
+    }
+    return false;
+  }
+
+  function sanitizeText(txt) {
+    // DOMPurify's own early exit -- `if (stringIndexOf(dirty, '<') === -1) return dirty` -- and the
+    // reason `charTest('&')` and the commented-out `charTest('>', '&gt;')` in flow.spec.js:128-140
+    // read the way they do. Without a `<` nothing is ever parsed, so nothing is ever re-escaped.
+    if (!txt || txt.indexOf("<") === -1) return txt;
+    var toks = tokenize(txt);
+    var out = [];
+    var open = [];
+    var skipName = "";
+    var skipDepth = 0;
+    var inHead = true;
+    for (var k = 0; k < toks.length; k += 1) {
+      var tok = toks[k];
+      if (skipDepth > 0) {
+        if (tok.kind === "start" && tok.name === skipName && !tok.self) skipDepth += 1;
+        else if (tok.kind === "end" && tok.name === skipName) skipDepth -= 1;
+        continue;
+      }
+      if (tok.kind === "text") {
+        // Leading whitespace is the one thing that does not open the body: the tree builder ignores
+        // it before `<head>` and DOMPurify puts it back by hand afterwards.
+        if (/\S/.test(tok.value)) inHead = false;
+        out.push(escapeText(tok.value, false));
+        continue;
+      }
+      var name = tok.name;
+      if (TRANSPARENT_TAGS[name]) continue;
+      if (tok.kind === "end") {
+        if (VOID_TAGS[name]) continue;
+        for (var j = open.length - 1; j >= 0; j -= 1) {
+          if (open[j].name === name) { popTo(open, out, j); break; }
+        }
+        continue;
+      }
+      var headRouted = inHead && HEAD_ROUTED[name];
+      if (!HEAD_ELEMENTS[name]) inHead = false;
+      // The "in body" insertion mode renames `image` to `img` before inserting it, which is why
+      // `<image src=x>` comes back as an `<img>` and never meets the namespace check below.
+      if (name === "image" && !inForeignContent(open, name)) { name = "img"; tok.name = name; }
+      if (TABLE_SCAFFOLD[name] && !hasOpen(open, "table")) continue;
+      var allowed = ALLOWED_TAGS[name] && !headRouted &&
+        !(FOREIGN_ONLY_TAGS[name] && !inForeignContent(open, name));
+      if (!allowed && (DROP_WITH_CONTENT[name] || headRouted || FOREIGN_ONLY_TAGS[name])) {
+        if (!tok.self && !VOID_TAGS[name]) { skipName = name; skipDepth = 1; }
+        continue;
+      }
+      if (IMPLIED_CLOSE[name]) impliedClose(open, out, IMPLIED_CLOSE[name]);
+      if (CLOSES_P[name]) impliedClose(open, out, OPEN_P);
+      if (allowed) out.push(openTag(tok));
+      // A solidus closes the element only in foreign content; in HTML it is ignored, which is how
+      // `<foo/>bar` ends up with `bar` inside the element rather than after it.
+      if (VOID_TAGS[name]) continue;
+      if (tok.self && inForeignContent(open, name)) {
+        if (allowed) out.push("</" + name + ">");
+        continue;
+      }
+      open.push({ name: name, kept: Boolean(allowed) });
+    }
+    popTo(open, out, 0);
+    return out.join("");
+  }
+
+  // ===========================================================================
+  // `click ... href` targets.
+  //
+  // mermaid puts a link through @braintree/sanitize-url whenever the security level is anything
+  // but loose (its own `formatUrl`, chunk-75Z2AOVW.mjs:142-152). What follows is a port of that
+  // package's `sanitizeUrl` at 7.1.2 -- the copy node_modules/mermaid resolves and the copy the
+  // mermaid.min.js beside this file has bundled, which is why there is one behaviour to match and
+  // not two.
+  //
+  // What stood here was a single regex over the scheme, written on the reading that the scheme
+  // check is the package's whole job. It is not, and the shortfall was not cosmetic. The package
+  // decodes before it decides, so `&#106;avascript:alert(1)`, `javascript&colon;alert(1)` and
+  // `%6a%61vascript:alert(1)` were stored verbatim where mermaid stores `about:blank` -- and the
+  // first two are decoded straight back into a working `javascript:` href by the HTML parser the
+  // moment such a link is written into an attribute. The old pattern also caught what mermaid
+  // lets through: it allowed whitespace between the letters, so `j a v a s c r i p t:` was blanked
+  // here while sanitize-url strips only C0, C1 and a few Unicode spaces and then matches the
+  // literal word.
+  // ===========================================================================
+
+  var BLANK_URL = "about:blank";
+
+  // sanitize-url's constants, verbatim from the package's constants.js. Their oddities are load
+  // bearing and are the package's, not ours: `(^\w|;)?` in the entity pattern can never match its
+  // first branch, so it only makes the trailing semicolon optional, and together with the greedy
+  // `\w+` before it that is why `&#106avascript:alert(1)` collapses to `:alert(1)` -- digits and
+  // letters are captured as one run whose char code is NaN. The scheme pattern is greedy too, so
+  // `http://x.com:8080/a` yields the scheme `http://x.com:` and leaves by the `://` exit below
+  // rather than being canonicalised.
+  var URL_CTRL_CHARS = /[\u0000-\u001F\u007F-\u009F\u2000-\u200D\uFEFF]/gim;
+  var URL_HTML_ENTITIES = /&#(\w+)(^\w|;)?/g;
+  var URL_HTML_CTRL_ENTITY = /&(newline|tab);/gi;
+  var URL_WS_ESCAPES = /(\\|%5[cC])((%(6[eE]|72|74))|[nrt])/g;
+  var URL_SCHEME = /^.+(:|&colon;)/gim;
+  var URL_INVALID_PROTOCOL = /^([^\w]*)(javascript|data|vbscript)/im;
+
+  // A `%` that begins no escape makes decodeURIComponent throw. sanitize-url keeps the string as it
+  // stands rather than rejecting it, which is how `http://x.com/%zz` survives to be parsed.
+  function decodeUrlOnce(uri) {
+    try { return decodeURIComponent(uri); } catch (e) { return uri; }
+  }
+
+  // sanitize-url hands http and https to the host's WHATWG URL parser and returns what that prints.
+  // That one call is what puts the trailing slash on `http://x.com`, percent-encodes the space in
+  // `/a b`, lowercases `HTTP://X.COM`, punycodes `münchen.de` and reads `http://1.1` as
+  // `http://1.0.0.1/`. Writing a URL parser here was the alternative and it was rejected outright:
+  // IDNA, the percent-encode sets, the IPv4 shorthand and path collapsing are each a table this
+  // file has no business carrying, and a canonical form that is subtly wrong is worse than none.
+  // mermaid and this both run where `URL` is a global -- WebKit in the app, node under the vendored
+  // specs -- so this is not an approximation of mermaid's answer, it is the same call into the same
+  // parser. `URL.canParse` is not used, because it is Safari 18 and newer and is defined as whether
+  // the constructor throws; the catch below is that definition. The protocol and hostname
+  // assignments are sanitize-url's own and are no-ops, the parser having lowercased both already.
+  //
+  // A host with no `URL` would be the one place this falls short, and there it leaves the link as
+  // it found it rather than guessing at a canonical form. Nothing this file is built for is in that
+  // position, and mermaid could not run there either.
+  function canonicalHttpUrl(url) {
+    if (typeof URL !== "function") return url;
+    var parsed;
+    try { parsed = new URL(url); } catch (e) { return BLANK_URL; }
+    parsed.protocol = parsed.protocol.toLowerCase();
+    parsed.hostname = parsed.hostname.toLowerCase();
+    return parsed.toString();
+  }
+
+  function sanitizeUrl(url) {
+    // Each pass strips one layer of encoding and the loop repeats while another layer is still
+    // visible, so `%26%23106%3bavascript:alert(1)` arrives at `javascript:` and is blanked like the
+    // plain spelling. It terminates because every pass either removes characters or replaces an
+    // escape with the single character it stood for, so a string that still matches gets shorter.
+    var decoded = decodeUrlOnce(url.trim());
+    var pending;
+    do {
+      decoded = decoded
+        .replace(URL_CTRL_CHARS, "")
+        .replace(URL_HTML_ENTITIES, function (match, dec) { return String.fromCharCode(dec); })
+        .replace(URL_HTML_CTRL_ENTITY, "")
+        .replace(URL_CTRL_CHARS, "")
+        .replace(URL_WS_ESCAPES, "")
+        .trim();
+      decoded = decodeUrlOnce(decoded);
+      pending = decoded.match(URL_CTRL_CHARS) || decoded.match(URL_HTML_ENTITIES) ||
+        decoded.match(URL_HTML_CTRL_ENTITY) || decoded.match(URL_WS_ESCAPES);
+    } while (pending && pending.length > 0);
+    if (!decoded) return BLANK_URL;
+    // A path is never a scheme, so `./javascript:x` is left alone and never reaches the check.
+    if (decoded.charAt(0) === "." || decoded.charAt(0) === "/") return decoded;
+    var trimmed = decoded.trimStart();
+    var schemeMatch = trimmed.match(URL_SCHEME);
+    if (!schemeMatch) return decoded;
+    var scheme = schemeMatch[0].toLowerCase().trim();
+    if (URL_INVALID_PROTOCOL.test(scheme)) return BLANK_URL;
+    var backSanitized = trimmed.replace(/\\/g, "/");
+    if (scheme === "mailto:" || scheme.indexOf("://") !== -1) return backSanitized;
+    if (scheme === "http:" || scheme === "https:") return canonicalHttpUrl(backSanitized);
+    return backSanitized;
+  }
 
   function formatUrl(linkStr) {
     var url = String(linkStr).trim();
     if (!url) return undefined;
-    if (CONFIG.securityLevel !== "loose") {
-      return UNSAFE_SCHEME.test(url) ? "about:blank" : url;
-    }
-    return url;
+    return CONFIG.securityLevel === "loose" ? url : sanitizeUrl(url);
   }
 
   // ===========================================================================
   // The `@{ ... }` metadata loader.
   //
   // mermaid hands the accumulated SHAPE_DATA run to js-yaml under JSON_SCHEMA, wrapping a run with
-  // no newline in braces so it parses as a flow mapping (flowDb.reference.ts:141-150). Pulling
-  // js-yaml in is not an option here, and the grammar only ever produces a mapping of scalars, so
-  // this covers exactly that: flow and block mappings, single- and double-quoted scalars, `|` block
-  // scalars, and JSON_SCHEMA's resolution rules -- under which `yes`/`no` stay strings and only
-  // `true`/`false`/`null`/numbers convert.
-  // ===========================================================================
+  // no newline in braces so it parses as a flow mapping (flowDb.reference.ts:141-150). js-yaml
+  // cannot be pulled in here, so what follows is a port of the loader out of the copy mermaid
+  // bundles (node_modules/mermaid/dist/chunks/mermaid.core/chunk-LNGE3PJU.mjs), cut to loading
+  // under the JSON schema: the failsafe types plus null, bool, int and float, and nothing of the
+  // dumper, the core/default schemas or !!binary and !!timestamp, which JSON_SCHEMA never resolves.
+  //
+  // It replaces a pair of hand-written splitters over `,` and `:`, and the YAML they missed was not
+  // exotic. `@{shape:Rect}` is one key `shape:Rect` with a null value, because a plain scalar in
+  // flow context runs on through a colon that is not followed by space or a flow indicator;
+  // `@{ shape: rect # c }` ends at the comment; `@{ "shape": rect }` has a quoted key;
+  // `@{ label: [a, b] }` is a flow sequence. The splitters read all four wrongly and turned the
+  // first two into a throw -- a diagram mermaid draws that FlowPeek refuses, which is the one
+  // failure the reader can neither see nor work around. Four more special cases would have been
+  // wrong about `? a : b`, `&anchor`, `*alias` and duplicate keys the same way, so the loader goes
+  // in whole instead.
+  //
+  // Error *text* is deliberately not ported: js-yaml decorates every message with a rendered
+  // source snippet and a line/column mark, and nothing here reads either. Where mermaid raises a
+  // YAMLException this raises a plain Error with the same wording minus that decoration.
+  //
+  // Differential-tested against the real thing rather than against the specs, which say almost
+  // nothing about the YAML: 13,158 `@{...}` bodies driven through both this and mermaid 11.17.2's
+  // own parser agreed on all but 23, and each of those 23 diverges in the SHAPE_DATA lexer or in
+  // addVertex, identically before and after this file changed.
+  var loadShapeData = (function () {
+    var CONTEXT_FLOW_IN = 1;
+    var CONTEXT_FLOW_OUT = 2;
+    var CONTEXT_BLOCK_IN = 3;
+    var CONTEXT_BLOCK_OUT = 4;
+    var CHOMPING_CLIP = 1;
+    var CHOMPING_STRIP = 2;
+    var CHOMPING_KEEP = 3;
 
-  function leadingWidth(line) {
-    var n = 0;
-    while (n < line.length && (line.charAt(n) === " " || line.charAt(n) === "\t")) n += 1;
-    return n;
-  }
+    var PATTERN_NON_PRINTABLE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x84\x86-\x9F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/;
+    var PATTERN_FLOW_INDICATORS = /[,\[\]{}]/;
+    var PATTERN_TAG_HANDLE = /^(?:!|!!|![0-9A-Za-z-]+!)$/;
+    var PATTERN_TAG_URI = /^(?:!|[^,\[\]{}])(?:%[0-9a-f]{2}|[0-9a-z\-#;/?:@&=+$,_.!~*'()\[\]])*$/i;
 
-  // Splits on a delimiter that is not inside a quoted scalar. Used for the `,` between flow-mapping
-  // entries and for the `:` between a key and its value, which is why `label: "a, b:c"` survives.
-  function splitOutsideQuotes(s, delim, once) {
-    var parts = [];
-    var buf = "";
-    var quote = null;
-    for (var i = 0; i < s.length; i += 1) {
-      var c = s.charAt(i);
-      if (quote) {
-        buf += c;
-        if (c === quote) quote = null;
-        continue;
+    var hasOwn = Object.prototype.hasOwnProperty;
+
+    function isEol(c) { return c === 10 || c === 13; }
+    function isWhiteSpace(c) { return c === 9 || c === 32; }
+    function isWsOrEol(c) { return c === 9 || c === 32 || c === 10 || c === 13; }
+    function isFlowIndicator(c) { return c === 44 || c === 91 || c === 93 || c === 123 || c === 125; }
+    function fromDecimalCode(c) { return c >= 48 && c <= 57 ? c - 48 : -1; }
+
+    function fromHexCode(c) {
+      if (c >= 48 && c <= 57) return c - 48;
+      var lc = c | 32;
+      return lc >= 97 && lc <= 102 ? lc - 97 + 10 : -1;
+    }
+
+    // `\x`, `\u` and `\U` take 2, 4 and 8 hex digits; everything else is not a hex escape.
+    function escapedHexLen(c) {
+      if (c === 120) return 2;
+      if (c === 117) return 4;
+      if (c === 85) return 8;
+      return 0;
+    }
+
+    var SIMPLE_ESCAPES = {
+      48: "\0", 97: "\x07", 98: "\b", 116: "\t", 9: "\t", 110: "\n", 118: "\v", 102: "\f",
+      114: "\r", 101: "\x1b", 32: " ", 34: '"', 47: "/", 92: "\\", 78: "\x85", 95: "\xa0",
+      76: "\u2028", 80: "\u2029"
+    };
+
+    function repeat(s, n) {
+      var out = "";
+      for (var i = 0; i < n; i += 1) out += s;
+      return out;
+    }
+
+    function codepoint(c) {
+      if (c <= 0xffff) return String.fromCharCode(c);
+      return String.fromCharCode(((c - 0x10000) >> 10) + 0xd800, ((c - 0x10000) & 0x3ff) + 0xdc00);
+    }
+
+    // ---- the JSON schema's types -------------------------------------------
+    // These four are the whole of what JSON_SCHEMA resolves implicitly, and they are why
+    // `yes`/`no`/`on`/`off` stay strings while `true`/`True`/`TRUE` convert, why `0X10` stays a
+    // string where `0x10` becomes 16, and why `1_000` stays a string. They are transcribed from the
+    // build mermaid ships, whose resolvers accept no underscore digit separators, rather than from
+    // the YAML 1.1 spec, which does.
+    function resolveNull(data) {
+      if (data === null) return true;
+      var max = data.length;
+      return (max === 1 && data === "~") || (max === 4 && (data === "null" || data === "Null" || data === "NULL"));
+    }
+
+    function resolveBool(data) {
+      if (data === null) return false;
+      var max = data.length;
+      return (max === 4 && (data === "true" || data === "True" || data === "TRUE")) ||
+        (max === 5 && (data === "false" || data === "False" || data === "FALSE"));
+    }
+
+    function parseYamlInteger(data) {
+      var value = data;
+      var sign = 1;
+      var ch = value[0];
+      if (ch === "-" || ch === "+") {
+        if (ch === "-") sign = -1;
+        value = value.slice(1);
+        ch = value[0];
       }
-      if (c === '"' || c === "'") {
-        quote = c;
-        buf += c;
-        continue;
+      if (value === "0") return 0;
+      if (ch === "0") {
+        if (value[1] === "b") return sign * parseInt(value.slice(2), 2);
+        if (value[1] === "x") return sign * parseInt(value.slice(2), 16);
+        if (value[1] === "o") return sign * parseInt(value.slice(2), 8);
       }
-      if (c === delim) {
-        parts.push(buf);
-        if (once) {
-          parts.push(s.slice(i + 1));
-          return parts;
+      return sign * parseInt(value, 10);
+    }
+
+    function resolveInt(data) {
+      if (data === null) return false;
+      var max = data.length;
+      var index = 0;
+      var hasDigits = false;
+      if (!max) return false;
+      var ch = data[index];
+      if (ch === "-" || ch === "+") ch = data[++index];
+      if (ch === "0") {
+        if (index + 1 === max) return true;
+        ch = data[++index];
+        if (ch === "b" || ch === "x" || ch === "o") {
+          var radix = ch === "b" ? 2 : ch === "x" ? 16 : 8;
+          index += 1;
+          for (; index < max; index += 1) {
+            var digit = fromHexCode(data.charCodeAt(index));
+            if (digit < 0 || digit >= radix) return false;
+            hasDigits = true;
+          }
+          return hasDigits && isFinite(parseYamlInteger(data));
         }
-        buf = "";
-        continue;
       }
-      buf += c;
-    }
-    parts.push(buf);
-    return parts;
-  }
-
-  var YAML_INT = /^-?(?:0|[1-9][0-9]*)$/;
-  var YAML_FLOAT = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$/;
-
-  function unquoteDouble(body) {
-    var out = "";
-    for (var i = 0; i < body.length; i += 1) {
-      var c = body.charAt(i);
-      if (c !== "\\") {
-        out += c;
-        continue;
+      for (; index < max; index += 1) {
+        if (fromDecimalCode(data.charCodeAt(index)) < 0) return false;
+        hasDigits = true;
       }
-      i += 1;
-      var e = body.charAt(i);
-      if (e === "n") out += "\n";
-      else if (e === "t") out += "\t";
-      else if (e === "r") out += "\r";
-      else out += e;
+      return hasDigits && isFinite(parseYamlInteger(data));
     }
-    return out;
-  }
 
-  function yamlScalar(raw) {
-    if (raw === "" || raw === "~" || raw === "null") return null;
-    var last = raw.charAt(raw.length - 1);
-    if (raw.length > 1 && raw.charAt(0) === '"' && last === '"') return unquoteDouble(raw.slice(1, -1));
-    if (raw.length > 1 && raw.charAt(0) === "'" && last === "'") return raw.slice(1, -1).replace(/''/g, "'");
-    if (raw === "true") return true;
-    if (raw === "false") return false;
-    if (YAML_INT.test(raw)) return parseInt(raw, 10);
-    if (YAML_FLOAT.test(raw)) return parseFloat(raw);
-    return raw;
-  }
+    var YAML_FLOAT = /^(?:[-+]?(?:[0-9]+)(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?|\.[0-9]+(?:[eE][-+]?[0-9]+)?|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$/;
+    var YAML_FLOAT_SPECIAL = /^(?:[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$/;
 
-  function yamlFlowMapping(src) {
-    var doc = {};
-    var entries = splitOutsideQuotes(src, ",", false);
-    for (var i = 0; i < entries.length; i += 1) {
-      if (entries[i].trim() === "") continue;
-      var pair = splitOutsideQuotes(entries[i], ":", true);
-      if (pair.length < 2) continue;
-      doc[pair[0].trim()] = yamlScalar(pair[1].trim());
+    function resolveFloat(data) {
+      if (data === null) return false;
+      if (!YAML_FLOAT.test(data)) return false;
+      return isFinite(parseFloat(data)) || YAML_FLOAT_SPECIAL.test(data);
     }
-    return doc;
-  }
 
-  function yamlBlockMapping(src) {
-    var doc = {};
-    var lines = src.split("\n");
-    for (var i = 0; i < lines.length; i += 1) {
-      if (lines[i].trim() === "") continue;
-      var pair = splitOutsideQuotes(lines[i], ":", true);
-      if (pair.length < 2) continue;
-      var key = pair[0].trim();
-      var raw = pair[1].trim();
-      if (raw !== "|" && raw !== "|-" && raw !== ">" && raw !== ">-") {
-        doc[key] = yamlScalar(raw);
-        continue;
+    function constructFloat(data) {
+      var value = data.toLowerCase();
+      var sign = value[0] === "-" ? -1 : 1;
+      if ("+-".indexOf(value[0]) >= 0) value = value.slice(1);
+      if (value === ".inf") return sign === 1 ? Infinity : -Infinity;
+      if (value === ".nan") return NaN;
+      return sign * parseFloat(value);
+    }
+
+    function always() { return true; }
+
+    // Implicit resolution is tried in this order, so `0` reaches the int type before the float one.
+    var IMPLICIT_TYPES = [
+      { tag: "tag:yaml.org,2002:null", kind: "scalar", resolve: resolveNull, construct: function () { return null; } },
+      { tag: "tag:yaml.org,2002:bool", kind: "scalar", resolve: resolveBool, construct: function (d) { return d === "true" || d === "True" || d === "TRUE"; } },
+      { tag: "tag:yaml.org,2002:int", kind: "scalar", resolve: resolveInt, construct: parseYamlInteger },
+      { tag: "tag:yaml.org,2002:float", kind: "scalar", resolve: resolveFloat, construct: constructFloat }
+    ];
+
+    var ALL_TYPES = [
+      { tag: "tag:yaml.org,2002:str", kind: "scalar", resolve: always, construct: function (d) { return d !== null ? d : ""; } },
+      { tag: "tag:yaml.org,2002:seq", kind: "sequence", resolve: always, construct: function (d) { return d !== null ? d : []; } },
+      { tag: "tag:yaml.org,2002:map", kind: "mapping", resolve: always, construct: function (d) { return d !== null ? d : {}; } }
+    ].concat(IMPLICIT_TYPES);
+
+    var TYPE_MAP = { scalar: {}, sequence: {}, mapping: {}, fallback: {} };
+    for (var ti = 0; ti < ALL_TYPES.length; ti += 1) {
+      TYPE_MAP[ALL_TYPES[ti].kind][ALL_TYPES[ti].tag] = ALL_TYPES[ti];
+      TYPE_MAP.fallback[ALL_TYPES[ti].tag] = ALL_TYPES[ti];
+    }
+
+    // ---- the loader ---------------------------------------------------------
+    // js-yaml wraps every message in a YAMLException carrying a mark and a rendered source
+    // snippet, and rewinds `position` before some throws so the caret lands on the offending
+    // character. Nothing in FlowPeek renders a snippet, so only the offset is kept -- enough to
+    // leave those rewinds meaning something, and enough for a caller that one day wants to point
+    // at the character.
+    function fail(st, message) {
+      var error = new Error(message);
+      error.yamlOffset = st.position;
+      throw error;
+    }
+
+    function newState(input) {
+      return {
+        input: input,
+        length: input.length,
+        position: 0,
+        line: 0,
+        lineStart: 0,
+        lineIndent: 0,
+        depth: 0,
+        firstTabInLine: -1,
+        kind: null,
+        result: null,
+        tag: null,
+        anchor: null,
+        anchorMap: Object.create(null),
+        tagMap: Object.create(null),
+        documents: []
+      };
+    }
+
+    function snapshot(st) {
+      return {
+        position: st.position, line: st.line, lineStart: st.lineStart, lineIndent: st.lineIndent,
+        firstTabInLine: st.firstTabInLine, tag: st.tag, anchor: st.anchor, kind: st.kind, result: st.result
+      };
+    }
+
+    function restore(st, snap) {
+      st.position = snap.position;
+      st.line = snap.line;
+      st.lineStart = snap.lineStart;
+      st.lineIndent = snap.lineIndent;
+      st.firstTabInLine = snap.firstTabInLine;
+      st.tag = snap.tag;
+      st.anchor = snap.anchor;
+      st.kind = snap.kind;
+      st.result = snap.result;
+    }
+
+    function storeAnchor(st, name, value) {
+      st.anchorMap[name] = value;
+    }
+
+    function captureSegment(st, start, end, checkJson) {
+      if (start >= end) return;
+      var slice = st.input.slice(start, end);
+      if (checkJson) {
+        for (var i = 0; i < slice.length; i += 1) {
+          var c = slice.charCodeAt(i);
+          if (!(c === 9 || (c >= 32 && c <= 1114111))) fail(st, "expected valid JSON character");
+        }
+      } else if (PATTERN_NON_PRINTABLE.test(slice)) {
+        fail(st, "the stream contains non-printable characters");
       }
-      // A block scalar owns every following line indented deeper than its key.
-      var indent = leadingWidth(lines[i]);
-      var body = [];
-      var j = i + 1;
-      while (j < lines.length && (lines[j].trim() === "" || leadingWidth(lines[j]) > indent)) {
-        body.push(lines[j]);
-        j += 1;
-      }
-      while (body.length && body[body.length - 1].trim() === "") body.pop();
-      var strip = body.length ? leadingWidth(body[0]) : 0;
-      for (var b = 0; b < body.length; b += 1) body[b] = body[b].slice(strip);
-      var folded = raw.charAt(0) === ">" ? body.join(" ") : body.join("\n");
-      doc[key] = raw.length === 1 ? folded + "\n" : folded;
-      i = j - 1;
+      st.result += slice;
     }
-    return doc;
-  }
 
-  function loadShapeData(metadata) {
-    return metadata.indexOf("\n") === -1 ? yamlFlowMapping(metadata) : yamlBlockMapping(metadata);
-  }
+    function readLineBreak(st) {
+      var ch = st.input.charCodeAt(st.position);
+      if (ch === 10) {
+        st.position += 1;
+      } else if (ch === 13) {
+        st.position += 1;
+        if (st.input.charCodeAt(st.position) === 10) st.position += 1;
+      } else {
+        fail(st, "a line break is expected");
+      }
+      st.line += 1;
+      st.lineStart = st.position;
+      st.firstTabInLine = -1;
+    }
+
+    function skipSeparationSpace(st, allowComments, checkIndent) {
+      var lineBreaks = 0;
+      var ch = st.input.charCodeAt(st.position);
+      while (ch !== 0) {
+        while (isWhiteSpace(ch)) {
+          if (ch === 9 && st.firstTabInLine === -1) st.firstTabInLine = st.position;
+          ch = st.input.charCodeAt(++st.position);
+        }
+        if (allowComments && ch === 35) {
+          do { ch = st.input.charCodeAt(++st.position); } while (ch !== 10 && ch !== 13 && ch !== 0);
+        }
+        if (!isEol(ch)) break;
+        readLineBreak(st);
+        ch = st.input.charCodeAt(st.position);
+        lineBreaks += 1;
+        st.lineIndent = 0;
+        while (ch === 32) {
+          st.lineIndent += 1;
+          ch = st.input.charCodeAt(++st.position);
+        }
+      }
+      // js-yaml only warns about deficient indentation here, and `load` installs no warning
+      // handler, so `checkIndent` has nothing left to do and is not carried through.
+      return lineBreaks;
+    }
+
+    function testDocumentSeparator(st) {
+      var p = st.position;
+      var ch = st.input.charCodeAt(p);
+      if ((ch === 45 || ch === 46) && ch === st.input.charCodeAt(p + 1) && ch === st.input.charCodeAt(p + 2)) {
+        ch = st.input.charCodeAt(p + 3);
+        if (ch === 0 || isWsOrEol(ch)) return true;
+      }
+      return false;
+    }
+
+    function writeFoldedLines(st, count) {
+      if (count === 1) st.result += " ";
+      else if (count > 1) st.result += repeat("\n", count - 1);
+    }
+
+    function readPlainScalar(st, nodeIndent, withinFlowCollection) {
+      var kind = st.kind;
+      var result = st.result;
+      var ch = st.input.charCodeAt(st.position);
+      if (isWsOrEol(ch) || isFlowIndicator(ch) || ch === 35 || ch === 38 || ch === 42 || ch === 33 ||
+        ch === 124 || ch === 62 || ch === 39 || ch === 34 || ch === 37 || ch === 64 || ch === 96) {
+        return false;
+      }
+      if (ch === 63 || ch === 45) {
+        var next = st.input.charCodeAt(st.position + 1);
+        if (isWsOrEol(next) || (withinFlowCollection && isFlowIndicator(next))) return false;
+      }
+      st.kind = "scalar";
+      st.result = "";
+      var captureStart = st.position;
+      var captureEnd = st.position;
+      var pending = false;
+      var line, lineStart, lineIndent;
+      while (ch !== 0) {
+        if (ch === 58) {
+          // The colon only ends the scalar when a space or a flow indicator follows it. This is
+          // what makes `@{shape:Rect}` one key with a null value rather than shape -> Rect.
+          var following = st.input.charCodeAt(st.position + 1);
+          if (isWsOrEol(following) || (withinFlowCollection && isFlowIndicator(following))) break;
+        } else if (ch === 35) {
+          if (isWsOrEol(st.input.charCodeAt(st.position - 1))) break;
+        } else if ((st.position === st.lineStart && testDocumentSeparator(st)) ||
+          (withinFlowCollection && isFlowIndicator(ch))) {
+          break;
+        } else if (isEol(ch)) {
+          line = st.line;
+          lineStart = st.lineStart;
+          lineIndent = st.lineIndent;
+          skipSeparationSpace(st, false, -1);
+          if (st.lineIndent >= nodeIndent) {
+            pending = true;
+            ch = st.input.charCodeAt(st.position);
+            continue;
+          }
+          st.position = captureEnd;
+          st.line = line;
+          st.lineStart = lineStart;
+          st.lineIndent = lineIndent;
+          break;
+        }
+        if (pending) {
+          captureSegment(st, captureStart, captureEnd, false);
+          writeFoldedLines(st, st.line - line);
+          captureStart = captureEnd = st.position;
+          pending = false;
+        }
+        if (!isWhiteSpace(ch)) captureEnd = st.position + 1;
+        ch = st.input.charCodeAt(++st.position);
+      }
+      captureSegment(st, captureStart, captureEnd, false);
+      if (st.result) return true;
+      st.kind = kind;
+      st.result = result;
+      return false;
+    }
+
+    function readSingleQuotedScalar(st, nodeIndent) {
+      var ch = st.input.charCodeAt(st.position);
+      if (ch !== 39) return false;
+      st.kind = "scalar";
+      st.result = "";
+      st.position += 1;
+      var captureStart = st.position;
+      var captureEnd = st.position;
+      while ((ch = st.input.charCodeAt(st.position)) !== 0) {
+        if (ch === 39) {
+          captureSegment(st, captureStart, st.position, true);
+          ch = st.input.charCodeAt(++st.position);
+          if (ch !== 39) return true;
+          captureStart = st.position;
+          st.position += 1;
+          captureEnd = st.position;
+        } else if (isEol(ch)) {
+          captureSegment(st, captureStart, captureEnd, true);
+          writeFoldedLines(st, skipSeparationSpace(st, false, nodeIndent));
+          captureStart = captureEnd = st.position;
+        } else if (st.position === st.lineStart && testDocumentSeparator(st)) {
+          fail(st, "unexpected end of the document within a single quoted scalar");
+        } else {
+          st.position += 1;
+          if (!isWhiteSpace(ch)) captureEnd = st.position;
+        }
+      }
+      fail(st, "unexpected end of the stream within a single quoted scalar");
+    }
+
+    function readDoubleQuotedScalar(st, nodeIndent) {
+      var ch = st.input.charCodeAt(st.position);
+      if (ch !== 34) return false;
+      st.kind = "scalar";
+      st.result = "";
+      st.position += 1;
+      var captureStart = st.position;
+      var captureEnd = st.position;
+      while ((ch = st.input.charCodeAt(st.position)) !== 0) {
+        if (ch === 34) {
+          captureSegment(st, captureStart, st.position, true);
+          st.position += 1;
+          return true;
+        }
+        if (ch === 92) {
+          captureSegment(st, captureStart, st.position, true);
+          ch = st.input.charCodeAt(++st.position);
+          var hexLength = escapedHexLen(ch);
+          if (isEol(ch)) {
+            skipSeparationSpace(st, false, nodeIndent);
+          } else if (ch < 256 && SIMPLE_ESCAPES[ch] !== undefined) {
+            st.result += SIMPLE_ESCAPES[ch];
+            st.position += 1;
+          } else if (hexLength > 0) {
+            var hexResult = 0;
+            for (; hexLength > 0; hexLength -= 1) {
+              var digit = fromHexCode(st.input.charCodeAt(++st.position));
+              if (digit < 0) fail(st, "expected hexadecimal character");
+              hexResult = (hexResult << 4) + digit;
+            }
+            st.result += codepoint(hexResult);
+            st.position += 1;
+          } else {
+            fail(st, "unknown escape sequence");
+          }
+          captureStart = captureEnd = st.position;
+        } else if (isEol(ch)) {
+          captureSegment(st, captureStart, captureEnd, true);
+          writeFoldedLines(st, skipSeparationSpace(st, false, nodeIndent));
+          captureStart = captureEnd = st.position;
+        } else if (st.position === st.lineStart && testDocumentSeparator(st)) {
+          fail(st, "unexpected end of the document within a double quoted scalar");
+        } else {
+          st.position += 1;
+          if (!isWhiteSpace(ch)) captureEnd = st.position;
+        }
+      }
+      fail(st, "unexpected end of the stream within a double quoted scalar");
+    }
+
+    function readFlowCollection(st, nodeIndent) {
+      var readNext = true;
+      var tag = st.tag;
+      var anchor = st.anchor;
+      var terminator, isMapping, result;
+      var ch = st.input.charCodeAt(st.position);
+      if (ch === 91) {
+        terminator = 93;
+        isMapping = false;
+        result = [];
+      } else if (ch === 123) {
+        terminator = 125;
+        isMapping = true;
+        result = {};
+      } else {
+        return false;
+      }
+      if (st.anchor !== null) storeAnchor(st, st.anchor, result);
+      ch = st.input.charCodeAt(++st.position);
+      while (ch !== 0) {
+        skipSeparationSpace(st, true, nodeIndent);
+        ch = st.input.charCodeAt(st.position);
+        if (ch === terminator) {
+          st.position += 1;
+          st.tag = tag;
+          st.anchor = anchor;
+          st.kind = isMapping ? "mapping" : "sequence";
+          st.result = result;
+          return true;
+        }
+        if (!readNext) fail(st, "missed comma between flow collection entries");
+        if (ch === 44) fail(st, "expected the node content, but found ','");
+        var keyTag = null;
+        var keyNode = null;
+        var valueNode = null;
+        var isPair = false;
+        var isExplicitPair = false;
+        if (ch === 63 && isWsOrEol(st.input.charCodeAt(st.position + 1))) {
+          isPair = isExplicitPair = true;
+          st.position += 1;
+          skipSeparationSpace(st, true, nodeIndent);
+        }
+        var line = st.line;
+        composeNode(st, nodeIndent, CONTEXT_FLOW_IN, false, true);
+        keyTag = st.tag;
+        keyNode = st.result;
+        skipSeparationSpace(st, true, nodeIndent);
+        ch = st.input.charCodeAt(st.position);
+        if ((isExplicitPair || st.line === line) && ch === 58) {
+          isPair = true;
+          st.position += 1;
+          skipSeparationSpace(st, true, nodeIndent);
+          composeNode(st, nodeIndent, CONTEXT_FLOW_IN, false, true);
+          valueNode = st.result;
+        }
+        if (isMapping) storeMappingPair(st, result, keyTag, keyNode, valueNode);
+        else if (isPair) result.push(storeMappingPair(st, null, keyTag, keyNode, valueNode));
+        else result.push(keyNode);
+        skipSeparationSpace(st, true, nodeIndent);
+        ch = st.input.charCodeAt(st.position);
+        if (ch === 44) {
+          readNext = true;
+          ch = st.input.charCodeAt(++st.position);
+        } else {
+          readNext = false;
+        }
+      }
+      fail(st, "unexpected end of the stream within a flow collection");
+    }
+
+    function readBlockScalar(st, nodeIndent) {
+      var folding;
+      var chomping = CHOMPING_CLIP;
+      var didReadContent = false;
+      var detectedIndent = false;
+      var textIndent = nodeIndent;
+      var emptyLines = 0;
+      var atMoreIndented = false;
+      var ch = st.input.charCodeAt(st.position);
+      if (ch === 124) folding = false;
+      else if (ch === 62) folding = true;
+      else return false;
+      st.kind = "scalar";
+      st.result = "";
+      while (ch !== 0) {
+        ch = st.input.charCodeAt(++st.position);
+        if (ch === 43 || ch === 45) {
+          if (chomping !== CHOMPING_CLIP) fail(st, "repeat of a chomping mode identifier");
+          chomping = ch === 43 ? CHOMPING_KEEP : CHOMPING_STRIP;
+        } else {
+          var width = fromDecimalCode(ch);
+          if (width < 0) break;
+          if (width === 0) fail(st, "bad explicit indentation width of a block scalar; it cannot be less than one");
+          if (detectedIndent) fail(st, "repeat of an indentation width identifier");
+          textIndent = nodeIndent + width - 1;
+          detectedIndent = true;
+        }
+      }
+      if (isWhiteSpace(ch)) {
+        do { ch = st.input.charCodeAt(++st.position); } while (isWhiteSpace(ch));
+        if (ch === 35) {
+          do { ch = st.input.charCodeAt(++st.position); } while (!isEol(ch) && ch !== 0);
+        }
+      }
+      while (ch !== 0) {
+        readLineBreak(st);
+        st.lineIndent = 0;
+        ch = st.input.charCodeAt(st.position);
+        while ((!detectedIndent || st.lineIndent < textIndent) && ch === 32) {
+          st.lineIndent += 1;
+          ch = st.input.charCodeAt(++st.position);
+        }
+        if (!detectedIndent && st.lineIndent > textIndent) textIndent = st.lineIndent;
+        if (isEol(ch)) {
+          emptyLines += 1;
+          continue;
+        }
+        if (!detectedIndent && textIndent === 0) fail(st, "missing indentation for block scalar");
+        if (st.lineIndent < textIndent) {
+          if (chomping === CHOMPING_KEEP) st.result += repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+          else if (chomping === CHOMPING_CLIP && didReadContent) st.result += "\n";
+          break;
+        }
+        if (!folding) {
+          st.result += repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+        } else if (isWhiteSpace(ch)) {
+          atMoreIndented = true;
+          st.result += repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+        } else if (atMoreIndented) {
+          atMoreIndented = false;
+          st.result += repeat("\n", emptyLines + 1);
+        } else if (emptyLines === 0) {
+          if (didReadContent) st.result += " ";
+        } else {
+          st.result += repeat("\n", emptyLines);
+        }
+        didReadContent = true;
+        detectedIndent = true;
+        emptyLines = 0;
+        var captureStart = st.position;
+        while (!isEol(ch) && ch !== 0) ch = st.input.charCodeAt(++st.position);
+        captureSegment(st, captureStart, st.position, false);
+      }
+      return true;
+    }
+
+    function readBlockSequence(st, nodeIndent) {
+      var tag = st.tag;
+      var anchor = st.anchor;
+      var result = [];
+      var detected = false;
+      if (st.firstTabInLine !== -1) return false;
+      if (st.anchor !== null) storeAnchor(st, st.anchor, result);
+      var ch = st.input.charCodeAt(st.position);
+      while (ch !== 0) {
+        if (st.firstTabInLine !== -1) {
+          st.position = st.firstTabInLine;
+          fail(st, "tab characters must not be used in indentation");
+        }
+        if (ch !== 45) break;
+        if (!isWsOrEol(st.input.charCodeAt(st.position + 1))) break;
+        detected = true;
+        st.position += 1;
+        if (skipSeparationSpace(st, true, -1) && st.lineIndent <= nodeIndent) {
+          result.push(null);
+          ch = st.input.charCodeAt(st.position);
+          continue;
+        }
+        var line = st.line;
+        composeNode(st, nodeIndent, CONTEXT_BLOCK_IN, false, true);
+        result.push(st.result);
+        skipSeparationSpace(st, true, -1);
+        ch = st.input.charCodeAt(st.position);
+        if ((st.line === line || st.lineIndent > nodeIndent) && ch !== 0) fail(st, "bad indentation of a sequence entry");
+        else if (st.lineIndent < nodeIndent) break;
+      }
+      if (!detected) return false;
+      st.tag = tag;
+      st.anchor = anchor;
+      st.kind = "sequence";
+      st.result = result;
+      return true;
+    }
+
+    function readBlockMapping(st, nodeIndent, flowIndent) {
+      var tag = st.tag;
+      var anchor = st.anchor;
+      var result = {};
+      var keyTag = null;
+      var keyNode = null;
+      var valueNode = null;
+      var atExplicitKey = false;
+      var detected = false;
+      var allowCompact = false;
+      if (st.firstTabInLine !== -1) return false;
+      if (st.anchor !== null) storeAnchor(st, st.anchor, result);
+      var ch = st.input.charCodeAt(st.position);
+      while (ch !== 0) {
+        if (!atExplicitKey && st.firstTabInLine !== -1) {
+          st.position = st.firstTabInLine;
+          fail(st, "tab characters must not be used in indentation");
+        }
+        var following = st.input.charCodeAt(st.position + 1);
+        var line = st.line;
+        if ((ch === 63 || ch === 58) && isWsOrEol(following)) {
+          if (ch === 63) {
+            if (atExplicitKey) {
+              storeMappingPair(st, result, keyTag, keyNode, null);
+              keyTag = keyNode = valueNode = null;
+            }
+            detected = true;
+            atExplicitKey = true;
+            allowCompact = true;
+          } else if (atExplicitKey) {
+            atExplicitKey = false;
+            allowCompact = true;
+          } else {
+            fail(st, "incomplete explicit mapping pair; a key node is missed; or followed by a non-tabulated empty line");
+          }
+          st.position += 1;
+          ch = following;
+        } else {
+          if (!composeNode(st, flowIndent, CONTEXT_FLOW_OUT, false, true)) break;
+          if (st.line !== line) {
+            if (detected) fail(st, "can not read a block mapping entry; a multiline key may not be an implicit key");
+            st.tag = tag;
+            st.anchor = anchor;
+            return true;
+          }
+          ch = st.input.charCodeAt(st.position);
+          while (isWhiteSpace(ch)) ch = st.input.charCodeAt(++st.position);
+          if (ch !== 58) {
+            if (detected) fail(st, "can not read an implicit mapping pair; a colon is missed");
+            st.tag = tag;
+            st.anchor = anchor;
+            return true;
+          }
+          ch = st.input.charCodeAt(++st.position);
+          if (!isWsOrEol(ch)) fail(st, "a whitespace character is expected after the key-value separator within a block mapping");
+          if (atExplicitKey) {
+            storeMappingPair(st, result, keyTag, keyNode, null);
+            keyTag = keyNode = valueNode = null;
+          }
+          detected = true;
+          atExplicitKey = false;
+          allowCompact = false;
+          keyTag = st.tag;
+          keyNode = st.result;
+        }
+        if (st.line === line || st.lineIndent > nodeIndent) {
+          if (composeNode(st, nodeIndent, CONTEXT_BLOCK_OUT, true, allowCompact)) {
+            if (atExplicitKey) keyNode = st.result;
+            else valueNode = st.result;
+          }
+          if (!atExplicitKey) {
+            storeMappingPair(st, result, keyTag, keyNode, valueNode);
+            keyTag = keyNode = valueNode = null;
+          }
+          skipSeparationSpace(st, true, -1);
+          ch = st.input.charCodeAt(st.position);
+        }
+        if ((st.line === line || st.lineIndent > nodeIndent) && ch !== 0) fail(st, "bad indentation of a mapping entry");
+        else if (st.lineIndent < nodeIndent) break;
+      }
+      if (atExplicitKey) storeMappingPair(st, result, keyTag, keyNode, null);
+      if (!detected) return false;
+      st.tag = tag;
+      st.anchor = anchor;
+      st.kind = "mapping";
+      st.result = result;
+      return true;
+    }
+
+    // `!!merge` is not in the JSON schema, so the `<<` merge branch js-yaml has here cannot fire
+    // and is left out; what remains is the key stringification and the duplicate-key rejection
+    // that makes `@{ shape: rect, shape: rounded }` an error rather than a last-one-wins.
+    function storeMappingPair(st, result, keyTag, keyNode, valueNode) {
+      if (Array.isArray(keyNode)) {
+        keyNode = keyNode.slice();
+        for (var i = 0; i < keyNode.length; i += 1) {
+          if (Array.isArray(keyNode[i])) fail(st, "nested arrays are not supported inside keys");
+          if (typeof keyNode[i] === "object" && keyNode[i] !== null) keyNode[i] = "[object Object]";
+        }
+      }
+      if (typeof keyNode === "object" && keyNode !== null && !Array.isArray(keyNode)) keyNode = "[object Object]";
+      keyNode = String(keyNode);
+      if (result === null) result = {};
+      if (hasOwn.call(result, keyNode)) fail(st, "duplicated mapping key");
+      if (keyNode === "__proto__") {
+        Object.defineProperty(result, keyNode, { configurable: true, enumerable: true, writable: true, value: valueNode });
+      } else {
+        result[keyNode] = valueNode;
+      }
+      return result;
+    }
+
+    function readTagProperty(st) {
+      var isVerbatim = false;
+      var isNamed = false;
+      var tagHandle;
+      var tagName;
+      var ch = st.input.charCodeAt(st.position);
+      if (ch !== 33) return false;
+      if (st.tag !== null) fail(st, "duplication of a tag property");
+      ch = st.input.charCodeAt(++st.position);
+      if (ch === 60) {
+        isVerbatim = true;
+        ch = st.input.charCodeAt(++st.position);
+      } else if (ch === 33) {
+        isNamed = true;
+        tagHandle = "!!";
+        ch = st.input.charCodeAt(++st.position);
+      } else {
+        tagHandle = "!";
+      }
+      var start = st.position;
+      if (isVerbatim) {
+        do { ch = st.input.charCodeAt(++st.position); } while (ch !== 0 && ch !== 62);
+        if (st.position >= st.length) fail(st, "unexpected end of the stream within a verbatim tag");
+        tagName = st.input.slice(start, st.position);
+        st.position += 1;
+      } else {
+        while (ch !== 0 && !isWsOrEol(ch)) {
+          if (ch === 33) {
+            if (isNamed) fail(st, "tag suffix cannot contain exclamation marks");
+            tagHandle = st.input.slice(start - 1, st.position + 1);
+            if (!PATTERN_TAG_HANDLE.test(tagHandle)) fail(st, "named tag handle cannot contain such characters");
+            isNamed = true;
+            start = st.position + 1;
+          }
+          ch = st.input.charCodeAt(++st.position);
+        }
+        tagName = st.input.slice(start, st.position);
+        if (PATTERN_FLOW_INDICATORS.test(tagName)) fail(st, "tag suffix cannot contain flow indicator characters");
+      }
+      if (tagName && !PATTERN_TAG_URI.test(tagName)) fail(st, "tag name cannot contain such characters: " + tagName);
+      try {
+        tagName = decodeURIComponent(tagName);
+      } catch (err) {
+        fail(st, "tag name is malformed: " + tagName);
+      }
+      if (isVerbatim) st.tag = tagName;
+      else if (hasOwn.call(st.tagMap, tagHandle)) st.tag = st.tagMap[tagHandle] + tagName;
+      else if (tagHandle === "!") st.tag = "!" + tagName;
+      else if (tagHandle === "!!") st.tag = "tag:yaml.org,2002:" + tagName;
+      else fail(st, 'undeclared tag handle "' + tagHandle + '"');
+      return true;
+    }
+
+    function readAnchorProperty(st) {
+      var ch = st.input.charCodeAt(st.position);
+      if (ch !== 38) return false;
+      if (st.anchor !== null) fail(st, "duplication of an anchor property");
+      ch = st.input.charCodeAt(++st.position);
+      var start = st.position;
+      while (ch !== 0 && !isWsOrEol(ch) && !isFlowIndicator(ch)) ch = st.input.charCodeAt(++st.position);
+      if (st.position === start) fail(st, "name of an anchor node must contain at least one character");
+      st.anchor = st.input.slice(start, st.position);
+      return true;
+    }
+
+    function readAlias(st) {
+      var ch = st.input.charCodeAt(st.position);
+      if (ch !== 42) return false;
+      ch = st.input.charCodeAt(++st.position);
+      var start = st.position;
+      while (ch !== 0 && !isWsOrEol(ch) && !isFlowIndicator(ch)) ch = st.input.charCodeAt(++st.position);
+      if (st.position === start) fail(st, "name of an alias node must contain at least one character");
+      var alias = st.input.slice(start, st.position);
+      if (!hasOwn.call(st.anchorMap, alias)) fail(st, 'unidentified alias "' + alias + '"');
+      st.result = st.anchorMap[alias];
+      skipSeparationSpace(st, true, -1);
+      return true;
+    }
+
+    // A tag or anchor written on the line before a block mapping leaves the mapping unreadable by
+    // the main path, which has already decided block collections are not allowed; js-yaml rewinds
+    // to where the property started and tries again. The anchor map is copied rather than
+    // journalled the way js-yaml journals it, because rolling the copy back has the same effect for
+    // a speculative parse this shallow.
+    function tryReadBlockMappingFromProperty(st, propertyStart, nodeIndent, flowIndent) {
+      var fallback = snapshot(st);
+      var anchors = Object.assign(Object.create(null), st.anchorMap);
+      restore(st, propertyStart);
+      st.tag = null;
+      st.anchor = null;
+      st.kind = null;
+      st.result = null;
+      if (readBlockMapping(st, nodeIndent, flowIndent) && st.kind === "mapping") return true;
+      st.anchorMap = anchors;
+      restore(st, fallback);
+      return false;
+    }
+
+    function composeNode(st, parentIndent, nodeContext, allowToSeek, allowCompact) {
+      var indentStatus = 1;
+      var atNewLine = false;
+      var hasContent = false;
+      var propertyStart = null;
+      var type;
+      var ch;
+      if (st.depth >= 100) fail(st, "nesting exceeded maxDepth (100)");
+      st.depth += 1;
+      st.tag = null;
+      st.anchor = null;
+      st.kind = null;
+      st.result = null;
+      var allowBlockStyles = nodeContext === CONTEXT_BLOCK_OUT || nodeContext === CONTEXT_BLOCK_IN;
+      var allowBlockScalars = allowBlockStyles;
+      var allowBlockCollections = allowBlockStyles;
+      if (allowToSeek && skipSeparationSpace(st, true, -1)) {
+        atNewLine = true;
+        indentStatus = st.lineIndent > parentIndent ? 1 : st.lineIndent === parentIndent ? 0 : -1;
+      }
+      if (indentStatus === 1) {
+        while (true) {
+          ch = st.input.charCodeAt(st.position);
+          var propertyState = snapshot(st);
+          if (atNewLine && ((ch === 33 && st.tag !== null) || (ch === 38 && st.anchor !== null))) break;
+          if (!readTagProperty(st) && !readAnchorProperty(st)) break;
+          if (propertyStart === null) propertyStart = propertyState;
+          if (skipSeparationSpace(st, true, -1)) {
+            atNewLine = true;
+            allowBlockCollections = allowBlockStyles;
+            indentStatus = st.lineIndent > parentIndent ? 1 : st.lineIndent === parentIndent ? 0 : -1;
+          } else {
+            allowBlockCollections = false;
+          }
+        }
+      }
+      if (allowBlockCollections) allowBlockCollections = atNewLine || allowCompact;
+      if (indentStatus === 1 || nodeContext === CONTEXT_BLOCK_OUT) {
+        var flowIndent = (nodeContext === CONTEXT_FLOW_IN || nodeContext === CONTEXT_FLOW_OUT) ? parentIndent : parentIndent + 1;
+        var blockIndent = st.position - st.lineStart;
+        if (indentStatus === 1) {
+          if ((allowBlockCollections && (readBlockSequence(st, blockIndent) || readBlockMapping(st, blockIndent, flowIndent))) ||
+            readFlowCollection(st, flowIndent)) {
+            hasContent = true;
+          } else {
+            ch = st.input.charCodeAt(st.position);
+            if (propertyStart !== null && allowBlockStyles && !allowBlockCollections && ch !== 124 && ch !== 62 &&
+              tryReadBlockMappingFromProperty(st, propertyStart, propertyStart.position - propertyStart.lineStart, flowIndent)) {
+              hasContent = true;
+            } else if ((allowBlockScalars && readBlockScalar(st, flowIndent)) ||
+              readSingleQuotedScalar(st, flowIndent) || readDoubleQuotedScalar(st, flowIndent)) {
+              hasContent = true;
+            } else if (readAlias(st)) {
+              hasContent = true;
+              if (st.tag !== null || st.anchor !== null) fail(st, "alias node should not have any properties");
+            } else if (readPlainScalar(st, flowIndent, nodeContext === CONTEXT_FLOW_IN)) {
+              hasContent = true;
+              if (st.tag === null) st.tag = "?";
+            }
+            if (st.anchor !== null) storeAnchor(st, st.anchor, st.result);
+          }
+        } else if (indentStatus === 0) {
+          hasContent = allowBlockCollections && readBlockSequence(st, blockIndent);
+        }
+      }
+      if (st.tag === null) {
+        if (st.anchor !== null) storeAnchor(st, st.anchor, st.result);
+      } else if (st.tag === "?") {
+        if (st.result !== null && st.kind !== "scalar") {
+          fail(st, 'unacceptable node kind for !<?> tag; it should be "scalar", not "' + st.kind + '"');
+        }
+        for (var i = 0; i < IMPLICIT_TYPES.length; i += 1) {
+          type = IMPLICIT_TYPES[i];
+          if (type.resolve(st.result)) {
+            st.result = type.construct(st.result);
+            st.tag = type.tag;
+            if (st.anchor !== null) storeAnchor(st, st.anchor, st.result);
+            break;
+          }
+        }
+      } else if (st.tag !== "!") {
+        type = TYPE_MAP[st.kind || "fallback"][st.tag];
+        if (!type) fail(st, "unknown tag !<" + st.tag + ">");
+        if (st.result !== null && type.kind !== st.kind) {
+          fail(st, "unacceptable node kind for !<" + st.tag + '> tag; it should be "' + type.kind + '", not "' + st.kind + '"');
+        }
+        if (!type.resolve(st.result, st.tag)) fail(st, "cannot resolve a node with !<" + st.tag + "> explicit tag");
+        st.result = type.construct(st.result, st.tag);
+        if (st.anchor !== null) storeAnchor(st, st.anchor, st.result);
+      }
+      st.depth -= 1;
+      return st.tag !== null || st.anchor !== null || hasContent;
+    }
+
+    function readDocument(st) {
+      var hasDirectives = false;
+      var ch;
+      st.tagMap = Object.create(null);
+      st.anchorMap = Object.create(null);
+      while ((ch = st.input.charCodeAt(st.position)) !== 0) {
+        skipSeparationSpace(st, true, -1);
+        ch = st.input.charCodeAt(st.position);
+        if (st.lineIndent > 0 || ch !== 37) break;
+        hasDirectives = true;
+        ch = st.input.charCodeAt(++st.position);
+        var start = st.position;
+        while (ch !== 0 && !isWsOrEol(ch)) ch = st.input.charCodeAt(++st.position);
+        var name = st.input.slice(start, st.position);
+        var args = [];
+        if (name.length < 1) fail(st, "directive name must not be less than one character in length");
+        while (ch !== 0) {
+          while (isWhiteSpace(ch)) ch = st.input.charCodeAt(++st.position);
+          if (ch === 35) {
+            do { ch = st.input.charCodeAt(++st.position); } while (ch !== 0 && !isEol(ch));
+            break;
+          }
+          if (isEol(ch)) break;
+          start = st.position;
+          while (ch !== 0 && !isWsOrEol(ch)) ch = st.input.charCodeAt(++st.position);
+          args.push(st.input.slice(start, st.position));
+        }
+        if (ch !== 0) readLineBreak(st);
+        // %YAML only picks a version and warns, and an unknown directive only warns, so %TAG is the
+        // one whose effect survives: it rewrites the handles readTagProperty resolves against.
+        if (name === "TAG") {
+          if (args.length !== 2) fail(st, "TAG directive accepts exactly two arguments");
+          if (!PATTERN_TAG_HANDLE.test(args[0])) fail(st, "ill-formed tag handle (first argument) of the TAG directive");
+          if (hasOwn.call(st.tagMap, args[0])) fail(st, 'there is a previously declared suffix for "' + args[0] + '" tag handle');
+          if (!PATTERN_TAG_URI.test(args[1])) fail(st, "ill-formed tag prefix (second argument) of the TAG directive");
+          try {
+            st.tagMap[args[0]] = decodeURIComponent(args[1]);
+          } catch (err) {
+            fail(st, "tag prefix is malformed: " + args[1]);
+          }
+        } else if (name === "YAML") {
+          if (args.length !== 1) fail(st, "YAML directive accepts exactly one argument");
+          var version = /^([0-9]+)\.([0-9]+)$/.exec(args[0]);
+          if (version === null) fail(st, "ill-formed argument of the YAML directive");
+          if (parseInt(version[1], 10) !== 1) fail(st, "unacceptable YAML version of the document");
+        }
+      }
+      skipSeparationSpace(st, true, -1);
+      if (st.lineIndent === 0 && st.input.charCodeAt(st.position) === 45 &&
+        st.input.charCodeAt(st.position + 1) === 45 && st.input.charCodeAt(st.position + 2) === 45) {
+        st.position += 3;
+        skipSeparationSpace(st, true, -1);
+      } else if (hasDirectives) {
+        fail(st, "directives end mark is expected");
+      }
+      composeNode(st, st.lineIndent - 1, CONTEXT_BLOCK_OUT, false, true);
+      skipSeparationSpace(st, true, -1);
+      st.documents.push(st.result);
+      if (st.position === st.lineStart && testDocumentSeparator(st)) {
+        if (st.input.charCodeAt(st.position) === 46) {
+          st.position += 3;
+          skipSeparationSpace(st, true, -1);
+        }
+        return;
+      }
+      if (st.position < st.length - 1) fail(st, "end of the stream or a document separator is expected");
+    }
+
+    function load(input) {
+      if (input.length !== 0) {
+        var last = input.charCodeAt(input.length - 1);
+        if (last !== 10 && last !== 13) input += "\n";
+        if (input.charCodeAt(0) === 0xfeff) input = input.slice(1);
+      }
+      var st = newState(input);
+      if (input.indexOf("\0") !== -1) fail(st, "null byte is not allowed in input");
+      // The sentinel is what every `ch !== 0` loop above stops on, and `length` deliberately still
+      // measures the input without it.
+      st.input += "\0";
+      while (st.input.charCodeAt(st.position) === 32) {
+        st.lineIndent += 1;
+        st.position += 1;
+      }
+      while (st.position < st.length - 1) readDocument(st);
+      if (st.documents.length === 0) return undefined;
+      if (st.documents.length > 1) throw new Error("expected a single document in the stream, but found more");
+      return st.documents[0];
+    }
+
+    // The two wrappings are mermaid's, not ours: a run with no newline is braced so it reads as a
+    // flow mapping, and the multi-line form gets the trailing newline a block document needs
+    // (flowDb.reference.ts:141-150). Feeding the loader the same string mermaid feeds js-yaml is
+    // what keeps `@{shape:Rect}` reading as one null-valued key here too, rather than needing a
+    // rule of its own.
+    return function loadShapeData(metadata) {
+      return load(metadata.indexOf("\n") === -1 ? "{\n" + metadata + "\n}" : metadata + "\n");
+    };
+  })();
 
   // Every name mermaid's `isValidShape` accepts: the shortName, aliases and internalAliases of its
   // 53 shape definitions plus the 20 undocumented ones. Held as data rather than derived because
@@ -1158,12 +2697,37 @@
   var INITIAL_ONLY = null;
   var ANY_STATE = "*";
 
+  // Every pattern here goes through jison-lex's keyword-boundary rewrite before it becomes a
+  // regex, because the generated lexer mermaid actually runs has been through it: dumping
+  // `diagram.parser.parser.lexer.rules` from mermaid 11.17.2 shows `/^(?:graph\b)/`,
+  // `/^(?:class\b)/`, `/^(?:_self\b)/` and twenty more boundaries that appear nowhere in
+  // flow.jison.reference. Without them `graphQL` lexes as GRAPH followed by NODE_STRING `QL`, and
+  // nothing downstream can glue the two back together -- idStringToken (flow.jison.reference:597)
+  // admits NODE_STRING and DEFAULT but no other keyword, so mermaid's own grammar would reject its
+  // own lexer's output. The boundary is what stops the keyword rule from ever firing there.
+  //
+  // Doing it in R rather than by hand-editing the twenty-three affected patterns keeps the table a
+  // transcription of the .jison source, and means a rule copied across later cannot quietly miss it.
   function R(states, source, action) {
     RULES.push({
       states: states,
-      re: new RegExp(typeof source === "string" ? source : source.source, "y"),
+      re: new RegExp(easyKeywordBoundary(typeof source === "string" ? source : source.source), "y"),
       act: action
     });
+  }
+
+  // jison appends the boundary to any rule whose pattern ends in a word character, and the escape
+  // list is the exception that matters: rule `(\r?\n)*\s*\n` and rule `\s` both end in a letter
+  // that belongs to a backslash escape, and mermaid's generated table leaves both unbounded. An
+  // odd-backslash-count test would cover those two as well, but it would also decline to bound a
+  // pattern ending in `\d` or `\w`, which jison does bound; matching jison's literal escape list
+  // keeps the two in step for patterns this grammar does not happen to contain yet. Verified by
+  // applying this to all 121 rule sources below and comparing the resulting \b set against the
+  // live mermaid rule table: identical, rule index for rule index.
+  function easyKeywordBoundary(source) {
+    if (!/[0-9A-Za-z_]$/.test(source)) return source;
+    if (/\\(?:r|f|n|t|v|s|b|c[A-Z]|x[0-9A-F]{2}|u[a-fA-F0-9]{4}|[0-7]{1,3})$/.test(source)) return source;
+    return source + "\\b";
   }
 
   function tok(name) {
@@ -1239,8 +2803,11 @@
   R(["string"], /["]/, function (lx) { lx.popState(); });
   R(ANY_STATE, /["]/, function (lx) { lx.begin("string"); });
 
-  // A keyword is only ever recognised at a token start, and NODE_STRING below is greedy across `-`,
-  // `.`, `_` and `/`, so `a-graph-node` and `endpoint` are single ids while `graph.node` is not.
+  // R gives each of these a trailing `\b`, so a keyword only wins when the character after it is not
+  // a word character. `classifier`, `styles` and `interpolateZ` therefore fall through to NODE_STRING
+  // below, which is greedy across `-`, `.`, `_` and `/` and takes them whole. `graph.node` still
+  // splits, because `.` is not a word character and the boundary holds there --
+  // flow-singlenode.spec.js:328 requires that split.
   R(INITIAL_ONLY, /style/, tok("STYLE"));
   R(INITIAL_ONLY, /default/, tok("DEFAULT"));
   R(INITIAL_ONLY, /linkStyle/, tok("LINKSTYLE"));
@@ -1260,8 +2827,9 @@
   R(INITIAL_ONLY, /graph/, graphKeyword);
   R(INITIAL_ONLY, /flowchart/, graphKeyword);
   R(INITIAL_ONLY, /subgraph/, tok("subgraph"));
-  // The word boundary saves `endpoint`, and the trailing `\s*` swallows the newline after `end` --
-  // which is why the subgraph production has no separator of its own.
+  // `end` is the one keyword whose boundary is written in the grammar rather than added by R, and
+  // the trailing `\s*` swallows the newline after it -- which is why the subgraph production has no
+  // separator of its own.
   R(INITIAL_ONLY, /end\b\s*/, tok("end"));
   R(INITIAL_ONLY, /_self/, tok("LINK_TARGET"));
   R(INITIAL_ONLY, /_blank/, tok("LINK_TARGET"));
@@ -1403,6 +2971,7 @@
     this.pos = 0;
     this.yytext = "";
     this.stack = ["INITIAL"];
+    this.done = false;
   }
 
   Lexer.prototype.begin = function (condition) { this.stack.push(condition); };
@@ -1413,7 +2982,28 @@
       // `<<EOF>>` is declared INITIAL-only, but jison-lex answers EOF from any state once the input
       // runs out. Reporting a lexical error instead would turn the unterminated-ellipse case into
       // the wrong kind of failure -- flow-text.spec.js:538 wants a parse error, not a hang.
-      if (this.pos >= this.input.length) return { type: "EOF", value: "", pos: this.pos };
+      //
+      // Exhausting the input is not the same moment as answering EOF, and the gap between them is
+      // load-bearing. jison-lex sets `done` as soon as `_input` is empty but still runs the rules
+      // that one time, so a start condition whose rule can match the empty string emits one last
+      // empty token before EOF; only the call after that answers EOF. Six of the rules below can
+      // match empty -- `<acc_title>[^\n]*`, `<acc_descr>[^\n]*`, `<acc_descr_multiline>[^}]*`,
+      // `<callbackname>[^(]*`, `<callbackargs>[^)]*` and `<click>[^\s\n]*` -- and returning EOF the
+      // moment the input ran out lost that token in every one of them. It mattered in both
+      // directions: `accTitle:` with nothing after it parses in mermaid, on the empty
+      // `acc_title_value`, and threw here, which is the failure this parser is not allowed to have;
+      // and an unterminated `accDescr {` block ends in mermaid with an empty
+      // `acc_descr_multiline_value` overwriting what the block had collected, which is why mermaid
+      // reports no description for it while this reported the block's text.
+      //
+      // Run over every prefix of every source in the differential corpus, 15,039 of them, against
+      // real mermaid: 10 rejections that mermaid accepts became agreement, 89 disagreements became
+      // agreement, and 77 sources this used to accept and mermaid refuses now fail here too. One
+      // prefix moved the other way, `click A call ` with the trailing space: the empty CALLBACKNAME
+      // satisfies `CLICK CALLBACKNAME` here while mermaid still refuses it. That is a source this
+      // accepts and mermaid does not, which costs nothing -- the rule runs the other way.
+      if (this.done) return { type: "EOF", value: "", pos: this.pos };
+      if (this.pos >= this.input.length) this.done = true;
 
       var state = this.stack[this.stack.length - 1];
       var matched = null;
@@ -1425,6 +3015,7 @@
         if (m) { matched = { rule: rule, text: m[0] }; break; }
       }
       if (!matched) {
+        if (this.done) return { type: "EOF", value: "", pos: this.pos };
         throw new Error("Lexical error on line " + lineOf(this.input, this.pos) + ": Unrecognized text.");
       }
 
@@ -1434,8 +3025,10 @@
       this.pos += matched.text.length;
       var name = matched.rule.act(this);
       // jison would spin here; a rule that neither consumes input nor changes condition can only be
-      // reached by input mermaid also cannot lex, so failing loudly is the honest answer.
-      if (matched.text.length === 0 && this.stack.length === depth) {
+      // reached by input mermaid also cannot lex, so failing loudly is the honest answer. Past the
+      // end of the input it cannot spin -- `done` ends the loop on the next turn -- and that empty
+      // match is the one jison emits, so the guard has to let it through.
+      if (!this.done && matched.text.length === 0 && this.stack.length === depth) {
         throw new Error("Lexical error on line " + lineOf(this.input, start) + ": Unrecognized text.");
       }
       if (name !== undefined) return { type: name, value: this.yytext, pos: start };

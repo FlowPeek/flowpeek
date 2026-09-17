@@ -15,9 +15,13 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const flow = require(join(root, 'Sources/FlowPeek/Resources/flowpeek-flow.js'));
 
 // What MacMermaidTheme.swift ships, reduced to the keys the projection reads.
+// `monoFontFamily` is among them because the editorial theme paints edge labels in a monospace
+// stack and the renderer measures a label in the face it will be painted in: a theme that sent only
+// the sans sized every backing rect for type nobody sees.
 const EDITORIAL = {
   dark: false,
   fontFamily: "'Geist', sans-serif",
+  monoFontFamily: "'Geist Mono', ui-monospace, monospace",
   themeVariables: { fontSize: '12px' },
   themeCSS: '.fp-ladder { --fp-ladder: on; }',
   arrangement: {
@@ -325,6 +329,96 @@ describe('[Layout] subgraphs', () => {
   });
 });
 
+describe('[Layout] the zone title', () => {
+  // A zone title is not a node label and the two were wrapped at the same number, which is the
+  // defect these are about. `wrappingWidth` is the width at which a NODE label has to start a new
+  // line, and it is a cap because a node cannot be made wider than the room its rank leaves. A zone
+  // has no such cap: it is sized by what is inside it, and by the time the title is shaped that
+  // size is known. Wrapping at 160px inside a zone 1100px wide is what the reader reported.
+
+  /** The widest line of a title, in px, by the metric the renderer measured it with. */
+  function titleWidth(cluster) {
+    const style = { fontFamily: "'Geist', sans-serif", fontSizePX: 12, fontWeight: 600, letterSpacing: '0.06em' };
+    return Math.max(...cluster.titleLines.map((line) => measureText(line, style).width));
+  }
+
+  it('puts a title that fits its zone on one line', () => {
+    // 204px of title in a band 320px wide, and 44px over the 160px a node label gets. Before this
+    // the second number was the only one consulted and the title came out on two lines.
+    const out = draw([
+      'flowchart TB',
+      '  subgraph z["Everything before it answers"]',
+      '    direction LR',
+      '    A[alpha] --> B[beta] --> C[gamma]',
+      '  end',
+      '  C --> D[delta]',
+    ].join('\n'));
+    const z = clusterById(out, 'z');
+    expect(z.titleLines).toEqual(['Everything before it answers']);
+    expect(titleWidth(z)).toBeGreaterThan(160);
+    expect(titleWidth(z)).toBeLessThanOrEqual(z.width - 32);
+  });
+
+  it('the reported title, on the reported source, is one line', () => {
+    // reelect.mmd, as the reader sent it. It came out as "QuoteStatusChangedEve" / "nt 수신 후
+    // 재선정": wrapped at the node width and then cut mid-word by the grapheme fallback, inside a
+    // zone about 1100px wide.
+    const out = draw([
+      'flowchart TB',
+      '    OPa["Original (Hauler1)<br/>derivedQuoteId: Nego-H3"]',
+      '',
+      '    subgraph reelect["QuoteStatusChangedEvent 수신 후 재선정"]',
+      '        N3a["Nego-H3<br/>status: Quoted<br/>isRepresentative: true"]',
+      '        N2a["Nego-H2<br/>status: Requested<br/>isRepresentative: false"]',
+      '        N1a["Nego-H1<br/>status: Requested<br/>isRepresentative: false"]',
+      '    end',
+      '',
+      '    OPa -. "derivedQuoteId 갱신" .-> N3a',
+    ].join('\n'));
+    expect(clusterById(out, 'reelect').titleLines).toEqual(['QuoteStatusChangedEvent 수신 후 재선정']);
+  });
+
+  it('wraps a title that does not fit at a space', () => {
+    // Narrow zone, long title: this one has to wrap, and where it wraps is the whole assertion.
+    // Joining the lines back with the space each break consumed reproduces the title exactly, which
+    // is only true if every break landed on a space.
+    const title = 'A remarkably long subgraph title that will not fit';
+    const out = draw(`flowchart TD\n  subgraph s["${title}"]\n    A --> B\n  end\n  B --> C`);
+    const s = clusterById(out, 's');
+    expect(s.titleLines.length).toBeGreaterThan(1);
+    expect(s.titleLines.join(' ')).toBe(title);
+  });
+
+  it('cuts a title only when there is no space in it to break at', () => {
+    // The grapheme fallback is still right here and stays: a Korean title carries no spaces at all,
+    // and one 380px line in a zone around two 80px nodes is worse for the reader than a cut one.
+    // `join('')` rather than `join(' ')` is the difference from the test above.
+    const title = '요청시점자동네고처리흐름도전체요약본입니다참고하세요';
+    const out = draw(`flowchart TD\n  subgraph s["${title}"]\n    A --> B\n  end\n  B --> C`);
+    const s = clusterById(out, 's');
+    expect(s.titleLines.length).toBeGreaterThan(1);
+    expect(s.titleLines.join('')).toBe(title);
+  });
+
+  it('widens a zone around a title its contents are too narrow for', () => {
+    // Where the room for a title that will not break comes from. Two words, so the line has a break
+    // opportunity and the long one is kept whole; 248px of it, in a zone whose two nodes are 80px
+    // wide. Before this the zone was the width of its contents alone and the title was simply drawn
+    // past the right edge.
+    const out = draw('flowchart TD\n  subgraph s["Supercalifragilisticexpialidocious rules"]\n    A --> B\n  end\n  B --> C');
+    const s = clusterById(out, 's');
+    expect(s.titleLines).toEqual(['Supercalifragilisticexpialidocious', 'rules']);
+    expect(titleWidth(s)).toBeGreaterThan(160);
+    expect(s.labelX + titleWidth(s)).toBeLessThanOrEqual(s.x + s.width);
+    // The contents keep the middle of the widened zone rather than the left padding.
+    const a = byId(out, 'A');
+    const left = a.x - s.x;
+    const right = (s.x + s.width) - (a.x + a.width);
+    expect(Math.abs(left - right)).toBeLessThanOrEqual(4);
+    expect(offGrid(out)).toEqual([]);
+  });
+});
+
 describe('[Layout] node size', () => {
   it('takes its width from the label', () => {
     const out = draw('flowchart TD\n  A[ok] --> B[a considerably longer label]');
@@ -521,6 +615,99 @@ describe('[Layout] edges', () => {
     expect(loop.start.side).toBe('right');
     expect(loop.end.side).toBe('right');
     expect(loop.start.y).not.toBe(loop.end.y);
+  });
+});
+
+describe('[Layout] the room an edge label needs', () => {
+  // A label sits BESIDE its stroke, never on it (SKILL.md §6 rule 2), so in a TB drawing it needs
+  // room ACROSS the ranks -- the axis `gapLabel` does not reserve. Before this the layout counted
+  // only the other one and the placer was left to put the label down somewhere regardless: over 79
+  // sources 41 of 88 labels ended within rule 2's own 8px of a node and 8 outside the viewBox.
+  //
+  // Everything below is stated as a distance the layout has to leave, not as a coordinate, because
+  // where within that room the label ends up is `placeEdgeLabel`'s decision and not this phase's.
+
+  /** The 8px of SKILL.md §6 rule 2, which is also what the layout hands out in grid units. */
+  const GAP = 8;
+  const centreX = (n) => n.x + n.width / 2;
+  const centreY = (n) => n.y + n.height / 2;
+
+  it('makes the drawing wide enough to hold a label with nothing beside it', () => {
+    // One column and one label, which is the whole defect in its smallest form: the run is at the
+    // middle of the column, the label goes beside it, and there is no neighbour to take the room
+    // from -- so the drawing itself has to be that wide. It was 128px against a 144px label.
+    const out = draw('flowchart TD\n  A[Alpha] -->|publishes an event| B[Beta]\n');
+    const [edge] = out.edges;
+    expect(edge.labelWidth).toBeGreaterThan(byId(out, 'A').width);
+    const run = centreX(byId(out, 'A'));
+    expect(out.width - out.padding).toBeGreaterThanOrEqual(run + GAP + edge.labelWidth);
+  });
+
+  it('separates two columns by the label of the connector between them', () => {
+    // The centres, not the facing edges: the stroke leaves the middle of a face, so what the label
+    // has to fit between is one run and the next, whatever the two boxes are.
+    const out = draw([
+      'flowchart TB',
+      '  A1[One] -- "negotiate(adjustRate, original)" --> B1[Two]',
+      '  A2[Three] -- "negotiate(adjustRate, original)" --> B2[Four]',
+    ].join('\n'));
+    const label = out.edges[0].labelWidth;
+    expect(label).toBeGreaterThan(0);
+    for (const [left, right] of [['A1', 'A2'], ['B1', 'B2']]) {
+      const apart = centreX(byId(out, right)) - centreX(byId(out, left));
+      expect(`${left}->${right} ${apart >= label + 2 * GAP}`).toBe(`${left}->${right} true`);
+    }
+  });
+
+  it('takes the room on the side the placer looks at first, and only that side', () => {
+    // `placeEdgeLabel` offers the right of a vertical run before the left, so a TB level reserves
+    // at +x; reserving both sides costs a second corridor per label for a position only reached
+    // when the first is taken. The narrow column here has no label of its own, so any room beside
+    // it came from the wide one next to it.
+    const out = draw([
+      'flowchart TB',
+      '  A[Alpha] -->|a reasonably long edge label| B[Beta]',
+      '  C[Gamma] --> D[Delta]',
+    ].join('\n'));
+    const [labelled] = out.edges;
+    const left = centreX(byId(out, 'A')) < centreX(byId(out, 'C'));
+    const apart = Math.abs(centreX(byId(out, 'C')) - centreX(byId(out, 'A')));
+    // Room on the labelled run's right and none carved out on its left.
+    expect(left).toBe(true);
+    expect(apart).toBeGreaterThanOrEqual(labelled.labelWidth + 2 * GAP);
+    expect(byId(out, 'A').x).toBe(out.padding);
+  });
+
+  it('reserves across the rank in LR too, on the side that direction offers first', () => {
+    // The same rule through the one direction switch: an LR level's runs are horizontal, their
+    // labels go above them, and across-the-rank is y. Nothing here is a transposed TB drawing --
+    // the label is still as wide as it is and as tall as it is.
+    const out = draw('flowchart LR\n  A[Alpha] -->|publishes an event| B[Beta]\n  C[Gamma] --> D[Delta]\n');
+    const [labelled] = out.edges;
+    const apart = Math.abs(centreY(byId(out, 'C')) - centreY(byId(out, 'A')));
+    expect(apart).toBeGreaterThanOrEqual(labelled.labelHeight + 2 * GAP);
+  });
+
+  it('deepens a gap so that labels sharing one corridor stack instead of overlaying', () => {
+    // Two connectors between the same pair of boxes run at one O whatever the ports do with them,
+    // so their labels cannot stand side by side and the gap has to be deep enough to hold both.
+    // This is cand.mmd's shape reduced to two: there, five of them shared a 56px band.
+    const out = draw([
+      'flowchart TB',
+      '  A[Alpha] -- "negotiate(adjustRate, original)" --> B[Beta]',
+      '  B -. "originalQuoteId" .-> A',
+    ].join('\n'));
+    const gap = byId(out, 'B').y - (byId(out, 'A').y + byId(out, 'A').height);
+    const stacked = out.edges[0].labelHeight + out.edges[1].labelHeight;
+    expect(out.edges[1].labelHeight).toBeGreaterThan(0);
+    expect(gap).toBeGreaterThanOrEqual(stacked + 2 * GAP);
+  });
+
+  it('leaves an unlabelled drawing exactly where it was', () => {
+    // The reservation is a response to a label and nothing else. Two drawings that differ only in
+    // whether the link carries text, and the one without is the size it always was.
+    const bare = draw('flowchart TD\n  A[Alpha] --> B[Beta]\n  C[Gamma] --> D[Delta]\n');
+    expect([bare.width, bare.height]).toEqual([240, 184]);
   });
 });
 

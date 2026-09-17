@@ -44,6 +44,7 @@ const flow = require(join(root, 'Sources/FlowPeek/Resources/flowpeek-flow.js'));
 const EDITORIAL = {
   dark: false,
   fontFamily: "'Geist', sans-serif",
+  monoFontFamily: "'Geist Mono', ui-monospace, monospace",
   themeVariables: { fontSize: '12px', lineColor: '#4f5d75', nodeBorder: '#2d3142', mainBkg: '#f5f5f5' },
   themeCSS: '.fp-ladder { --fp-ladder: on; }',
   arrangement: {
@@ -160,11 +161,16 @@ describe('[Fork] the branches of one decision', () => {
   it('mirrors the reported drawing about the decision node', () => {
     // `flowpeek-flow.js` before this: the 충분함 branch dropped straight down from a port 8px left
     // of the apex while the 부족함 branch stepped 44px right and turned 12px lower. Now both step
-    // 44px and both turn at 272.
+    // 44px and both turn at the same height.
+    //
+    // That height is 304 and was 272: the gap under the decision now reserves room for 충분함 and
+    // 부족함 to sit beside their own cross-lines rather than on top of them, so the lane the two
+    // arms turn on sits 32px further down. The mirror is the property under test and it is
+    // untouched -- what moved is where the mirrored pair sits, not that it is one.
     const out = laid(DECISION('결제 진행', '입고 대기 알림'));
     const fork = expectMirror(out, 'C', 'reported');
     expect(fork.map((a) => a.step)).toEqual([-44, 44]);
-    expect(fork.map((a) => a.turn)).toEqual([272, 272]);
+    expect(fork.map((a) => a.turn)).toEqual([304, 304]);
 
     // And as drawn, not just as placed: the two paths are reflections of each other in the line
     // through the apex. A reflection has to be read off the emitted `d` because that is the only

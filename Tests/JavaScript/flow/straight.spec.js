@@ -32,6 +32,7 @@ const flow = require(join(root, 'Sources/FlowPeek/Resources/flowpeek-flow.js'));
 const EDITORIAL = {
   dark: false,
   fontFamily: "'Geist', sans-serif",
+  monoFontFamily: "'Geist Mono', ui-monospace, monospace",
   themeVariables: { fontSize: '12px', lineColor: '#4f5d75', nodeBorder: '#2d3142', mainBkg: '#f5f5f5' },
   themeCSS: '.fp-ladder { --fp-ladder: on; }',
   arrangement: {

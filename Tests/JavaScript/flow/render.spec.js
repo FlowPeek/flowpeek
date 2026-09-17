@@ -20,9 +20,13 @@ const THEME_SWIFT = readFileSync(join(root, 'Sources/FlowPeekCore/MacMermaidThem
 // What MacMermaidTheme.swift ships, reduced to the keys the projection reads. The stylesheet is a
 // stand-in for the real one in every test except the stylesheet-contract block, which reads the
 // Swift source itself.
+// `monoFontFamily` is among them because the editorial theme paints edge labels in a monospace
+// stack and the renderer measures a label in the face it will be painted in: a theme that sent only
+// the sans sized every backing rect for type nobody sees.
 const EDITORIAL = {
   dark: false,
   fontFamily: "'Geist', sans-serif",
+  monoFontFamily: "'Geist Mono', ui-monospace, monospace",
   themeVariables: { fontSize: '12px', lineColor: '#4f5d75', nodeBorder: '#2d3142', mainBkg: '#f5f5f5' },
   themeCSS: '.fp-ladder { --fp-ladder: on; }\n.node rect.basic:not([rx]) { rx: 6px; ry: 6px; }',
   arrangement: {
@@ -1063,6 +1067,101 @@ describe('[Render] declining', () => {
   });
 });
 
+describe('[Render] the zone eyebrow', () => {
+  // A zone title is the one piece of text in the drawing with nowhere else to be: it names the box
+  // it sits in, so it belongs at the top of that box, and a connector INTO the zone has to cross
+  // that same band. The reader reported both halves of it on reelect.mmd -- a dashed connector
+  // straight through the middle of "QuoteStatusChangedEvent" -- and on cand.mmd, where an edge label
+  // landed on "Negotiation Quotes" as well. The route cannot move once its ports and lanes are
+  // settled; the title can, along a band that is several times its own width.
+
+  const GAP = 8;
+
+  /** Every zone and its eyebrow, as the two rects the emitter actually wrote. */
+  function eyebrows(svg) {
+    const style = { fontFamily: "'Geist', sans-serif", fontSizePX: 12, fontWeight: 600, letterSpacing: '0.06em' };
+    const found = [];
+    const re = /<g class="cluster" id="([^"]*)"><rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"\/><g class="cluster-label" transform="translate\((-?\d+),(-?\d+)\)"><text text-anchor="start">(.*?)<\/text>/g;
+    let m;
+    while ((m = re.exec(svg)) !== null) {
+      const lines = [...m[8].matchAll(/<tspan[^>]*>(.*?)<\/tspan>/g)].map((t) => t[1]);
+      // The same two roundings `shapeLabel` applied: a line box is a whole number of grid units and
+      // so is the widest line. Reading them back is what makes this an assertion about the drawing
+      // rather than about the layout's own bookkeeping.
+      const width = Math.ceil(Math.max(...lines.map((l) => measureText(l, style).width)) / 4) * 4;
+      const lineHeight = Math.ceil(measureText('X', style).height / 4) * 4;
+      found.push({
+        id: m[1],
+        zone: { x: Number(m[2]), y: Number(m[3]), width: Number(m[4]), height: Number(m[5]) },
+        title: { x: Number(m[6]), y: Number(m[7]), width, height: lineHeight * lines.length },
+        lines,
+      });
+    }
+    return found;
+  }
+
+  const crosses = ([p, q], r) => Math.max(p.x, q.x) > r.x && Math.min(p.x, q.x) < r.x + r.width
+    && Math.max(p.y, q.y) > r.y && Math.min(p.y, q.y) < r.y + r.height;
+
+  const grow = (r, by) => ({ x: r.x - by, y: r.y - by, width: r.width + 2 * by, height: r.height + 2 * by });
+
+  const REELECT = [
+    'flowchart TB',
+    '    OPa["Original (Hauler1)<br/>derivedQuoteId: Nego-H3"]',
+    '    subgraph reelect["QuoteStatusChangedEvent 수신 후 재선정"]',
+    '        N3a["Nego-H3<br/>status: Quoted<br/>isRepresentative: true"]',
+    '        N2a["Nego-H2<br/>status: Requested<br/>isRepresentative: false"]',
+    '        N1a["Nego-H1<br/>status: Requested<br/>isRepresentative: false"]',
+    '    end',
+    '    OPa -. "derivedQuoteId 갱신" .-> N3a',
+  ].join('\n');
+
+  it('leaves the eyebrow at the zone padding when nothing crosses it', () => {
+    // The home position dd-arch.md asks for, and the one every zone in the corpus keeps. The slide
+    // is a response to a crossing, not a new layout rule.
+    const [edge] = eyebrows(drawn(CORPUS[2]).svg);
+    expect(edge.lines).toEqual(['Edge tier']);
+    expect(edge.title.x - edge.zone.x).toBe(16);
+  });
+
+  it('steps the eyebrow aside from a connector that would run through it', () => {
+    const out = drawn(REELECT);
+    const [zone] = eyebrows(out.svg);
+    expect(zone.lines).toEqual(['QuoteStatusChangedEvent 수신 후 재선정']);
+    // It moved, and it moved along its own band rather than out of it.
+    expect(zone.title.x).toBeGreaterThan(zone.zone.x + 16);
+    expect(zone.title.x + zone.title.width).toBeLessThanOrEqual(zone.zone.x + zone.zone.width - 16);
+    // 8px is what §6 rule 2 asks between a stroke and the text it passes: a connector 2px from a
+    // letter reads as touching it.
+    const through = [];
+    for (const path of edgePaths(out.svg)) {
+      for (const segment of segmentsOf(polyline(path.d))) {
+        if (crosses(segment, grow(zone.title, GAP))) through.push(path.id);
+      }
+    }
+    expect(through).toEqual([]);
+  });
+
+  it('keeps an edge label off the title wherever the title ends up', () => {
+    // The eyebrow is in the label set before any edge label is placed, and the rect that set holds
+    // is the one the slide moves -- so a label cannot chase the title into its new position.
+    const out = drawn(REELECT);
+    const [zone] = eyebrows(out.svg);
+    const re = /<g class="label[^"]*" data-id="[^"]*" transform="translate\((-?\d+),(-?\d+)\)"><rect class="background" x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/g;
+    let m;
+    const over = [];
+    while ((m = re.exec(out.svg)) !== null) {
+      const r = {
+        x: Number(m[1]) + Number(m[3]), y: Number(m[2]) + Number(m[4]),
+        width: Number(m[5]), height: Number(m[6]),
+      };
+      const t = zone.title;
+      if (r.x < t.x + t.width && t.x < r.x + r.width && r.y < t.y + t.height && t.y < r.y + r.height) over.push(r);
+    }
+    expect(over).toEqual([]);
+  });
+});
+
 describe('[Render] a connector it only passes', () => {
   // The defect: in the two-subgraph drawing two long legs ran down x=100 and x=196 while the API
   // Server box spanned exactly 100..196 -- 152px of connector drawn along a border, straight over
@@ -1137,4 +1236,581 @@ describe('[Render] a connector it only passes', () => {
       expect(tight).toEqual([]);
     });
   }
+});
+
+
+describe('[Render] where an edge label lands', () => {
+  // The reader sent three drawings and named the same fault in all three: "negotiate(adjustRate,"
+  // running into the Original box, two "originalQuoteId" masks on top of each other, a third over a
+  // zone title. None of it was the placer being careless -- it scored every position it was offered
+  // and took the least bad one. It was the layout, which sized the inter-rank gaps from the labels
+  // and left the OTHER axis alone: in a TB drawing a label beside a vertical run needs room across
+  // the rank, and nothing had reserved any.
+  //
+  // So these are assertions about the finished markup, at the 8px SKILL.md §6 rule 2 asks for
+  // between a mask and a stroke. Measured at strict overlap they would have passed on reelect.mmd
+  // while the mask ended at x=244 and the node began at x=244.
+
+  const GAP = 8;
+  const grow = (r, by) => ({ x: r.x - by, y: r.y - by, width: r.width + 2 * by, height: r.height + 2 * by });
+  const hits = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width
+    && a.y < b.y + b.height && b.y < a.y + a.height;
+
+  /** Every edge label's backing rect, in the drawing's own frame. */
+  function masks(svg) {
+    const found = [];
+    const re = /<g class="label[^"]*" data-id="([^"]*)" transform="translate\((-?\d+),(-?\d+)\)"><rect class="background" x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/g;
+    let m;
+    while ((m = re.exec(svg)) !== null) {
+      found.push({
+        id: m[1], x: Number(m[2]) + Number(m[4]), y: Number(m[3]) + Number(m[5]),
+        width: Number(m[6]), height: Number(m[7]),
+      });
+    }
+    return found;
+  }
+
+  /** Every node's own rect, which is what a mask may not be flush against. */
+  function boxes(svg) {
+    const found = [];
+    const re = /<g class="node[^"]*" id="([^"]*)" transform="translate\((-?\d+),(-?\d+)\)">([\s\S]*?)<g class="label"/g;
+    let m;
+    while ((m = re.exec(svg)) !== null) {
+      const r = /x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/.exec(m[4]);
+      if (!r) continue;
+      found.push({
+        id: m[1], x: Number(m[2]) + Number(r[1]), y: Number(m[3]) + Number(r[2]),
+        width: Number(r[3]), height: Number(r[4]),
+      });
+    }
+    return found;
+  }
+
+  /** Every zone eyebrow's rect, measured back off the tspans the emitter wrote. */
+  function titles(svg) {
+    const style = { fontFamily: "'Geist', sans-serif", fontSizePX: 12, fontWeight: 600, letterSpacing: '0.06em' };
+    const found = [];
+    const re = /<g class="cluster-label" transform="translate\((-?\d+),(-?\d+)\)"><text[^>]*>(.*?)<\/text>/g;
+    let m;
+    while ((m = re.exec(svg)) !== null) {
+      const lines = [...m[3].matchAll(/<tspan[^>]*>(.*?)<\/tspan>/g)].map((t) => t[1]);
+      found.push({
+        x: Number(m[1]), y: Number(m[2]),
+        width: Math.ceil(Math.max(...lines.map((l) => measureText(l, style).width)) / 4) * 4,
+        height: Math.ceil(measureText('X', style).height / 4) * 4 * lines.length,
+      });
+    }
+    return found;
+  }
+
+  const NEGO = [
+    'flowchart TB',
+    '    subgraph tpt["요청 시점 자동 네고 (TPT) — Original별로 네고 하나씩"]',
+    '        OT2["Original (TPT, Hauler2)<br/>isRepresentative: false"]',
+    '        NT2["Negotiation<br/>isRepresentative: true<br/>derivedQuoteId: (없음)"]',
+    '        OT3["Original (TPT, Hauler3)<br/>isRepresentative: false"]',
+    '        NT3["Negotiation<br/>isRepresentative: true<br/>derivedQuoteId: (없음)"]',
+    '        OT2 -- "negotiate(0, self)" --> NT2',
+    '        OT3 -- "negotiate(0, self)" --> NT3',
+    '    end',
+    '    subgraph am["AM 네고 요청 (PT · VPT) — Original 하나 아래에서 경쟁"]',
+    '        OP["Original (Hauler1)<br/>isRepresentative: true"]',
+    '        C2["Candidate-H2<br/>isDiscarded: true"]',
+    '        C3["Candidate-H3<br/>isDiscarded: true"]',
+    '        N2["Nego-H2 = negotiatedQuotes[0]<br/>isRepresentative: true"]',
+    '        N3["Nego-H3<br/>isRepresentative: false"]',
+    '        N1["Nego-H1<br/>isRepresentative: false"]',
+    '        C2 -- "negotiate(adjustRate, original)" --> N2',
+    '        C3 -- "negotiate(adjustRate, original)" --> N3',
+    '        OP -- "negotiate(adjustRate, self)" --> N1',
+    '        OP -. "derivedQuoteId" .-> N2',
+    '    end',
+  ].join('\n');
+
+  const CAND = [
+    'flowchart TB',
+    '    O["Original (Hauler1)<br/>category: Original"]',
+    '    subgraph candidates["Candidate 생성 (market group 내 hauler별)"]',
+    '        C2["Candidate-H2<br/>category: Original<br/>isDiscarded: true"]',
+    '        C3["Candidate-H3<br/>category: Original<br/>isDiscarded: true"]',
+    '    end',
+    '    subgraph negotiations["Negotiation Quotes"]',
+    '        N1["Nego-H1<br/>category: Negotiation<br/>discardedQuoteId: (없음)"]',
+    '        N2["Nego-H2<br/>category: Negotiation<br/>discardedQuoteId: Candidate-H2.id"]',
+    '        N3["Nego-H3<br/>category: Negotiation<br/>discardedQuoteId: Candidate-H3.id"]',
+    '    end',
+    '    O -- "negotiate(adjustRate, original)" --> N1',
+    '    C2 -- "negotiate(adjustRate, original)" --> N2',
+    '    C3 -- "negotiate(adjustRate, original)" --> N3',
+    '    N1 -. "originalQuoteId" .-> O',
+    '    N2 -. "originalQuoteId" .-> O',
+    '    N3 -. "originalQuoteId" .-> O',
+    '    N2 -. "discardedQuoteId" .-> C2',
+    '    N3 -. "discardedQuoteId" .-> C3',
+    '    O -- "derivedQuoteId (representative)" --> N1',
+  ].join('\n');
+
+  const REPORTED = [['nego', NEGO], ['cand', CAND]];
+  const LABELLED = [
+    'flowchart TD\n  A[Alpha] -->|publishes an event| B[Beta] -->|writes through| C[Gamma]',
+    'flowchart TD\n  H{Hub} -->|route one| A\n  H -->|route two| B\n  H -->|route three| C',
+    'flowchart TD\n  N0 -->|settled| Z[Sink]\n  N1 -->|settled| Z\n  N2 -->|settled| Z',
+    'flowchart LR\n  A[Alpha] -->|publishes an event| B[Beta]\n  C[Gamma] --> D[Delta]',
+    'flowchart BT\n  A[Start] -->|first| B{Is it ready?}\n  B -->|yes| C[(Store)]\n  B -->|no| D((Retry))',
+    ['flowchart RL', '  subgraph z["A zone"]', '    P[One] -->|carries a long note| Q[Two]', '  end',
+      '  Q -->|and another long note| R[Three]'].join('\n'),
+  ];
+  const ALL = [...CORPUS, ...LABELLED, ...REPORTED.map(([, src]) => src)];
+
+  it('keeps every mask inside the drawing', () => {
+    // The plainest failure of the old layout and the one with nothing to argue about: a label
+    // outside the viewBox is clipped and the author's word is gone. There were 8 of them.
+    const outside = [];
+    for (const source of ALL) {
+      const out = drawn(source);
+      for (const mask of masks(out.svg)) {
+        if (mask.x < 0 || mask.y < 0 || mask.x + mask.width > out.width || mask.y + mask.height > out.height) {
+          outside.push(`${name(source)} / ${mask.id}`);
+        }
+      }
+    }
+    expect(outside).toEqual([]);
+  });
+
+  it('keeps every mask 8px clear of every node, zone title and other mask', () => {
+    // One assertion for the three things a mask may not be sharing its place with, because the
+    // reader reported all three on one drawing and a separate test for each would let two of them
+    // pass while the third failed on the same label. 41 of 88 masks were within this of a node.
+    const tight = [];
+    for (const source of ALL) {
+      const out = drawn(source);
+      const found = masks(out.svg);
+      const near = found.map((mask) => grow(mask, GAP));
+      for (let i = 0; i < found.length; i += 1) {
+        for (const box of boxes(out.svg)) {
+          if (hits(near[i], box)) tight.push(`${name(source)} / ${found[i].id} vs node ${box.id}`);
+        }
+        for (const title of titles(out.svg)) {
+          if (hits(near[i], title)) tight.push(`${name(source)} / ${found[i].id} vs a zone title`);
+        }
+        for (let j = i + 1; j < found.length; j += 1) {
+          if (hits(near[i], found[j])) tight.push(`${name(source)} / ${found[i].id} vs ${found[j].id}`);
+        }
+      }
+    }
+    expect(tight).toEqual([]);
+  });
+
+  it('counts the masks it is checking, so an empty pass cannot pass', () => {
+    // The assertions above are all "nothing is wrong", which a reader that found no labels at all
+    // would satisfy. This is the count they are actually made over: 33 masks at the time of
+    // writing, 15 of them on the two reported drawings.
+    let counted = 0;
+    for (const source of ALL) counted += masks(drawn(source).svg).length;
+    expect(counted).toBeGreaterThanOrEqual(30);
+  });
+
+  it('stacks the labels of connectors that share one corridor, on the reported drawing', () => {
+    // cand.mmd: five labelled connectors between one node and one zone, every one of them running
+    // straight down the gap between them. `assignPorts` fans the five ports across the narrower
+    // face, 28px apart against labels 128 to 168px wide, so side by side was never available --
+    // the gap is what had to grow, and the five masks come out at five different heights.
+    const out = drawn(CAND);
+    const rising = masks(out.svg).filter((m) => /_O_|_O_0$|_N\d_O_/.test(m.id)).map((m) => m.y);
+    expect(rising.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(rising).size).toBe(rising.length);
+  });
+
+  it('spaces two lanes of one gap far enough apart to write on both', () => {
+    // The lane pitch is SKILL.md §6 rule 3's 12px, which is what two strokes need and not what a
+    // label between them needs. `H -->|route one| A / |route two| B / |route three| C` drew its
+    // three labels at one height because of it.
+    const out = drawn('flowchart TD\n  H{Hub} -->|route one| A\n  H -->|route two| B\n  H -->|route three| C');
+    const ys = masks(out.svg).map((m) => m.y + m.height / 2);
+    expect(ys.length).toBe(3);
+    const lanes = [...new Set(edgePaths(out.svg)
+      .flatMap((p) => segmentsOf(polyline(p.d)))
+      .filter(([a, b]) => a.y === b.y)
+      .map(([a]) => a.y))];
+    expect(lanes.length).toBeGreaterThan(0);
+    for (const lane of lanes) {
+      for (const mask of masks(out.svg)) {
+        // >= and not >: the label that annotates a lane sits at exactly the gap, by
+        // construction. Grazing the margin is the one placement allowed to be that close.
+        const clear = mask.y >= lane + GAP || mask.y + mask.height <= lane - GAP;
+        expect(`lane ${lane} vs ${mask.id}: ${clear}`).toBe(`lane ${lane} vs ${mask.id}: true`);
+      }
+    }
+  });
+});
+
+describe('[Render] which connector a label belongs to', () => {
+  // Reserving room stops labels landing on each other. It does not tell the reader whose label is
+  // whose. On nego.mmd both halves of that failed at once: "negotiate(adjustRate, self)" sat 84px
+  // to the left of the stroke it names and 8px from a different one, and the reader could not tell
+  // which line either label went with. The mask is 152px wide because the author wrote thirty
+  // characters where SKILL.md §6 asks for fourteen, and beside a vertical run a mask that wide puts
+  // its own middle further from its own line than the next lane is.
+  //
+  // So ownership is scored, and where beside cannot be owned the mask sits ON the run instead --
+  // the line enters one edge of it and leaves the opposite edge, which is what mermaid does on all
+  // three of the drawings the reader sent us alongside ours.
+
+  const GAP = 8;
+  const grow = (r, by) => ({ x: r.x - by, y: r.y - by, width: r.width + 2 * by, height: r.height + 2 * by });
+  const hits = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width
+    && a.y < b.y + b.height && b.y < a.y + a.height;
+  const crosses = ([p, q], r) => Math.max(p.x, q.x) > r.x && Math.min(p.x, q.x) < r.x + r.width
+    && Math.max(p.y, q.y) > r.y && Math.min(p.y, q.y) < r.y + r.height;
+
+  function masks(svg) {
+    const found = [];
+    const re = /<g class="label[^"]*" data-id="([^"]*)" transform="translate\((-?\d+),(-?\d+)\)"><rect class="background" x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/g;
+    let m;
+    while ((m = re.exec(svg)) !== null) {
+      found.push({
+        id: m[1], cx: Number(m[2]), cy: Number(m[3]),
+        x: Number(m[2]) + Number(m[4]), y: Number(m[3]) + Number(m[5]),
+        width: Number(m[6]), height: Number(m[7]),
+      });
+    }
+    return found;
+  }
+
+  function boxes(svg) {
+    const found = [];
+    const re = /<g class="node[^"]*" id="([^"]*)" transform="translate\((-?\d+),(-?\d+)\)">([\s\S]*?)<g class="label"/g;
+    let m;
+    while ((m = re.exec(svg)) !== null) {
+      const r = /x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/.exec(m[4]);
+      if (!r) continue;
+      found.push({
+        id: m[1], x: Number(m[2]) + Number(r[1]), y: Number(m[3]) + Number(r[2]),
+        width: Number(r[3]), height: Number(r[4]),
+      });
+    }
+    return found;
+  }
+
+  /** Every zone: its rect, and its eyebrow's rect measured back off the tspans that were written. */
+  function zones(svg) {
+    const style = { fontFamily: "'Geist', sans-serif", fontSizePX: 12, fontWeight: 600, letterSpacing: '0.06em' };
+    const found = [];
+    const re = /<g class="cluster" id="([^"]*)"><rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"\/>([\s\S]*?)<\/g>/g;
+    let m;
+    while ((m = re.exec(svg)) !== null) {
+      const zone = { x: Number(m[2]), y: Number(m[3]), width: Number(m[4]), height: Number(m[5]) };
+      const t = /<g class="cluster-label" transform="translate\((-?\d+),(-?\d+)\)"><text[^>]*>([\s\S]*?)<\/text>/.exec(m[6]);
+      let title = null;
+      if (t) {
+        const lines = [...t[3].matchAll(/<tspan[^>]*>(.*?)<\/tspan>/g)].map((x) => x[1]);
+        title = {
+          x: Number(t[1]), y: Number(t[2]),
+          width: Math.ceil(Math.max(...lines.map((l) => measureText(l, style).width)) / 4) * 4,
+          height: Math.ceil(measureText('X', style).height / 4) * 4 * lines.length,
+        };
+      }
+      found.push({ id: m[1], zone, title });
+    }
+    return found;
+  }
+
+  /** The four walls of a rect, as segments. A zone is drawn as an outline, not as a fill. */
+  function walls(r) {
+    const a = { x: r.x, y: r.y };
+    const b = { x: r.x + r.width, y: r.y };
+    const c = { x: r.x + r.width, y: r.y + r.height };
+    const d = { x: r.x, y: r.y + r.height };
+    return [[a, b], [b, c], [c, d], [d, a]];
+  }
+
+  function pointToSegment(x, y, [p, q]) {
+    const dx = q.x - p.x;
+    const dy = q.y - p.y;
+    const len = dx * dx + dy * dy;
+    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((x - p.x) * dx + (y - p.y) * dy) / len));
+    return Math.hypot(x - (p.x + t * dx), y - (p.y + t * dy));
+  }
+
+  const distanceTo = (mask, d) => Math.min(...segmentsOf(polyline(d)).map((s) => pointToSegment(mask.cx, mask.cy, s)));
+
+  /**
+   * The corner-to-corner runs of a route, with collinear pieces joined. `polyline` splits a run
+   * at every arc control point, so the 64px stretch a label sits on arrives as a 56px piece and an
+   * 8px one, and a question about how much stroke shows past a mask would be answered about the
+   * wrong length.
+   */
+  function runsOf(d) {
+    const out = [];
+    for (const [p, q] of segmentsOf(polyline(d))) {
+      const last = out[out.length - 1];
+      if (last && ((last[0].x === last[1].x && p.x === q.x && p.x === last[0].x)
+        || (last[0].y === last[1].y && p.y === q.y && p.y === last[0].y))) {
+        last[1] = q;
+        continue;
+      }
+      out.push([p, q]);
+    }
+    return out;
+  }
+
+  /**
+   * Does this leg run THROUGH the mask -- in one edge and out of the opposite one? That is the
+   * on-the-line placement, and it is a different thing from a leg that clips a corner of a mask
+   * standing beside some other part of the same route.
+   */
+  function runsThrough([p, q], mask) {
+    if (p.y === q.y) {
+      return p.y > mask.y && p.y < mask.y + mask.height
+        && Math.min(p.x, q.x) <= mask.x && Math.max(p.x, q.x) >= mask.x + mask.width;
+    }
+    return p.x > mask.x && p.x < mask.x + mask.width
+      && Math.min(p.y, q.y) <= mask.y && Math.max(p.y, q.y) >= mask.y + mask.height;
+  }
+
+  const sitsOn = (mask, d) => runsOf(d).some((leg) => runsThrough(leg, mask));
+
+  const REELECT = [
+    'flowchart TB',
+    '    OPa["Original (Hauler1)<br/>derivedQuoteId: Nego-H3"]',
+    '    subgraph reelect["QuoteStatusChangedEvent 수신 후 재선정"]',
+    '        N3a["Nego-H3<br/>status: Quoted<br/>isRepresentative: true"]',
+    '        N2a["Nego-H2<br/>status: Requested<br/>isRepresentative: false"]',
+    '        N1a["Nego-H1<br/>status: Requested<br/>isRepresentative: false"]',
+    '    end',
+    '    OPa -. "derivedQuoteId 갱신" .-> N3a',
+  ].join('\n');
+
+  const NEGO = [
+    'flowchart TB',
+    '    subgraph tpt["요청 시점 자동 네고 (TPT) — Original별로 네고 하나씩"]',
+    '        OT2["Original (TPT, Hauler2)<br/>isRepresentative: false"]',
+    '        NT2["Negotiation<br/>isRepresentative: true<br/>derivedQuoteId: (없음)"]',
+    '        OT3["Original (TPT, Hauler3)<br/>isRepresentative: false"]',
+    '        NT3["Negotiation<br/>isRepresentative: true<br/>derivedQuoteId: (없음)"]',
+    '        OT2 -- "negotiate(0, self)" --> NT2',
+    '        OT3 -- "negotiate(0, self)" --> NT3',
+    '    end',
+    '    subgraph am["AM 네고 요청 (PT · VPT) — Original 하나 아래에서 경쟁"]',
+    '        OP["Original (Hauler1)<br/>isRepresentative: true"]',
+    '        C2["Candidate-H2<br/>isDiscarded: true"]',
+    '        C3["Candidate-H3<br/>isDiscarded: true"]',
+    '        N2["Nego-H2 = negotiatedQuotes[0]<br/>isRepresentative: true"]',
+    '        N3["Nego-H3<br/>isRepresentative: false"]',
+    '        N1["Nego-H1<br/>isRepresentative: false"]',
+    '        C2 -- "negotiate(adjustRate, original)" --> N2',
+    '        C3 -- "negotiate(adjustRate, original)" --> N3',
+    '        OP -- "negotiate(adjustRate, self)" --> N1',
+    '        OP -. "derivedQuoteId" .-> N2',
+    '    end',
+  ].join('\n');
+
+  const CAND = [
+    'flowchart TB',
+    '    O["Original (Hauler1)<br/>category: Original"]',
+    '    subgraph candidates["Candidate 생성 (market group 내 hauler별)"]',
+    '        C2["Candidate-H2<br/>category: Original<br/>isDiscarded: true"]',
+    '        C3["Candidate-H3<br/>category: Original<br/>isDiscarded: true"]',
+    '    end',
+    '    subgraph negotiations["Negotiation Quotes"]',
+    '        N1["Nego-H1<br/>category: Negotiation<br/>discardedQuoteId: (없음)"]',
+    '        N2["Nego-H2<br/>category: Negotiation<br/>discardedQuoteId: Candidate-H2.id"]',
+    '        N3["Nego-H3<br/>category: Negotiation<br/>discardedQuoteId: Candidate-H3.id"]',
+    '    end',
+    '    O -- "negotiate(adjustRate, original)" --> N1',
+    '    C2 -- "negotiate(adjustRate, original)" --> N2',
+    '    C3 -- "negotiate(adjustRate, original)" --> N3',
+    '    N1 -. "originalQuoteId" .-> O',
+    '    N2 -. "originalQuoteId" .-> O',
+    '    N3 -. "originalQuoteId" .-> O',
+    '    N2 -. "discardedQuoteId" .-> C2',
+    '    N3 -. "discardedQuoteId" .-> C3',
+    '    O -- "derivedQuoteId (representative)" --> N1',
+  ].join('\n');
+
+  const LONG = 'negotiate(adjustRate, original)';
+
+  /** The label-heavy families: many labelled edges in one place, and labels longer than their runs. */
+  const CROWDED = [];
+  for (const dir of ['TD', 'LR', 'BT', 'RL']) {
+    CROWDED.push(
+      `flowchart ${dir}\n  H[Hub] -- "${LONG}" --> A[One]\n  H -- "${LONG}" --> B[Two]\n  H -- "${LONG}" --> C[Three]`,
+      `flowchart ${dir}\n  A[One] -- "${LONG}" --> Z[Sink]\n  B[Two] -- "${LONG}" --> Z\n  C[Three] -- "${LONG}" --> Z`,
+      `flowchart ${dir}\n  A -- "${LONG}" --> B\n  B -- "${LONG}" --> C\n  C -- "${LONG}" --> A`,
+      [`flowchart ${dir}`,
+        '  subgraph one["Zone one with a long name"]', '   A1[Alpha] --> A2[Beta]', '  end',
+        '  subgraph two["Zone two with a long name"]', '   B1[Gamma] --> B2[Delta]', '  end',
+        `  A1 -- "${LONG}" --> B1`, `  A2 -- "${LONG}" --> B2`,
+        '  B2 -. "originalQuoteId" .-> A1', '  B1 -. "discardedQuoteId" .-> A2'].join('\n'),
+      [`flowchart ${dir}`,
+        '  subgraph s1["Left"]', '   L1[L1]', '   L2[L2]', '   L3[L3]', '  end',
+        '  subgraph s2["Right"]', '   R1[R1]', '   R2[R2]', '   R3[R3]', '  end',
+        '  L1 -- "alpha route" --> R1', '  L1 -- "beta route" --> R2', '  L2 -- "gamma route" --> R2',
+        '  L2 -- "delta route" --> R3', '  L3 -- "epsilon route" --> R1', '  L3 -- "zeta route" --> R3',
+        '  R1 -. "back one" .-> L3', '  R3 -. "back two" .-> L1'].join('\n'),
+      [`flowchart ${dir}`, '  X[Outside]',
+        '  subgraph z["A subgraph title long enough to fill its band"]', '   I1[Inner one]', '   I2[Inner two]', '  end',
+        '  X -- "crosses the wall" --> I1', '  X -- "also crosses" --> I2', '  I2 -. "returns" .-> X'].join('\n'),
+      `flowchart ${dir}\n  A1 -->|one| B1\n  A1 -->|two| B2\n  A2 -->|three| B1\n  A2 -->|four| B2\n  B1 -->|five| C1\n  B2 -->|six| C1`,
+      `flowchart ${dir}\n  P[Source] -- "derivedQuoteId (representative)" --> Q[Target]\n  P -. "originalQuoteId" .-> Q`,
+    );
+  }
+
+  const REPORTED = [['nego', NEGO], ['reelect', REELECT], ['cand', CAND]];
+  const ALL = [...CORPUS, ...CROWDED, ...REPORTED.map(([, source]) => source)];
+
+  it('draws enough labels for the assertions below to mean anything', () => {
+    // Every property here is "nothing collides", which a reader that found no masks would satisfy.
+    // 148 masks over 47 sources at the time of writing, 16 of them on the three reported drawings.
+    let counted = 0;
+    for (const source of ALL) counted += masks(drawn(source).svg).length;
+    expect(counted).toBeGreaterThanOrEqual(148);
+    let reported = 0;
+    for (const [, source] of REPORTED) reported += masks(drawn(source).svg).length;
+    expect(reported).toBe(16);
+  });
+
+  it('never lets one mask touch another, on any source in the corpus', () => {
+    // Strict intersection, not the 8px margin the sibling block asserts: that one is the taste rule
+    // and this one is the floor under it. Two masks that intersect make both words unreadable, and
+    // the weight the placer gives that now sits above standing too close to a node -- which is the
+    // trade it actually had to make on `P -- "..." --> Q / P -. "..." .-> Q`, where it had taken a
+    // position that buried one label under the other.
+    const stacked = [];
+    for (const source of ALL) {
+      const found = masks(drawn(source).svg);
+      for (let i = 0; i < found.length; i += 1) {
+        for (let j = i + 1; j < found.length; j += 1) {
+          if (hits(found[i], found[j])) stacked.push(`${name(source)} / ${found[i].id} vs ${found[j].id}`);
+        }
+      }
+    }
+    expect(stacked).toEqual([]);
+  });
+
+  it('never lets a mask touch a node or a zone title, on any source in the corpus', () => {
+    const touching = [];
+    for (const source of ALL) {
+      const svg = drawn(source).svg;
+      for (const mask of masks(svg)) {
+        for (const box of boxes(svg)) if (hits(mask, box)) touching.push(`${name(source)} / ${mask.id} vs node ${box.id}`);
+        for (const z of zones(svg)) {
+          if (z.title && hits(mask, z.title)) touching.push(`${name(source)} / ${mask.id} vs title of ${z.id}`);
+        }
+      }
+    }
+    expect(touching).toEqual([]);
+  });
+
+  it('never lets a mask sit on a zone wall', () => {
+    // A zone is an outline and the masks are painted over it, so a mask straddling a wall erases
+    // the stretch of border it covers: the box stops being a box at exactly the place a label drew
+    // the eye to. Inside is fine and outside is fine -- rule 6 allows a mask over a zone, because
+    // the zone's fill is painted first. It is the wall that is not allowed. Five masks over the
+    // corpus were on one, `Q -->|and another long note| R` among them.
+    const astride = [];
+    for (const source of ALL) {
+      const svg = drawn(source).svg;
+      for (const mask of masks(svg)) {
+        for (const z of zones(svg)) {
+          if (walls(z.zone).some((w) => crosses(w, mask))) astride.push(`${name(source)} / ${mask.id} on ${z.id}`);
+        }
+      }
+    }
+    expect(astride).toEqual([]);
+  });
+
+  it('puts every mask nearer its own connector than any other', () => {
+    // The ambiguity property, stated the way a reader resolves it: a label belongs to the line it
+    // sits nearest. Measured from the mask's middle, because that is what the eye uses and because
+    // it is what makes a wide mask beside a narrow lane fail -- 55 of these 148 masks had some
+    // other connector nearer their middle than their own, "derivedQuoteId" on the reported drawing
+    // among them.
+    //
+    // Two are left, and they are not the placer's to fix. `P -- "..." --> Q / P -. "..." .-> Q`
+    // routes its two connectors 12px apart, and both labels are wider than 128px: every position
+    // on either side has both strokes inside the mask, and so does every position on either line.
+    // Placement cannot separate two lines 12px apart; the lane pitch has to.
+    const KNOWN = [
+      '"flowchart TD" (3 lines) / L_P_Q_0 is nearer L_P_Q_2',
+      '"flowchart BT" (3 lines) / L_P_Q_0 is nearer L_P_Q_2',
+    ];
+    const orphans = [];
+    for (const source of ALL) {
+      const svg = drawn(source).svg;
+      const paths = edgePaths(svg);
+      for (const mask of masks(svg)) {
+        const own = paths.find((p) => p.id === mask.id);
+        if (!own) continue;
+        const mine = distanceTo(mask, own.d);
+        for (const other of paths) {
+          if (other.id === mask.id) continue;
+          if (distanceTo(mask, other.d) < mine) orphans.push(`${name(source)} / ${mask.id} is nearer ${other.id}`);
+        }
+      }
+    }
+    expect(orphans).toEqual(KNOWN);
+  });
+
+  it('leaves the stroke showing past both ends of a mask that sits on it', () => {
+    // The price of the on-the-line placement, and the limit on it. A mask centred on its run hides
+    // the stretch it covers, which SKILL.md §6 rule 2 forbids and which is survivable only while
+    // the line comes out the other side: the reader traces it in, reads the word, and picks it up
+    // again. A mask longer than its run swallows the connector whole, and then there is nothing to
+    // trace -- which is what an all-on-the-line placer did to `OT2 -- "negotiate(0, self)" --> NT2`,
+    // leaving an arrowhead and a 4px stub of its own arrow.
+    const swallowed = [];
+    for (const source of ALL) {
+      const svg = drawn(source).svg;
+      const paths = edgePaths(svg);
+      for (const mask of masks(svg)) {
+        const own = paths.find((p) => p.id === mask.id);
+        if (!own) continue;
+        for (const leg of runsOf(own.d)) {
+          if (!runsThrough(leg, mask)) continue;
+          const [p, q] = leg;
+          const shows = p.y === q.y
+            ? Math.min(p.x, q.x) <= mask.x - GAP && Math.max(p.x, q.x) >= mask.x + mask.width + GAP
+            : Math.min(p.y, q.y) <= mask.y - GAP && Math.max(p.y, q.y) >= mask.y + mask.height + GAP;
+          if (!shows) swallowed.push(`${name(source)} / ${mask.id}`);
+        }
+      }
+    }
+    expect(swallowed).toEqual([]);
+  });
+
+  it('keeps the mask beside the stroke wherever beside is legible', () => {
+    // Rule 2 is still the default and this is the count that says so: sitting on the line is what
+    // the placer falls back to, not what it prefers. An all-on-the-line placer -- mermaid's rule,
+    // tried and rendered -- put 179 of 216 masks over a stroke and stacked 18 of them on each
+    // other; this one puts 44 of 148 over a stroke and stacks none. On a drawing with nothing
+    // crowding it, none at all.
+    let on = 0;
+    let total = 0;
+    for (const source of ALL) {
+      const svg = drawn(source).svg;
+      const paths = edgePaths(svg);
+      for (const mask of masks(svg)) {
+        const own = paths.find((p) => p.id === mask.id);
+        if (!own) continue;
+        total += 1;
+        if (sitsOn(mask, own.d)) on += 1;
+      }
+    }
+    expect(total).toBeGreaterThanOrEqual(148);
+    expect(on / total).toBeLessThan(0.35);
+
+    const plain = drawn('flowchart TD\n  A[Start] --> B{Is it ready?}\n  B -->|yes| C[(Store)]\n  B -->|no| D((Retry))');
+    const plainPaths = edgePaths(plain.svg);
+    for (const mask of masks(plain.svg)) {
+      const own = plainPaths.find((p) => p.id === mask.id);
+      const onLine = sitsOn(mask, own.d);
+      expect(`${mask.id} on its line: ${onLine}`).toBe(`${mask.id} on its line: false`);
+      // And rule 2's gap where it is beside, measured against its own stroke.
+      for (const leg of segmentsOf(polyline(own.d))) {
+        expect(`${mask.id} vs its own stroke: ${crosses(leg, grow(mask, GAP - 1))}`)
+          .toBe(`${mask.id} vs its own stroke: false`);
+      }
+    }
+  });
 });

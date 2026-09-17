@@ -130,6 +130,7 @@ public struct MermaidRenderRequest: Sendable, Equatable {
             renderID: renderID,
             seed: seed,
             fontFamily: theme.fontFamily,
+            monoFontFamily: theme.monoFontFamily,
             themeVariables: theme.variables,
             themeCSS: theme.css,
             dark: theme.appearance == .dark,
@@ -165,6 +166,9 @@ struct MermaidRenderPayload: Codable, Equatable, Sendable {
     let renderID: String
     let seed: String
     let fontFamily: String
+    /// The face edge labels are painted in. The renderer measures a label in the face it will be
+    /// drawn in; a theme whose edge labels are its body face repeats `fontFamily` here.
+    let monoFontFamily: String
     let themeVariables: [String: String]
     let themeCSS: String
     /// Selects mermaid's own light or dark palette as the base, so diagram types that hardcode

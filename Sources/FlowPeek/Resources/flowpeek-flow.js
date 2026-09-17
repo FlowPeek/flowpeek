@@ -3908,12 +3908,22 @@
     return { head: head, tail: parts.slice(i).join("") };
   }
 
-  function wrapOneLine(line, measure, style, maxPX) {
+  // `keepWordsWhole` asks for the grapheme fallback to stay off while the line still has a space to
+  // break at. The zone title is the one caller that asks: a cluster is sized by what is inside it
+  // and can be widened, so a title that does not fit is a reason to give it more room, not a reason
+  // to cut a word in half. reelect.mmd is the source that settled it -- its title came out as
+  // "QuoteStatusChangedEven" / "t 수신 후 재선정" inside a zone 608px wide. A node label cannot be
+  // given room the same way -- it is pinned to the wrapping width -- so it keeps the fallback.
+  //
+  // The fallback is kept even for a title when the line offers nothing else: a CJK title carries no
+  // spaces at all, and one line 900px long is worse for the reader than a cut one.
+  function wrapOneLine(line, measure, style, maxPX, keepWordsWhole) {
     var text = line.replace(/\s+/g, " ").replace(/^ /, "").replace(/ $/, "");
     if (text === "") return [""];
     if (measure(text, style).w <= maxPX) return [text];
 
     var words = text.split(" ");
+    var mayCut = !keepWordsWhole || words.length === 1;
     var out = [];
     var cur = "";
     for (var i = 0; i < words.length; i += 1) {
@@ -3927,7 +3937,7 @@
       // A run with no break opportunity in it -- a URL, a path, or any CJK sentence, which carries
       // no spaces at all -- would otherwise stay one line however long and blow the node out past
       // the wrapping width. Breaking it by grapheme is the only option that is still deterministic.
-      for (;;) {
+      while (mayCut) {
         if (measure(cur, style).w <= maxPX) break;
         var cut = breakToWidth(cur, measure, style, maxPX);
         if (!cut) break;
@@ -3972,14 +3982,14 @@
     });
   }
 
-  function shapeLabel(text, metrics, style, maxPX) {
+  function shapeLabel(text, metrics, style, maxPX, keepWordsWhole) {
     // Split before decoding, never after. `<br/>` is a line break because the sanitizer kept it as
     // markup; `&lt;br/&gt;` is four visible characters because the author escaped it, and decoding
     // first would turn the second into the first.
     var hard = String(text === undefined || text === null ? "" : text).split(BREAK_TAG);
     var lines = [];
     for (var i = 0; i < hard.length; i += 1) {
-      var wrapped = wrapOneLine(decodeRefs(hard[i]), metrics.measure, style, maxPX);
+      var wrapped = wrapOneLine(decodeRefs(hard[i]), metrics.measure, style, maxPX, keepWordsWhole);
       for (var j = 0; j < wrapped.length; j += 1) lines.push(wrapped[j]);
     }
     var widest = 0;
@@ -4402,6 +4412,11 @@
   // the same as the straight `web --> router` arrival beside it. At 20 and 24px nothing further is
   // legible and the corpus costs a further 2.4% and 4.7% of drawing area.
   var ARRIVE = 6;
+  // SKILL.md §6 rule 2 asks for 6-10px between a label's mask and the stroke it annotates, and
+  // `LABEL_GAP_PX` below is the 8 that satisfies it. It is stated here, in grid units, because the
+  // LAYOUT is now the first thing that needs it: a label that has to sit 8px off its own stroke has
+  // to be given 8px to sit in, and only the layout can hand out room.
+  var LABEL_GAP = 2;
 
   function layoutLevel(level, env) {
     var vertical = (level.dir === "TB" || level.dir === "BT");
@@ -4621,6 +4636,57 @@
       for (j = 0; j < layers[i].length; j += 1) items[layers[i][j]].order = j;
     }
 
+    // --- the room a label needs across the rank ---------------------------
+    // An edge label does not sit ON its stroke, it sits BESIDE it (SKILL.md §6 rule 2, so the
+    // connector stays traceable under its own annotation). In a TB level that stroke runs along the
+    // rank axis, so the room its label needs runs ACROSS the rank -- the one axis nothing below
+    // reserves. `gapLabel` reserves the other one, and reserving only that is what drew
+    // `A -->|publishes an event| B` as a 128px-wide drawing with a 144px label hanging off the side
+    // of it: measured over 79 sources, 41 of 88 labels came within rule 2's own 8px of a node, 22
+    // within it of another label, and 8 were outside the viewBox altogether.
+    //
+    // The demand is stated centre to centre rather than as extra node spacing because the stroke
+    // leaves from the middle of a face, not from its edge: a wide box and a narrow one leaving the
+    // same gap between them leave the label different amounts of room, and the label is beside the
+    // STROKE. `assignPorts` fans several connectors across a face afterwards, so this is the
+    // corridor the run is in the middle of rather than the exact O it ends up at.
+    //
+    // BOTH ends claim it, not just the source. Which leg of a one-gap route the label lands beside
+    // is `placeEdgeLabel`'s choice of the longest segment, and the two ends disagree about which
+    // that is: a fork's arms share their source point and diverge at their targets, a fan-in does
+    // the reverse. The two are close to a wash and this is the dearer of them: measured over 79
+    // sources, claiming at the source alone costs 13.1% of drawing area against 13.8% and leaves
+    // one more label inside rule 2's 8px of a stroke, 6 against 5. It is chosen for being the
+    // statement that does not depend on which end of an edge the author happened to write first.
+    var labelRoom = [];
+    for (i = 0; i < m; i += 1) labelRoom.push(0);
+    for (i = 0; i < segments.length; i += 1) {
+      var lseg = segments[i];
+      if (lseg.gap >= maxRank) continue;
+      var lbox = lseg.edge.labelBox;
+      if (!lbox) continue;
+      // The label's extent along O, which is its width in a TB or BT level and its height in an LR
+      // or RL one -- the same switch `gapLabel` makes for the other axis, and for the same reason:
+      // a box is not rotated when the drawing is.
+      var oExtent = vertical ? lbox.w : lbox.h;
+      if (oExtent > labelRoom[lseg.u]) labelRoom[lseg.u] = oExtent;
+      if (oExtent > labelRoom[lseg.v]) labelRoom[lseg.v] = oExtent;
+    }
+    // Which way the placer looks first, in this level's own O frame. `placeEdgeLabel` offers the
+    // right of a vertical run and the top of a horizontal one before the other side, and `localOf`
+    // maps O to +x in TB and BT and to +y in LR and RL with no flip anywhere -- so a vertical level
+    // reserves at +O and a horizontal one at -O. Reserving BOTH sides of every run was measured and
+    // rejected on the number -- 18.5% of drawing area against 13.8%, for a corridor the placer only
+    // reaches when the first one is taken, and it took one label off a stroke to do it.
+    var labelAfter = vertical;
+    // The minimum distance between two neighbours' centres: what they need to not touch, or what the
+    // label between them needs, whichever is larger. `a` is the earlier of the two along the rank.
+    var centreSep = function (a, b) {
+      var plain = (items[a].oSize + items[b].oSize) / 2 + env.spaceU;
+      var room = labelAfter ? labelRoom[a] : labelRoom[b];
+      return room > 0 ? Math.max(plain, room + 2 * LABEL_GAP) : plain;
+    };
+
     // --- coordinates along the rank (the O axis) --------------------------
     var oPos = [];
     for (i = 0; i < m; i += 1) oPos.push(0);
@@ -4628,8 +4694,12 @@
       var cursor = 0;
       for (j = 0; j < layers[i].length; j += 1) {
         var it = items[layers[i][j]];
+        if (j > 0) {
+          var prevIdx = layers[i][j - 1];
+          cursor = oPos[prevIdx] + items[prevIdx].oSize / 2
+            + centreSep(prevIdx, layers[i][j]) - it.oSize / 2;
+        }
         oPos[layers[i][j]] = cursor;
-        cursor += it.oSize + env.spaceU;
       }
     }
 
@@ -4661,7 +4731,9 @@
         }
         var put = [];
         for (i = 0; i < layer2.length; i += 1) {
-          var lowest = (i === 0) ? want[i] : put[i - 1] + items[layer2[i - 1]].oSize + env.spaceU;
+          var lowest = (i === 0) ? want[i]
+            : put[i - 1] + items[layer2[i - 1]].oSize / 2
+              + centreSep(layer2[i - 1], layer2[i]) - items[layer2[i]].oSize / 2;
           put.push(Math.max(want[i], lowest));
         }
         var drift = 0;
@@ -4671,16 +4743,29 @@
       }
     }
 
+    // The label of the LAST run along a rank has no neighbour to take its room from, so the level
+    // itself has to be that wide -- otherwise the corridor `centreSep` reserved for every other
+    // label runs off the end of the viewBox for this one. `labelled chain TD` is the whole story in
+    // one source: one column, two labels, and before this a 128px drawing with both of them outside
+    // it. The bound is the label's own far edge, not a centre-to-centre distance, because there is
+    // nothing on the far side of it to be clear of.
     var minO = 0;
     var first = true;
     for (i = 0; i < m; i += 1) {
-      if (first || oPos[i] < minO) { minO = oPos[i]; first = false; }
+      var low = oPos[i];
+      if (!labelAfter && labelRoom[i] > 0) {
+        low = Math.min(low, oPos[i] + items[i].oSize / 2 - LABEL_GAP - labelRoom[i]);
+      }
+      if (first || low < minO) { minO = low; first = false; }
     }
     for (i = 0; i < m; i += 1) oPos[i] -= minO;
 
     var totalO = 0;
     for (i = 0; i < m; i += 1) {
       var end = oPos[i] + items[i].oSize;
+      if (labelAfter && labelRoom[i] > 0) {
+        end = Math.max(end, oPos[i] + items[i].oSize / 2 + LABEL_GAP + labelRoom[i]);
+      }
       if (end > totalO) totalO = end;
     }
 
@@ -4708,8 +4793,10 @@
     // of drawing area over the 300-source corpus against 2.24% for this.
     var gapLoNeed = [];
     var gapHiNeed = [];
+    var gapStraight = [];
+    var stacked = [];
     for (i = 0; i < maxRank; i += 1) {
-      gapLanes.push(0); gapLabel.push(0);
+      gapLanes.push(0); gapLabel.push(0); gapStraight.push(0); stacked.push(new Map());
       gapLoNeed.push(2 * STUB); gapHiNeed.push(2 * STUB);
     }
     for (i = 0; i < segments.length; i += 1) {
@@ -4749,7 +4836,46 @@
       if (lbl) {
         var along = vertical ? lbl.h : lbl.w;
         if (along > gapLabel[seg.gap]) gapLabel[seg.gap] = along;
+        // A run with no cross-line is labelled beside the run itself, anywhere along it. It is
+        // tracked apart from the rest because a gap that holds both kinds has to hold them at two
+        // different heights -- see the far-face reserve below.
+        if (seg.lo === seg.hi) {
+          if (along > gapStraight[seg.gap]) gapStraight[seg.gap] = along;
+        }
+        // Labels that will be fighting over one corridor, so that the gap can be made deep enough
+        // to STACK them rather than wide enough to stand them side by side. Two runs share a
+        // corridor when they cross the gap at one O -- cand.mmd, five labelled connectors between
+        // one node and one zone, every one of them straight, five labels in a 56px band -- or when
+        // they leave the same item, which is the case a shared O misses: nego.mmd's `OP` sends a
+        // labelled arm and a labelled dotted link into the same gap, `centreSep` reserved ONE
+        // corridor beside it because it takes the widest label and not the sum, and the two masks
+        // landed on top of each other.
+        //
+        // Stacking is what the room costs least in, and it is the only one of the two that works.
+        // Giving each label a corridor of its own across the rank instead -- `labelRoom` summing
+        // rather than taking the widest -- costs 25.4% of drawing area over the 79 sources against
+        // 13.8% for this AND still leaves 4 labels overlapping another, because a rank holding one
+        // item has no corridor to widen and cand.mmd's five connectors run between one node and one
+        // zone. `assignPorts` does fan the shared ports apart afterwards -- 28px in cand.mmd, across
+        // a 168px face -- which is no help against labels 128 to 168px wide.
+        //
+        // The key is exact, not an overlap test: a fan-in's arms all pass over their target's
+        // centre and are still side by side by the time they are labelled, and grouping by overlap
+        // stacked every one of those for nothing.
+        var corridor = (seg.lo === seg.hi) ? ("o" + seg.lo) : ("u" + seg.u);
+        var stack = stacked[seg.gap];
+        var sharing = stack.get(corridor);
+        if (!sharing) { sharing = []; stack.set(corridor, sharing); }
+        sharing.push(along);
       }
+    }
+
+    for (i = 0; i < maxRank; i += 1) {
+      stacked[i].forEach(function (heights) {
+        var depth = (heights.length - 1) * 2 * LABEL_GAP;
+        for (var d = 0; d < heights.length; d += 1) depth += heights[d];
+        if (depth > gapLabel[i]) gapLabel[i] = depth;
+      });
     }
 
     // --- which lane each segment travels ----------------------------------
@@ -4876,6 +5002,79 @@
       if (unit.fork) unit.fork.floor = got + 1;
     }
 
+    // --- how far apart the lanes sit -------------------------------------
+    // A cross-line's label sits beside the cross-line, so the space between two lanes is where one
+    // of them has to go. At the flat LANE_GAP that space is 12px and a one-line label is 24px, which
+    // is why `H -->|route one| A / |route two| B / |route three| C` drew its three labels on top of
+    // one another: the layout had counted the lanes and not what is written along them.
+    //
+    // Per lane rather than one pitch for the whole gap, so that a gap with four lanes of which one
+    // is labelled does not pay the label's pitch three times. No source in the 79 reaches that
+    // shape -- one pitch for the gap measures the same drawing, to the pixel, on every one of them
+    // -- so this is the rule carried through rather than a case measured.
+    //
+    // WHICH side of its lane a label takes is the side `placeEdgeLabel` offers first, carried
+    // through the same one switch the rest of this function uses: it prefers above a horizontal run
+    // and the right of a vertical one, and `localOf` flips R for BT and RL. So the label sits on the
+    // low side of its lane in TB and RL and on the high side in BT and LR, and the room goes there.
+    var laneLabelLo = (level.dir === "TB" || level.dir === "RL");
+    var laneNeed = [];
+    for (i = 0; i < maxRank; i += 1) laneNeed.push([]);
+    for (i = 0; i < segments.length; i += 1) {
+      var ns = segments[i];
+      // Only a segment with a cross-line has a lane to be labelled beside. A straight run took no
+      // lane at all (`takeLane` is never called for lo === hi) and its label is `centreSep`'s
+      // business, across the rank rather than along it.
+      if (ns.gap >= maxRank || ns.lane < 0 || ns.lo === ns.hi) continue;
+      var nbox = ns.edge.labelBox;
+      if (!nbox) continue;
+      var nExtent = vertical ? nbox.h : nbox.w;
+      var here = laneNeed[ns.gap];
+      while (here.length <= ns.lane) here.push(0);
+      if (nExtent > here[ns.lane]) here[ns.lane] = nExtent;
+    }
+    var laneRoom = function (g, L) {
+      var need = laneNeed[g][L] || 0;
+      return need > 0 ? need + 2 * LABEL_GAP : 0;
+    };
+    // Where each lane of a gap sits, measured from the first one. Lane L's label sits between lane
+    // L and its neighbour on the label side, so that neighbour is the one that has to move over.
+    var laneOff = [];
+    for (i = 0; i < maxRank; i += 1) {
+      var offs = [0];
+      for (j = 1; j < gapLanes[i]; j += 1) {
+        offs.push(offs[j - 1] + Math.max(LANE_GAP, laneRoom(i, laneLabelLo ? j : j - 1)));
+      }
+      laneOff.push(offs);
+      // The outermost lane's label has no next lane to take its room from; the gap's own face is
+      // what it is clear of, so the face reserve grows instead. ARRIVE and 2*STUB stay the floor --
+      // this is a label's demand on top of an arrowhead's, not instead of it.
+      var edgeLane = laneLabelLo ? 0 : gapLanes[i] - 1;
+      var edgeRoom = gapLanes[i] > 0 ? laneRoom(i, edgeLane) : 0;
+      if (laneLabelLo) {
+        if (edgeRoom > gapLoNeed[i]) gapLoNeed[i] = edgeRoom;
+      } else if (edgeRoom > gapHiNeed[i]) {
+        gapHiNeed[i] = edgeRoom;
+      }
+      // A gap holding both kinds of label holds them on opposite faces. A cross-line's label is
+      // pinned beside its lane; a straight run's can slide the length of the run, so it is the one
+      // that moves, and it moves to the face the lanes' labels do not use. Without this, the middle
+      // arm of `H -->|route one| A / |route two| B / |route three| C` -- the one arm that IS
+      // straight -- put its label at the same height as the outer arms' and over the top of one of
+      // them. Only when both kinds are present: a gap of straight runs alone has the whole band,
+      // and charging it a second face regardless costs 16px of every such gap -- `labelled chain
+      // TD` goes 272px tall to 304 across its two -- for a further 1.3% of drawing area over the 79
+      // sources and not one clash removed.
+      if (edgeRoom > 0 && gapStraight[i] > 0) {
+        var bothRoom = gapStraight[i] + 2 * LABEL_GAP;
+        if (laneLabelLo) {
+          if (bothRoom > gapHiNeed[i]) gapHiNeed[i] = bothRoom;
+        } else if (bothRoom > gapLoNeed[i]) {
+          gapLoNeed[i] = bothRoom;
+        }
+      }
+    }
+
     var rankSize = [];
     for (i = 0; i <= maxRank; i += 1) rankSize.push(0);
     for (i = 0; i < m; i += 1) if (items[i].rSize > rankSize[items[i].rank]) rankSize[items[i].rank] = items[i].rSize;
@@ -4884,7 +5083,7 @@
     var gapSize = [];
     for (i = 0; i < maxRank; i += 1) {
       var lanes = gapLanes[i];
-      var needed = gapLoNeed[i] + Math.max(0, lanes - 1) * LANE_GAP + gapHiNeed[i];
+      var needed = gapLoNeed[i] + (lanes > 0 ? laneOff[i][lanes - 1] : 0) + gapHiNeed[i];
       // An edge label lives in the gap, so the gap has to hold it. The router decides which side of
       // the stroke it goes on; reserving the room is the only part layout can settle.
       var labelled = gapLabel[i] + 2 * STUB;
@@ -4911,7 +5110,7 @@
     for (i = 0; i < maxRank; i += 1) {
       var bandStart = rankStart[i] + rankSize[i];
       var band = gapSize[i];
-      var used = Math.max(0, gapLanes[i] - 1) * LANE_GAP;
+      var used = gapLanes[i] > 0 ? laneOff[i][gapLanes[i] - 1] : 0;
       var slack = band - gapLoNeed[i] - used - gapHiNeed[i];
       laneAt.push(bandStart + gapLoNeed[i] + Math.floor(slack / 2));
     }
@@ -4946,7 +5145,7 @@
     for (i = 0; i < segments.length; i += 1) {
       var sg2 = segments[i];
       if (sg2.gap >= maxRank) continue;
-      sg2.laneR = (sg2.lane >= 0) ? laneAt[sg2.gap] + sg2.lane * LANE_GAP : laneAt[sg2.gap];
+      sg2.laneR = (sg2.lane >= 0) ? laneAt[sg2.gap] + laneOff[sg2.gap][sg2.lane] : laneAt[sg2.gap];
       sg2.laneLocal = laneCoord(sg2.laneR);
       sg2.laneAxis = vertical ? "y" : "x";
     }
@@ -6074,7 +6273,16 @@
       var title = String(cluster.title || "");
       var header = 0;
       if (title.length > 0) {
-        cluster.label = shapeLabel(title, metrics, metrics.cluster, wrapPX);
+        // The title is wrapped at the room the zone actually has, not at the node wrapping width.
+        // The two are unrelated numbers: `wrappingWidth` is how wide one label may grow before a
+        // box has to get taller, and a box cannot get wider; a zone has no such cap, because it is
+        // sized by what is inside it and `inner` has already been laid out one line above. Wrapping
+        // a title at 160px inside a zone whose band is 576px is what put reelect.mmd's title on
+        // two lines with 416px of that band left empty. The floor keeps a zone around one 80px node
+        // from stacking a three-word title into three lines -- below the wrapping width the zone
+        // grows instead, which is the cheaper of the two.
+        var titleMaxPX = Math.max(px(inner.contentW), wrapPX);
+        cluster.label = shapeLabel(title, metrics, metrics.cluster, titleMaxPX, true);
         // dd-arch.md: the eyebrow sits 4px inside the top of the zone and there is at least 16px
         // between its baseline box and the first enclosed node. The 2 units here plus the padding
         // below buy 20px, which is the near side of that.
@@ -6083,9 +6291,16 @@
         cluster.label = null;
       }
       cluster.header = header;
-      cluster.contentDX = padU;
+      // A title wider than the contents widens the zone rather than hanging off its right edge --
+      // which is what it did before, because the width was the contents' alone. `keepWordsWhole`
+      // above makes that case reachable on purpose: a token with no break in it now overflows the
+      // wrapping width, and this is where the room for it comes from. The contents keep the middle
+      // of the widened zone; leaving them against the left padding put a short row of nodes under
+      // one end of a long title and read as a misalignment rather than as a wide title.
+      var bandU = cluster.label ? Math.max(inner.contentW, cluster.label.w) : inner.contentW;
+      cluster.contentDX = padU + Math.floor((bandU - inner.contentW) / 2);
       cluster.contentDY = padU + header;
-      cluster.w = even(inner.contentW + 2 * padU);
+      cluster.w = even(bandU + 2 * padU);
       cluster.h = even(inner.contentH + 2 * padU + header);
     }
 
@@ -6280,8 +6495,10 @@
   var ARRIVE_PX = px(ARRIVE);
   // SKILL.md §6 rule 2 asks for 6-10px between a label's mask and the stroke it annotates. 8 is the
   // middle of that and the only value in it that is also a grid step, so the mask's own corners
-  // stay on the grid without a second rounding rule.
-  var LABEL_GAP_PX = 8;
+  // stay on the grid without a second rounding rule. Written as the layout's own LABEL_GAP rather
+  // than as an 8 of its own: the layout reserves the room and the placer spends it, and two
+  // spellings of one number is how those two stop agreeing.
+  var LABEL_GAP_PX = px(LABEL_GAP);
   // A self-loop's bulge, and its return leg -- one number, because a loop is symmetric about the
   // face it leaves and lands on. It was half the 32px node spacing, so the loop sat inside the gap
   // the layout already left beside the node rather than reaching the next column; what that missed
@@ -6859,50 +7076,126 @@
       && a.y < b.y + b.height && b.y < a.y + a.height;
   }
 
-  // SKILL.md §6 rules 2 and 6 together: the mask sits clear of its own stroke by LABEL_GAP_PX, and
-  // it sits clear of every node -- nodes are painted last, so a mask that lands under one is
-  // covered and its text becomes a fragment on a node border. Every candidate is offered both
-  // sides of every segment, longest segment first, because the longest run is the one with room
-  // beside it; the fallback when none is clear keeps the label rather than dropping the author's
-  // word, which is the lesser of the two failures.
-  // How badly a mask lands where it is proposed. Zero is what every placement in the measured
-  // corpus scores; the weights only order the failures, and they order them by how much the reader
-  // loses. A mask outside the viewBox is clipped and the word is gone; a mask inside a node is
-  // covered by the node's fill, because nodes are painted last (SKILL.md §6 rule 6); a mask over
-  // another mask makes two words one; a mask over a stroke hides a connector. In that order.
-  function labelPenalty(rect, own, ctx) {
+  // How far a point is from a segment. The mask's centre is the point, because that is the
+  // question a reader answers without thinking: a label belongs to the line it sits nearest.
+  function pointSegDist(x, y, p, q) {
+    var dx = q.x - p.x, dy = q.y - p.y;
+    var len = dx * dx + dy * dy;
+    var t = len === 0 ? 0 : ((x - p.x) * dx + (y - p.y) * dy) / len;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    var ex = x - (p.x + t * dx), ey = y - (p.y + t * dy);
+    return Math.sqrt(ex * ex + ey * ey);
+  }
+
+  // The nearest stroke to (cx, cy) that is NOT part of the route the label annotates. Own segments
+  // are excluded by the identity of their endpoint objects, not by comparing coordinates: `emit`
+  // fills `ctx.drawn` from the very `points` array this route was routed into, and two different
+  // edges running the same lane do share coordinates.
+  function nearestRival(cx, cy, own, ctx) {
+    var best = Infinity;
+    for (var i = 0; i < ctx.drawn.length; i += 1) {
+      var seg = ctx.drawn[i];
+      var mine = false;
+      for (var j = 0; j < own.length; j += 1) {
+        if (own[j][0] === seg[0] && own[j][1] === seg[1]) { mine = true; break; }
+      }
+      if (mine) continue;
+      var d = pointSegDist(cx, cy, seg[0], seg[1]);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  // How badly a mask lands where it is proposed. Zero is what a placement in open canvas scores;
+  // the weights only order the failures, and they order them by how much the reader loses. A mask
+  // outside the viewBox is clipped and the word is gone; a mask inside a node is covered by the
+  // node's fill, because nodes are painted last (SKILL.md §6 rule 6); a mask over another mask
+  // makes two words one; a mask straddling a zone wall cuts the outline of the box it stands in;
+  // a mask over a stroke hides a connector. In that order.
+  //
+  // `sitting` is the one segment the mask is deliberately covering when it is placed ON its own
+  // connector, and it is the only segment of the route exempted -- the legs around the corner from
+  // it are hidden by accident, not by design, and still count.
+  function labelPenalty(rect, own, ctx, sitting) {
     var penalty = 0;
     var i;
     if (rect.x < 0 || rect.y < 0 || rect.x + rect.width > ctx.width || rect.y + rect.height > ctx.height) {
       penalty += 1000;
     }
-    for (i = 0; i < ctx.boxes.length; i += 1) if (rectsOverlap(rect, ctx.boxes[i])) penalty += 100;
-    for (i = 0; i < ctx.labelRects.length; i += 1) if (rectsOverlap(rect, ctx.labelRects[i])) penalty += 50;
-    // Strokes are tested against the mask grown by LABEL_GAP_PX, so "clear" means the gap rule 2
-    // asks for rather than merely not touching: a stroke nearer than 8px counts as a clash. The
-    // annotated segment sits at exactly 8 by construction, which grazes this margin and does not
-    // cross it -- the one placement that is allowed to be that close is the one the gap was
-    // measured from.
+    // Every clearance here is measured at LABEL_GAP_PX, not at strict overlap. A mask whose corner
+    // meets a node's corner has no pixel inside the box and reads as a collision anyway -- which is
+    // exactly what reelect.mmd drew: the mask ended at x=244 and the node began at x=244, and the
+    // reader reported the label as running into the box. Scoring true overlap alone also left the
+    // search indifferent between a flush position and one 8px clear of the same face, so it kept
+    // whichever it reached first. The measurement is the whole argument: over 79 sources NO label
+    // was strictly inside a node and 41 of 88 were within this margin of one.
     var near = {
       x: rect.x - LABEL_GAP_PX, y: rect.y - LABEL_GAP_PX,
       width: rect.width + 2 * LABEL_GAP_PX, height: rect.height + 2 * LABEL_GAP_PX
     };
+    // Two weights per obstacle, because the near margin and a real intersection are not the same
+    // failure. A mask 4px from a node reads as touching it; a mask whose pixels are inside one is
+    // painted over and gone. A mask 4px from another mask is tight; a mask ON another mask makes
+    // both words unreadable, which is why it outranks standing too near a node -- on `P -- "..." -->
+    // Q / P -. "..." .-> Q` the placer had only bad candidates and took a 50 that buried one label
+    // under the other in preference to a 100 that merely stood close to a box.
+    for (i = 0; i < ctx.boxes.length; i += 1) {
+      if (rectsOverlap(rect, ctx.boxes[i])) penalty += 400;
+      else if (rectsOverlap(near, ctx.boxes[i])) penalty += 100;
+    }
+    for (i = 0; i < ctx.labelRects.length; i += 1) {
+      if (rectsOverlap(rect, ctx.labelRects[i])) penalty += 200;
+      else if (rectsOverlap(near, ctx.labelRects[i])) penalty += 50;
+    }
+    // A zone's rect is painted before the labels, so a mask INSIDE one covers nothing (rule 6 says
+    // so in as many words) and a mask outside one is not its business. A mask that overlaps the
+    // rect without being inside it is the third case: it is sitting on the wall, and it erases the
+    // stretch of outline it covers. Measured on 216 labels over 79 sources, 5 did exactly that.
+    for (i = 0; i < ctx.rails.length; i += 1) {
+      var rail = ctx.rails[i];
+      if (!rectsOverlap(near, rail)) continue;
+      var inside = near.x >= rail.x && near.y >= rail.y
+        && near.x + near.width <= rail.x + rail.width
+        && near.y + near.height <= rail.y + rail.height;
+      if (!inside) penalty += 20;
+    }
     for (i = 0; i < ctx.drawn.length; i += 1) {
       if (segmentCrossesRect(ctx.drawn[i][0], ctx.drawn[i][1], near)) penalty += 10;
     }
     // Its own route counts too: the perpendicular offset clears only the segment the label
     // annotates, and a mask wider than that segment reaches the leg around the corner from it.
     for (i = 0; i < own.length; i += 1) {
+      if (sitting && own[i][0] === sitting[0] && own[i][1] === sitting[1]) continue;
       if (segmentCrossesRect(own[i][0], own[i][1], near)) penalty += 10;
     }
     return penalty;
   }
 
-  // SKILL.md §6 rule 2: the mask sits clear of its own stroke by LABEL_GAP_PX so the connector stays
-  // traceable under its own annotation. Every segment is offered both sides, longest first, because
-  // the longest run is the one with open canvas beside it -- and every candidate is scored rather
-  // than the first clear one taken, so that when a crowded drawing has no clear placement the label
-  // lands on the least damaging one instead of wherever the search happened to stop.
+  // Where an edge label goes, and which of the two ways of attaching it to its line is used.
+  //
+  // SKILL.md §6 rule 2 puts the mask BESIDE the stroke with a 6-10px gap so the connector stays
+  // traceable under its own annotation, and that is still the first thing tried on every segment,
+  // both sides, longest first. It is not always available. The rule was written for the labels the
+  // guide asks for -- fourteen characters, all caps -- and the reported sources carry thirty:
+  // `negotiate(adjustRate, original)` is a 152px mask, so BESIDE a vertical run its centre stands
+  // 84px off its own line. In nego.mmd the edge it names and the edge beside it are 16px apart, so
+  // the mask's own stroke was 84px away and a different stroke was 8px away, and the reader
+  // reported exactly that: a label whose owner could not be told. Measured over 79 sources, 63 of
+  // 216 masks had some other connector nearer their centre than their own.
+  //
+  // So the second way: the mask sits ON the run, centred on the stroke, the way mermaid places
+  // every label (see the three *-mermaid.png the reader sent). Ownership is then not a judgement --
+  // the line enters one edge of the mask and leaves the opposite edge on the same axis, and the
+  // distance from the mask to its own connector is zero, which nothing can beat.
+  //
+  // Rejected: doing what mermaid does everywhere. It buys the 63 ambiguous masks by covering all
+  // 216 strokes, and rule 2's gap is what makes the other 153 traceable -- they are already
+  // unambiguous and they lose nothing by staying beside the line. The two are ordered by score
+  // instead: a clean BESIDE scores 0 and wins, an ON scores 4, and an ambiguous BESIDE scores 40.
+  //
+  // ON is offered only where the run is longer than the mask plus a visible tail of stroke at each
+  // end. A mask longer than the segment it sits on swallows the whole connector, and then rule 2's
+  // harm is real: there is nothing left to trace.
   function placeEdgeLabel(edge, points, ctx, preferEarly) {
     if (!(edge.labelWidth > 0) || !(edge.labelHeight > 0)) return null;
     var halfW = half4(edge.labelWidth);
@@ -6911,9 +7204,10 @@
     var own = [];
     for (var i = 0; i + 1 < points.length; i += 1) {
       var p = points[i], q = points[i + 1];
-      own.push([p, q]);
+      var pair = [p, q];
+      own.push(pair);
       segs.push({
-        p: p, q: q, at: i,
+        pair: pair, p: p, q: q, at: i,
         len: Math.abs(q.x - p.x) + Math.abs(q.y - p.y),
         horizontal: p.y === q.y
       });
@@ -6929,26 +7223,33 @@
     var best = null;
     for (i = 0; i < segs.length; i += 1) {
       var seg = segs[i];
-      for (var s = 0; s < 2; s += 1) {
+      var lo = seg.horizontal ? Math.min(seg.p.x, seg.q.x) : Math.min(seg.p.y, seg.q.y);
+      var hi = seg.horizontal ? Math.max(seg.p.x, seg.q.x) : Math.max(seg.p.y, seg.q.y);
+      // Half the mask's extent ALONG the run, which is what decides whether the run can carry it.
+      var alongHalf = seg.horizontal ? halfW : halfH;
+      var onFits = (hi - lo) >= 2 * (alongHalf + LABEL_GAP_PX);
+      for (var m = 0; m < 3; m += 1) {
+        var onLine = (m === 2);
+        if (onLine && !onFits) continue;
         // Above a horizontal run and to the right of a vertical one, which is where the style guide
-        // puts an arrow label; the other side is the second try, not a different rule.
-        var side = seg.horizontal ? (s === 0 ? -1 : 1) : (s === 0 ? 1 : -1);
-        // Three positions along the run, midpoint first. Sliding is what makes a crowded drawing
-        // solvable at all: the midpoint of the longest segment is the reading position, but a
-        // quarter of the way along is still unambiguously that connector's label and is often the
-        // only place with open canvas beside it.
-        var lo = seg.horizontal ? Math.min(seg.p.x, seg.q.x) : Math.min(seg.p.y, seg.q.y);
-        var hi = seg.horizontal ? Math.max(seg.p.x, seg.q.x) : Math.max(seg.p.y, seg.q.y);
+        // puts an arrow label; the other side is the second try, not a different rule. On the line
+        // there is no side.
+        var side = onLine ? 0 : (seg.horizontal ? (m === 0 ? -1 : 1) : (m === 0 ? 1 : -1));
+        // ON keeps a tail of stroke showing past each end of the mask; BESIDE may use the whole run.
+        var aLo = onLine ? lo + alongHalf + LABEL_GAP_PX : lo;
+        var aHi = onLine ? hi - alongHalf - LABEL_GAP_PX : hi;
         var mid = snap4((lo + hi) / 2);
+        if (mid < aLo) mid = aLo;
+        if (mid > aHi) mid = aHi;
         // Every grid step along the run, nearest the midpoint first. Three positions were enough
         // while a fan's legs were long; a rhombus's two branches leave its apex 16px apart and turn
         // within 24px of it, and on `B -->|yes| C / B -->|no| D` every one of the six positions the
         // quarter rule offered was inside 8px of one of the route's own corners. Stepping the run
         // costs a handful of candidates on a diagram this file already budgets nine nodes for.
         var alongs = [mid];
-        for (var step = GRID; mid - step >= lo || mid + step <= hi; step += GRID) {
-          if (mid - step >= lo) alongs.push(mid - step);
-          if (mid + step <= hi) alongs.push(mid + step);
+        for (var step = GRID; mid - step >= aLo || mid + step <= aHi; step += GRID) {
+          if (mid - step >= aLo) alongs.push(mid - step);
+          if (mid + step <= aHi) alongs.push(mid + step);
         }
         for (var a = 0; a < alongs.length; a += 1) {
           var cx, cy;
@@ -6960,15 +7261,116 @@
             cy = alongs[a];
           }
           var rect = { x: cx - halfW, y: cy - halfH, width: edge.labelWidth, height: edge.labelHeight };
-          var penalty = labelPenalty(rect, own, ctx);
+          // The canvas is as wide as the layout made it, and the layout made it wide enough for a
+          // mask BESIDE a run, not for one centred on it: on two parallel labelled chains the room
+          // pass reserves 192px between the columns, and a 176px mask centred on the left column
+          // starts 24px off the left edge. Rather than lose the placement to the viewBox, slide it
+          // back on -- the stroke still runs through the mask, which is the whole of what makes the
+          // label the line's own. The slide is capped at a quarter of the mask, so the stroke stays
+          // inside its middle half and it never reads as standing beside the line again.
+          var slid = 0;
+          if (onLine) {
+            var cap = GRID * Math.floor((seg.horizontal ? halfH : halfW) / (2 * GRID));
+            if (seg.horizontal) {
+              if (rect.y < 0) slid = Math.min(-rect.y, cap);
+              else if (rect.y + rect.height > ctx.height) slid = -Math.min(rect.y + rect.height - ctx.height, cap);
+              cy += slid;
+              rect.y += slid;
+            } else {
+              if (rect.x < 0) slid = Math.min(-rect.x, cap);
+              else if (rect.x + rect.width > ctx.width) slid = -Math.min(rect.x + rect.width - ctx.width, cap);
+              cx += slid;
+              rect.x += slid;
+            }
+          }
+          var penalty = labelPenalty(rect, own, ctx, onLine ? seg.pair : null);
+          // Ambiguity, scored: how far the mask's centre stands from its own stroke, against how
+          // far it stands from the nearest stroke that is not its own. BESIDE, that distance is the
+          // perpendicular offset, which grows with the mask -- a wide label hung off a vertical run
+          // stands further from the line it names than the next lane over is. ON, it is zero, or
+          // the slide if the mask had to come back onto the canvas, and almost nothing can tie it.
+          //
+          // Two weights, because winning by 4px is not winning. On cand.mmd the placer found a
+          // position for "derivedQuoteId (representative)" whose own connector was 76px away and
+          // the sibling connector between the SAME two nodes 80px away: nearest, and unreadable as
+          // an answer. The second weight is deliberately small -- 6 buys a move onto the line,
+          // which costs 4, but never buys a move over a node or another mask. Raising the hard
+          // test to this margin instead of adding a soft one was tried and measured: every
+          // candidate then scored 40, the search lost its gradient, and nego.mmd came back with a
+          // mask 72px from its own line and 33px from a different one, which is the fault itself.
+          var ownDist = onLine ? Math.abs(slid) : (seg.horizontal ? halfH : halfW) + LABEL_GAP_PX;
+          var rival = nearestRival(cx, cy, own, ctx);
+          if (rival <= ownDist) penalty += 40;
+          else if (rival < ownDist + LABEL_GAP_PX) penalty += 6;
+          // What the reader actually loses here, before the ordering between the two ways of
+          // attaching a label is applied. `crowded` is read as a warning slug, and a label sitting
+          // on its own line is a choice this function makes on a clear canvas, not a compromise it
+          // was forced into -- scoring the tie-break into it would have reported 43 crowded
+          // drawings in a corpus of 47.
+          var harm = penalty;
+          // The tie-break that keeps rule 2 the default: an ON placement is worse than a clean
+          // BESIDE one and better than every failure BESIDE can have.
+          if (onLine) penalty += 4;
           if (best === null || penalty < best.penalty) {
-            best = { x: cx, y: cy, rect: rect, penalty: penalty, crowded: penalty > 0 };
+            best = { x: cx, y: cy, rect: rect, penalty: penalty, onLine: onLine, crowded: harm > 0 };
             if (penalty === 0) return best;
           }
         }
       }
     }
     return best;
+  }
+
+  // Where the zone title may sit, and where it ends up.
+  //
+  // A title is the one label in the drawing with no second choice of segment to sit on: it names
+  // the box it is inside and belongs at the top of it. A route has no choice either -- its ports and
+  // its lanes were settled by the layout, and a connector INTO a zone has to cross the zone's top
+  // edge, which is the band the title lives in. Something has to give, and in reelect.mmd that band
+  // is 576px wide and the title 260 of them: the title has room to step aside along it and the
+  // route has none, so the title is what moves.
+  //
+  // Rejected: an opaque plate under the title, painted over the strokes the way a node is. It makes
+  // the title legible whatever crosses it, and it hides 260px of a connector to do it -- the whole
+  // point of §6 rule 2's gap is that a line stays traceable under its own annotation, and a title is
+  // not even the annotation of the line it would be covering.
+  // Also rejected: centring the title, which is what mermaid does and which happens to clear both
+  // reported drawings. It clears them by luck -- the stroke is off-centre in both -- and it gives up
+  // the editorial eyebrow's flush-left position on every zone, including the ones nothing crosses.
+  //
+  // The gap is LABEL_GAP_PX, the same 8px rule 2 asks between a mask and a stroke: a connector 2px
+  // from a letter reads as touching it.
+  function titleIsClear(x, cl, ctx) {
+    var near = {
+      x: x - LABEL_GAP_PX,
+      y: cl.labelY - LABEL_GAP_PX,
+      width: cl.labelWidth + 2 * LABEL_GAP_PX,
+      height: cl.labelHeight + 2 * LABEL_GAP_PX
+    };
+    for (var i = 0; i < ctx.drawn.length; i += 1) {
+      if (segmentCrossesRect(ctx.drawn[i][0], ctx.drawn[i][1], near)) return false;
+    }
+    return true;
+  }
+
+  // The eyebrow's home is the left of the band -- the position the layout reserved and the one
+  // dd-arch.md asks for -- so the search starts there and steps right one grid unit at a time,
+  // which makes the answer the least displacement that clears. `last` keeps the far end inside the
+  // zone's own padding: a title that ran past it would be chrome hanging off the box it names.
+  function slideTitle(cl, rect, ctx) {
+    if (!(cl.labelWidth > 0)) return;
+    if (titleIsClear(cl.labelX, cl, ctx)) return;
+    var pad = cl.labelX - cl.x;
+    var last = cl.x + cl.width - pad - cl.labelWidth;
+    for (var x = cl.labelX + GRID; x <= last; x += GRID) {
+      if (!titleIsClear(x, cl, ctx)) continue;
+      cl.labelX = x;
+      rect.x = x;
+      return;
+    }
+    // Nothing in the band clears it. The title stays at the eyebrow's home rather than at whichever
+    // arbitrary position the search stopped on -- one crossed title in its proper place is easier to
+    // read than one crossed title halfway along a band.
   }
 
   function segmentCrossesRect(p, q, rect) {
@@ -7395,11 +7797,15 @@
     // The zone eyebrows are in the label set before any edge label is placed, so an edge label
     // cannot land on a subgraph's title. They are not obstacles for the strokes: a connector
     // entering a zone has to cross the zone, and the zone rect is painted first, so it is behind
-    // everything either way.
+    // everything either way. The rect object is kept rather than copied, because `slideTitle` moves
+    // it after routing and the edge labels have to see where the title actually ended up.
+    var titles = [];
     for (i = 0; i < drawing.clusters.length; i += 1) {
       var cl = drawing.clusters[i];
       if (cl.labelWidth > 0) {
-        ctx.labelRects.push({ x: cl.labelX, y: cl.labelY, width: cl.labelWidth, height: cl.labelHeight });
+        var titleRect = { x: cl.labelX, y: cl.labelY, width: cl.labelWidth, height: cl.labelHeight };
+        ctx.labelRects.push(titleRect);
+        titles.push({ cluster: cl, rect: titleRect });
       }
     }
 
@@ -7431,6 +7837,10 @@
       if (tail) markers.set(tail + "Start", true);
       if (edge.kind && head === "point") markers.set("fp-" + edge.kind, true);
     }
+
+    // Between the two passes on purpose: every stroke is drawn by now, which is what the title has
+    // to dodge, and no edge label is placed yet, which is what has to dodge the title.
+    for (i = 0; i < titles.length; i += 1) slideTitle(titles[i].cluster, titles[i].rect, ctx);
 
     for (i = 0; i < routed.length; i += 1) {
       if (!routed[i]) continue;

@@ -13,6 +13,13 @@ public struct MacMermaidTheme: Equatable, Sendable {
     public let variables: [String: String]
     public let css: String
     public let fontFamily: String
+    /// The face this theme paints EDGE LABELS in, which need not be `fontFamily` and in the
+    /// editorial theme is not: its `.edgeLabel` rule sets a monospace stack. It is carried in the
+    /// payload because the renderer measures a label before it draws it and has to measure the face
+    /// that will be painted -- measuring the sans and painting the mono made every edge label's
+    /// backing rect narrower than the words on it, which is text spilling off both ends of its own
+    /// mask, visible on cand.mmd's two "originalQuoteId" labels at the edges of the drawing.
+    public let monoFontFamily: String
     /// The spacing and edge shape this theme asks mermaid for. `.unset` means "say nothing", which
     /// is what every theme said before themes were plural.
     public let arrangement: MermaidArrangement
@@ -405,6 +412,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
             variables: variables,
             css: css,
             fontFamily: sans,
+            monoFontFamily: mono,
             // Gaps from the source's own allowed ramp (20/24/32/40/48); 32 and 40 sit between its
             // 24 "standard" and 40 "presentation" figures, and a preview is closer to presentation.
             // `padding` is held here rather than handed to `look: "neo"`, which would replace it
@@ -489,6 +497,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         variables: [String: String],
         css: String,
         fontFamily: String,
+        monoFontFamily: String? = nil,
         arrangement: MermaidArrangement,
         darkInk: String,
         lightInk: String,
@@ -498,6 +507,8 @@ public struct MacMermaidTheme: Equatable, Sendable {
         self.variables = variables
         self.css = css
         self.fontFamily = fontFamily
+        // A theme that paints its edge labels in the body face says nothing, and gets the body face.
+        self.monoFontFamily = monoFontFamily ?? fontFamily
         self.arrangement = arrangement
         self.darkInk = darkInk
         self.lightInk = lightInk
@@ -508,6 +519,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         self.appearance = appearance
         let dark = appearance == .dark
         fontFamily = Self.systemFontStack
+        monoFontFamily = Self.systemFontStack
         arrangement = .unset
         darkInk = LabelContrast.darkInk
         lightInk = LabelContrast.lightInk

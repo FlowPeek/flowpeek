@@ -79,7 +79,20 @@ final class EditorialStructureTests: XCTestCase {
     /// every arrow in a flowchart points at the same shared marker.
     func testAnUnambiguousEdgeCarriesTheAccentAndItsOwnArrowhead() async throws {
         // `web` has two edges out, `mob` one, so the flow into the gateway has a clear main source.
-        let source = Self.hub + "\n    web --> cdn[CDN]"
+        // That edge carries a word, and it has to: the assertion below is that the accent reaches
+        // the label as well as the path, and an unlabelled edge cannot prove it. mermaid emits an
+        // empty label container for every edge regardless, so an unlabelled edge still counted two
+        // -- the second of them an element with nothing in it to paint.
+        let source = """
+        flowchart TD
+            web[Web App] -->|traffic| gw{{API Gateway}}
+            mob[Mobile App] --> gw
+            gw --> auth[Auth]
+            gw --> orders[Orders]
+            orders --> pg[(Postgres)]
+            auth --> deny([Denied])
+            web --> cdn[CDN]
+        """
         let markup = drawing(try await render(source, .editorial).svg)
         XCTAssertEqual(occurrences("fp-focal", in: markup), 1)
         // Counted in class attributes only. The raw token also appears in the cloned marker's id

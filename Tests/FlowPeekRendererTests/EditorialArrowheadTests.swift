@@ -59,9 +59,16 @@ final class EditorialArrowheadTests: XCTestCase {
             marker.contains("M 0 0 L 8 3 L 0 6 z"),
             "the polygon is the source's own, not a scaled version of mermaid's"
         )
-        // The reference point is where the line stops, so the head's body covers its last few
-        // points. Mermaid puts it half way along its triangle; the same fraction of the new box.
-        XCTAssertEqual(try XCTUnwrap(Double(attribute("refX", of: marker) ?? "")), 4, accuracy: 0.01)
+        // The reference point is the tip, not the middle. FlowPeek's own router ends an edge exactly
+        // on the node's boundary, and a centred reference buries the front half of the head under a
+        // node that is painted after it -- which is what every arrow in the first five sample
+        // drawings looked like, a flat-ended trapezoid. mermaid can centre its own because it clips
+        // its edges short of the boundary.
+        XCTAssertEqual(try XCTUnwrap(Double(attribute("refX", of: marker) ?? "")), 8, accuracy: 0.01)
+        // And the head is a fixed 8x6 whatever the stroke under it. Scaling with the stroke made
+        // the accent edge's head two thirds larger than its neighbours', which says something the
+        // diagram does not mean, and pushed five heads fanned onto one face into each other.
+        XCTAssertEqual(attribute("markerUnits", of: marker), "userSpaceOnUse")
         XCTAssertEqual(try XCTUnwrap(Double(attribute("refY", of: marker) ?? "")), 3, accuracy: 0.01)
     }
 

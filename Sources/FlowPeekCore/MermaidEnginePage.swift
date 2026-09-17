@@ -84,6 +84,11 @@ public enum MermaidEnginePage {
     public static let engineResourceExtension = "min.js"
     public static let glueResourceName = "flowpeek-glue"
     public static let glueResourceExtension = "js"
+    /// FlowPeek's own flowchart renderer. Injected between the engine and the glue: it defines
+    /// `window.__flowpeekFlow`, which the glue reads at render time, so load order matters only
+    /// in that both must be in place before the first render -- neither calls the other at load.
+    public static let flowResourceName = "flowpeek-flow"
+    public static let flowResourceExtension = "js"
 
     /// The one call the integrator makes per render; `payload` is `MermaidRenderRequest.payloadJSON()`.
     public static let renderInvocation = "return await window.__flowpeek.render(payload);"

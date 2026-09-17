@@ -527,42 +527,43 @@ describe('[Render] bridges at crossings', () => {
     // write-back), or the one with lighter stroke weight (dashed, muted)". One crossing, held
     // fixed, with the weight of one of its two edges changed underneath it.
     //
-    // `B --> A` and `B --> D` cross in the gap below B -- two legs of one fan, which is where this
-    // router's crossings live -- and each has the straight run a bump needs, which is what makes the
-    // choice between them a choice at all. `A --> Z` and `D --> Z` are load-bearing for that: they
-    // add a rank under the crossing, so both legs run on past it. Without them B's fan turns 8px
-    // after `B --> D`'s corner arc lets go, that edge cannot take a bump at all, and all four
-    // weightings bridge `B --> A` by default -- a test that asserts nothing about importance. The
+    // A four-way fan-in, where `A --> Z`'s cross-line and `B --> Z`'s stub cross in the gap above Z.
+    // What makes the choice between them a choice at all is that BOTH have the room a bump needs --
+    // 8px of straight either side of the crossing, which is a 16px bump's own width. Measured over
+    // the 300-source corpus: 4 crossings in the whole of it have that on both strokes, and this fan
+    // is two of them. Most crossings can only be bridged one way round, and a fixture like that
+    // asserts nothing about importance however its edges are weighted.
+    //
     // The crossing is one point, so which edge carries the bump is the whole assertion: the bridged
-    // path is the one that has an arc in it at all.
+    // path is the one that has an arc in it at all. Either way the bump is centred on that point --
+    // `A --> Z` is interrupted along its horizontal there and `B --> Z` along its vertical.
     const where = (source, index) => bridges(edgePaths(drawn(source).svg)[index].d).map((h) => `${h.at.x},${h.at.y}`);
-    const body = (fourth, fifth) => [
-      'flowchart TD', '  B --> C', '  E --> C', '  B --> E',
-      `  B ${fourth} A`, `  B ${fifth} D`, '  A --> Z', '  D --> Z',
+    const body = (first, second) => [
+      'flowchart TD', `  A ${first} Z`, `  B ${second} Z`, '  C --> Z', '  D --> Z',
     ].join('\n');
-    const AT = '204,124';
+    const AT = '204,88';
 
     // Nothing separates two solid edges, so the tie goes to the one declared later and the first
     // one written stays whole. A tie-break, not a judgement; the four below are the judgement.
     const solid = body('-->', '-->');
-    expect(where(solid, 3)).toEqual([]);
-    expect(where(solid, 4)).toEqual([AT]);
+    expect(where(solid, 0)).toEqual([]);
+    expect(where(solid, 1)).toEqual([AT]);
 
     const dashedFirst = body('-.->', '-->');
-    expect(where(dashedFirst, 3)).toEqual([AT]);
-    expect(where(dashedFirst, 4)).toEqual([]);
+    expect(where(dashedFirst, 0)).toEqual([AT]);
+    expect(where(dashedFirst, 1)).toEqual([]);
 
     const dashedSecond = body('-->', '-.->');
-    expect(where(dashedSecond, 3)).toEqual([]);
-    expect(where(dashedSecond, 4)).toEqual([AT]);
+    expect(where(dashedSecond, 0)).toEqual([]);
+    expect(where(dashedSecond, 1)).toEqual([AT]);
 
     const thickFirst = body('==>', '-->');
-    expect(where(thickFirst, 3)).toEqual([]);
-    expect(where(thickFirst, 4)).toEqual([AT]);
+    expect(where(thickFirst, 0)).toEqual([]);
+    expect(where(thickFirst, 1)).toEqual([AT]);
 
     const thickSecond = body('-->', '==>');
-    expect(where(thickSecond, 3)).toEqual([AT]);
-    expect(where(thickSecond, 4)).toEqual([]);
+    expect(where(thickSecond, 0)).toEqual([AT]);
+    expect(where(thickSecond, 1)).toEqual([]);
   });
 });
 

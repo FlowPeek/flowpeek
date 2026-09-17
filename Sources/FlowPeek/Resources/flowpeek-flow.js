@@ -4386,6 +4386,22 @@
   // SKILL.md §6 rule 3: two connectors that run parallel must stay ≥12px apart along their whole
   // length or the reader cannot trace either one.
   var LANE_GAP = 3;
+  // What an ARRIVING edge needs between the face it lands on and the last place it may turn, where
+  // STUB is what a LEAVING one needs. The two ends are not symmetric because only one of them
+  // carries an arrowhead: the head is 8px long with its reference at the tip (`markerWidth 8`,
+  // `refX 8`, in `markerMarkup`), so it eats the last 8px of the path, and a corner one stub from the
+  // face leaves 8 - cornerRadius = 4px of line under it. Six units is 24px, and cornerRadius caps
+  // at two units, so the leg spends 8px on the fillet, shows 8px of shaft, and gives the last 8px
+  // to the head.
+  //
+  // Rendered at 1x and at 2x through DiagramExporter and looked at side by side: the two-subgraph
+  // drawing's `worker --> web` arrival at five settings of this. At 4px of straight -- what shipped
+  // for that edge -- the head and the elbow arc are one shape and the head reads as a barb hanging
+  // off the horizontal run rather than as the end of a line. At 12px the arc still lets go inside
+  // the head's own length. At 16px, this value, the head reads as head-plus-stem,
+  // the same as the straight `web --> router` arrival beside it. At 20 and 24px nothing further is
+  // legible and the corpus costs a further 2.4% and 4.7% of drawing area.
+  var ARRIVE = 6;
 
   function layoutLevel(level, env) {
     var vertical = (level.dir === "TB" || level.dir === "BT");
@@ -4670,33 +4686,194 @@
 
     // --- the inter-rank gaps ----------------------------------------------
     // Sized last, because only now is it known how many edges have to move sideways between two
-    // ranks. Each of those gets its own lane, 12px from the next, which is SKILL.md §6 rule 3 held
-    // by the layout rather than left to the router to discover it cannot hold it.
+    // ranks, and which of them can travel side by side. A lane is 12px from the next, which is
+    // SKILL.md §6 rule 3 held by the layout rather than left to the router to discover it cannot
+    // hold it. On top of the lanes the gap reserves each of its two faces -- 2*STUB to turn away
+    // from one, ARRIVE to arrive at one -- which at the default 40px rank spacing tile it exactly:
+    // 16 + 24.
     //
     // "Has to move sideways" is read off the two boxes' centres, not off the two ports, because the
     // ports are fanned globally afterwards and a face can carry edges from more than one level. So
     // two edges joining the same pair of columns share the band centre and the router jogs them the
     // few px their fanned ports differ by. What that leaves unguaranteed is checked rather than
     // assumed: "never runs two connectors along one lane" in layout.spec.js asserts that edges
-    // sharing a lane occupy disjoint stretches of it. A lane per segment regardless would make every
-    // gap taller on every diagram to pay for a case that suite has not produced.
+    // sharing a lane occupy disjoint stretches of it.
     var gapLanes = [];
     var gapLabel = [];
-    for (i = 0; i < maxRank; i += 1) { gapLanes.push(0); gapLabel.push(0); }
+    // How much of the gap each of its two faces has to be left alone for. A gap is not symmetric:
+    // the face an edge LEAVES needs a stub plus room to round the corner off it, and the face an
+    // edge ARRIVES at needs that plus the arrowhead and a shaft behind it. Which face is which is a
+    // property of the edges in the gap, not of the gap, so it is read off them -- an all-forward
+    // gap only ever has arrivals on its far face, and reserving ARRIVE on both instead cost 6.47%
+    // of drawing area over the 300-source corpus against 2.24% for this.
+    var gapLoNeed = [];
+    var gapHiNeed = [];
+    for (i = 0; i < maxRank; i += 1) {
+      gapLanes.push(0); gapLabel.push(0);
+      gapLoNeed.push(2 * STUB); gapHiNeed.push(2 * STUB);
+    }
     for (i = 0; i < segments.length; i += 1) {
       var seg = segments[i];
       if (seg.gap >= maxRank) continue;
-      if (centreOf(seg.u) !== centreOf(seg.v)) {
-        seg.lane = gapLanes[seg.gap];
-        gapLanes[seg.gap] += 1;
-      } else {
-        seg.lane = -1;
-      }
+      // The target's rank, which is the high end for a forward edge and the low end for a back one.
+      // Only the segment adjacent to it can be the one that arrives, and there is exactly one.
+      var segEdge = seg.edge;
+      var segBack = rank[segEdge.a.slot] > rank[segEdge.b.slot];
+      var segTargetRank = segBack ? segEdge.lowRank : segEdge.highRank;
+      if (segTargetRank === seg.gap && ARRIVE > gapLoNeed[seg.gap]) gapLoNeed[seg.gap] = ARRIVE;
+      if (segTargetRank === seg.gap + 1 && ARRIVE > gapHiNeed[seg.gap]) gapHiNeed[seg.gap] = ARRIVE;
+      // The stretch of the gap this segment crosses, so the assignment below can ask whether two of
+      // them would actually share any of a lane rather than counting them.
+      var cu = centreOf(seg.u);
+      var cv = centreOf(seg.v);
+      seg.lo = Math.min(cu, cv);
+      seg.hi = Math.max(cu, cv);
+      seg.lane = -1;
+      // Which node this segment LEAVES, when it leaves one at all: the low end of a forward edge,
+      // the high end of a back one, and only where this is the segment next to that node. That node
+      // plus that direction IS the fork -- "the edges leaving one node on one face, the same way" --
+      // because `chooseSides` hands every ranked edge the face its direction names, so one node and
+      // one direction can only be one face.
+      //
+      // An edge with a corridor to travel is not an arm of it, which is the same line `mirrorForks`
+      // draws and for the same reason: its cross-line is a step onto a corridor several ranks long,
+      // not a branch beside the others, and pairing it with one would ladder a mirror that the port
+      // pass is never going to draw.
+      seg.forkAt = (segEdge.chain.length > 2) ? -1
+        : ((!segBack && seg.gap === segEdge.lowRank) ? seg.u
+          : ((segBack && seg.gap + 1 === segEdge.highRank) ? seg.v : -1));
+      seg.forkBack = segBack;
+      seg.forkOff = (seg.forkAt < 0) ? 0
+        : ((seg.forkAt === seg.u ? cv : cu) - centreOf(seg.forkAt));
       var lbl = seg.edge.labelBox;
       if (lbl) {
         var along = vertical ? lbl.h : lbl.w;
         if (along > gapLabel[seg.gap]) gapLabel[seg.gap] = along;
       }
+    }
+
+    // --- which lane each segment travels ----------------------------------
+    // A running counter used to hand every segment in a gap a lane of its own, in the order the
+    // edges were declared. That is what made a decision fork's two branches turn at two different
+    // heights -- the reader who reported it could see the asymmetry follow the source's line order
+    // and nothing in the drawing -- and on a five-way fan it also laddered the right-hand arms
+    // inner-first, which put an inner arm's cross-line across an outer arm and cost a bridge hop.
+    //
+    // So a fork's arms are laddered as MIRROR PAIRS. Sort the arms of one fork by where along the
+    // rank they are going, pair the outermost with the outermost inwards, and give each pair one
+    // lane: arm k and arm n-1-k turn at the same height by construction, whatever their targets are
+    // called. The pairs ladder outwards-first, the outermost taking the lane nearest the node they
+    // leave, because the other order is the one that crosses -- an inner arm's cross-line would have
+    // to pass under an outer arm's, and that is the hop the fan was drawing.
+    //
+    // Everything else first-fits alongside them. Two segments may share a lane when the stretches
+    // they cross are disjoint, which is the property "never runs two connectors along one lane" in
+    // layout.spec.js has always asserted and which the counter, handing out a lane apiece, could
+    // only ever meet by never sharing. Touching at one point counts as disjoint: a fork's two arms
+    // meet at their own source's centre and nowhere else, and their ports there are 16px apart.
+    // Measured over the 312 drawings the corpus lays out: 2 pairs shared a lane before this and 83
+    // do now, and the pairs that overlap along the one they share are the same 2 in both -- a
+    // pre-existing case in the nested-subgraph source, untouched, not one of the 81 new ones.
+    var laneHeld = [];
+    for (i = 0; i < maxRank; i += 1) laneHeld.push([]);
+    var laneFits = function (g, L, list) {
+      var held = laneHeld[g][L];
+      if (!held) return true;
+      for (var q = 0; q < list.length; q += 1) {
+        for (var w = 0; w < held.length; w += 1) {
+          if (Math.min(list[q].hi, held[w][1]) - Math.max(list[q].lo, held[w][0]) > 0) return false;
+        }
+      }
+      return true;
+    };
+    var takeLane = function (g, list, from) {
+      var L = from;
+      while (!laneFits(g, L, list)) L += 1;
+      while (laneHeld[g].length <= L) laneHeld[g].push([]);
+      for (var q = 0; q < list.length; q += 1) {
+        list[q].lane = L;
+        laneHeld[g][L].push([list[q].lo, list[q].hi]);
+      }
+      if (L + 1 > gapLanes[g]) gapLanes[g] = L + 1;
+      return L;
+    };
+
+    var forks = new Map();
+    for (i = 0; i < segments.length; i += 1) {
+      var fs = segments[i];
+      if (fs.gap >= maxRank || fs.forkAt < 0) continue;
+      var fkey = fs.gap + "|" + fs.forkAt + "|" + (fs.forkBack ? "b" : "f");
+      if (!forks.has(fkey)) forks.set(fkey, []);
+      forks.get(fkey).push(fs);
+    }
+    // A lane is claimed by a UNIT: one mirror pair of a fork, or one segment on its own. Units go in
+    // the order their edges were DECLARED, which is the order the counter used, so a gap that holds
+    // no fork comes out of this exactly as it went in. Two orders that read as more principled were
+    // built and measured, and each cost a bridge hop somewhere:
+    //   * furthest-travelling unit first. Inside a fork that IS the rule -- an arm that crosses
+    //     further has to turn sooner or the shorter one's cross-line runs through it -- but a fan-IN
+    //     shares its point at the other end of the gap and wants the opposite. `fan-in-TD` and
+    //     `fan-in-LR` went from 1 hop to 2 each, 17 over the corpus against 14.
+    //   * forks claiming their lanes before anything else in the gap. That pushes a two-rank edge
+    //     out past an arm travelling less far than it does: `B --> C / E --> C / B --> E / B --> A /
+    //     B --> D` in render.spec.js went from 1 hop to 3.
+    // Declaration order costs neither and still saves two: 16 hops over the corpus before, 14 after.
+    var units = [];
+    forks.forEach(function (arms) {
+      if (arms.length < 2) return;
+      arms.sort(function (p, q) { return (p.forkOff - q.forkOff) || (p.edge.index - q.edge.index); });
+      for (var a2 = 0; a2 < arms.length; a2 += 1) arms[a2].inFork = true;
+      var tiers = [];
+      for (var k = 0; k < arms.length; k += 1) {
+        var t = Math.min(k, arms.length - 1 - k);
+        if (!tiers[t]) tiers[t] = [];
+        tiers[t].push(arms[k]);
+      }
+      // One index for the whole fork, so that its pairs sort together and in ladder order. A pair's
+      // own edges will not do: tier order is position order and an edge index is declaration order,
+      // and the two need not agree -- a fork whose inner pair was written first would sort ahead of
+      // its own outer pair and take the lower lane. Nothing in the corpus does that, and every
+      // measurement is identical with this line and without it; it is what lets the ladder below be
+      // stated as a rule rather than held by the order the source happened to be written in.
+      var forkIndex = arms[0].edge.index;
+      for (var a3 = 1; a3 < arms.length; a3 += 1) forkIndex = Math.min(forkIndex, arms[a3].edge.index);
+      var fork = { tiers: [], back: arms[0].forkBack };
+      for (var t2 = 0; t2 < tiers.length; t2 += 1) {
+        var tier = tiers[t2];
+        if (!tier) continue;
+        // The axis of an odd fan: one arm, going nowhere along the rank. It is drawn straight, so
+        // there is no cross-line to reserve a lane for. A tier of two keeps its lane even when one
+        // of the pair is a point, because `mirrorForks` gives that arm a step to match its partner.
+        if (tier.length === 1 && tier[0].lo === tier[0].hi) continue;
+        fork.tiers.push({ segs: tier, index: forkIndex, fork: fork });
+      }
+      // Lane 0 is the one nearest the gap's LOW face, which is the face a forward fork leaves by and
+      // the face a back fork arrives at, so a back fork ladders the other way round -- its innermost
+      // pair takes the lowest lane, which puts its outermost arm nearest the node it is leaving.
+      // Ranking turns most declared back edges into forward ones, and no source in the 328-source
+      // corpus produces a back fork of two arms at all: 7 segments there qualify as one arm of one
+      // and no two of them ever share a node. So this line is the rule carried through rather than a
+      // case measured, and `forkBack` is in the key above for the reachable half of the same point --
+      // a node with one back arm and two forward ones is not a fork of three.
+      if (fork.back) fork.tiers.reverse();
+      for (var t4 = 0; t4 < fork.tiers.length; t4 += 1) {
+        fork.tiers[t4].step = t4;
+        units.push(fork.tiers[t4]);
+      }
+    });
+    for (i = 0; i < segments.length; i += 1) {
+      var rest = segments[i];
+      if (rest.gap >= maxRank || rest.lo === rest.hi) continue;
+      if (rest.inFork) continue;
+      units.push({ segs: [rest], index: rest.edge.index, fork: null, step: 0 });
+    }
+    units.sort(function (p, q) { return (p.index - q.index) || (p.step - q.step); });
+    for (i = 0; i < units.length; i += 1) {
+      var unit = units[i];
+      var floorL = unit.fork ? (unit.fork.floor || 0) : 0;
+      var got = takeLane(unit.segs[0].gap, unit.segs, floorL);
+      // A fork's pairs ladder outwards, one lane apart at least, whatever else claims the gap first.
+      if (unit.fork) unit.fork.floor = got + 1;
     }
 
     var rankSize = [];
@@ -4707,7 +4884,7 @@
     var gapSize = [];
     for (i = 0; i < maxRank; i += 1) {
       var lanes = gapLanes[i];
-      var needed = 2 * STUB + Math.max(0, lanes - 1) * LANE_GAP + 2 * STUB;
+      var needed = gapLoNeed[i] + Math.max(0, lanes - 1) * LANE_GAP + gapHiNeed[i];
       // An edge label lives in the gap, so the gap has to hold it. The router decides which side of
       // the stroke it goes on; reserving the room is the only part layout can settle.
       var labelled = gapLabel[i] + 2 * STUB;
@@ -4722,12 +4899,21 @@
     }
     var totalR = at2;
 
+    // Inside the two reserves, not across the whole band. Centring across the band put the lane the
+    // gap was sized for in a place the router could not take it: a cross-line is clamped between
+    // the two stubs the route leaves its ports on, so a lane closer to the arrival face than ARRIVE
+    // is outside the range `connect` may choose from, and every edge whose lane fell outside it
+    // dropped to the same fallback midpoint. This and the inclusive bound in `crossCandidates` go
+    // together and neither works alone: with either one missing, 7 further pairs of connectors came
+    // within 12px of each other over the corpus -- SKILL.md §6 rule 3 -- and with both, none.
+    // `gapSize` is a max over `needed`, which is `lo + used + hi`, so the slack cannot go negative.
     var laneAt = [];
     for (i = 0; i < maxRank; i += 1) {
       var bandStart = rankStart[i] + rankSize[i];
       var band = gapSize[i];
       var used = Math.max(0, gapLanes[i] - 1) * LANE_GAP;
-      laneAt.push(bandStart + Math.floor((band - used) / 2));
+      var slack = band - gapLoNeed[i] - used - gapHiNeed[i];
+      laneAt.push(bandStart + gapLoNeed[i] + Math.floor(slack / 2));
     }
 
     // --- one switch, four directions --------------------------------------
@@ -5356,6 +5542,8 @@
 
     for (i = 0; i < model.edges.length; i += 1) desirePorts(model.edges[i], model);
 
+    mirrorForks(faces);
+
     for (i = 0; i < faces.length; i += 1) {
       var f = faces[i];
       if (f.fixed) continue;
@@ -5483,6 +5671,100 @@
 
   function viaAlong(face, level, v) {
     return face.alongX ? (level.originX + v.lx) : (level.originY + v.ly);
+  }
+
+  var FACING_SIDE = { top: "bottom", bottom: "top", left: "right", right: "left" };
+
+  // A fork's branches have to read as a pair.
+  //
+  // `desirePorts` answers for one edge at a time, so each branch of a decision aims at its OWN
+  // target and nothing compares the two. On the Korean decision source that is the whole defect the
+  // reader reported: `결제 진행` is an 88px box and the branch reaches it straight down, `입고 대기
+  // 알림` is a 120px box whose landing run starts 44px to the right, so that branch is clamped and
+  // steps. One branch a bare vertical, one an S. Exchanging two branch labels exchanges which is
+  // which -- on `C{Check} --> L[Go]` / `C --> R[A considerably longer label here]` the left stepped
+  // 44px and the right was straight, and the other way round the left was straight and the right
+  // stepped 40 -- which is the reader's own test and why "no influence from the text" is the
+  // requirement and not a nicety.
+  //
+  // So the branches are settled together. The arms of one fork -- the edges LEAVING one face, in the
+  // rank direction that face names, each reaching its target directly -- are sorted across the rank
+  // and paired outermost-with-outermost, and each pair is given one distance either side of the
+  // face's own centre: the LARGER of what the two asked for, clamped into the stretch both landing
+  // runs can hold. Larger rather than smaller because the arm that has to step furthest is the one
+  // with no choice -- its target's run does not reach any closer -- and matching it costs the other
+  // arm only a longer cross-line. Where no distance suits both -- two targets on the same side of
+  // the apex, or a near one too small to reach out as far as a far one has to -- the pair is left as
+  // `desirePorts` had it rather than pushed somewhere neither box wants it. 23 of the corpus's 66
+  // pairs are that; the drawing is lopsided there because the BOXES are, and nothing a connector can
+  // do about it would be an improvement. The odd arm of an odd fan is the axis of symmetry and
+  // goes to the centre.
+  //
+  // Only a preference is written. `placeFace` still owns the face and still holds rule 4's 12px, so
+  // a target face carrying other connectors gives the fork what it can and no more.
+  //
+  // An arm travelling a corridor is not one of these: its first station is the corridor the layout
+  // reserved, several ranks long, and aiming it at a mirror point instead would bend it at both ends
+  // to buy symmetry with a branch that is not beside it anyway.
+  function mirrorForks(faces) {
+    for (var i = 0; i < faces.length; i += 1) {
+      var f = faces[i];
+      var arms = [];
+      for (var g = 0; g < f.group.length; g += 1) {
+        var att = f.group[g];
+        // `end === 0` is the end the edge leaves by, whichever way round the ranks are: a back
+        // edge's start attachment is on its source's far face, and that face is still a fork face.
+        if (att.end !== 0 || att.edge.selfLoop) continue;
+        if ((att.edge.via || []).length) continue;
+        var far = att.edge.endAtt;
+        if (!far || !far.face) continue;
+        if (far.face.alongX !== f.alongX || far.side !== FACING_SIDE[f.side]) continue;
+        arms.push(far);
+      }
+      if (arms.length < 2) continue;
+      // Sorted by where the TARGETS stand across the rank, not by what they asked for: two arms
+      // clamped to the same end of their runs ask for the same thing and would pair with themselves.
+      arms.sort(function (p, q) {
+        var pk = f.alongX ? centreX(p.box) : centreY(p.box);
+        var qk = f.alongX ? centreX(q.box) : centreY(q.box);
+        return (pk - qk) || (p.edge.index - q.edge.index);
+      });
+      var centre = Math.round(f.base + faceCentre(f));
+      // Where an arm may land, in the drawing's own frame. A shape that answers for its own port --
+      // a circle, a cylinder's crest, a rhombus's apex -- has a run of one point, and that point is
+      // already placed and read back rather than asked for: the arm cannot move, so it is the one
+      // that sets the distance and its partner is the one that matches.
+      var reachOf = function (a) {
+        if (a.face.fixed) {
+          var pt = a.edge.endPoint;
+          if (pt) {
+            var at = f.alongX ? pt.x : pt.y;
+            return { lo: at, hi: at };
+          }
+        }
+        return { lo: a.face.base + a.face.run.lo, hi: a.face.base + a.face.run.hi };
+      };
+      for (var k = 0; k + 1 < arms.length - k; k += 1) {
+        var lo = arms[k];
+        var hi = arms[arms.length - 1 - k];
+        var loAt = reachOf(lo);
+        var hiAt = reachOf(hi);
+        var least = Math.max(centre - loAt.hi, hiAt.lo - centre, 0);
+        var most = Math.min(centre - loAt.lo, hiAt.hi - centre);
+        if (least > most) continue;
+        var want = Math.max(
+          Math.abs(lo.face.base + lo.desire - centre),
+          Math.abs(hi.face.base + hi.desire - centre)
+        );
+        var step = Math.min(most, Math.max(least, want));
+        if (!lo.face.fixed) lo.desire = centre - step - lo.face.base;
+        if (!hi.face.fixed) hi.desire = centre + step - hi.face.base;
+      }
+      if (arms.length % 2 === 1) {
+        var mid = arms[(arms.length - 1) / 2];
+        if (!mid.face.fixed) mid.desire = clampToRun(mid.face, centre - mid.face.base);
+      }
+    }
   }
 
   // SKILL.md §6 rule 4's "spread the attach points evenly along the edge", `L * k / (N + 1)` and all.
@@ -5990,13 +6272,25 @@
   // ===========================================================================
 
   var STUB_PX = px(STUB);
+  // The arrival's counterpart to STUB_PX, and deliberately not the same number. STUB was chosen for
+  // LEAVING a port, where the line is bare; arriving, the last 8px of it are under the arrowhead
+  // (`refX 8` at the tip, in `markerMarkup`), so a route that turns one stub from the face has
+  // 8 - cornerRadius = 4px of line showing and reads as a bulge rather than as an arrow. See
+  // ARRIVE, in the layout, for the five settings that were rendered and looked at to land on 24.
+  var ARRIVE_PX = px(ARRIVE);
   // SKILL.md §6 rule 2 asks for 6-10px between a label's mask and the stroke it annotates. 8 is the
   // middle of that and the only value in it that is also a grid step, so the mask's own corners
   // stay on the grid without a second rounding rule.
   var LABEL_GAP_PX = 8;
-  // A self-loop's bulge. Half the 32px node spacing, so the loop stays inside the gap the layout
-  // already left beside the node rather than reaching the next column.
-  var LOOP_PX = 16;
+  // A self-loop's bulge, and its return leg -- one number, because a loop is symmetric about the
+  // face it leaves and lands on. It was half the 32px node spacing, so the loop sat inside the gap
+  // the layout already left beside the node rather than reaching the next column; what that missed
+  // is that 16px is also exactly a corner radius plus a head, and all 9 self-loops in the corpus
+  // came back in with no shaft at all. ARRIVE_PX is three quarters of that gap rather than half,
+  // so the loop still ends inside it. Measured over the corpus the loops' closest approach to a box
+  // they are not attached to is unchanged at 56px, and rendered at 24px a loop still reads as a
+  // loop -- at 28 and 32 it stops being a return and becomes a rectangle stuck on the side.
+  var LOOP_PX = ARRIVE_PX;
   // A cap on how far the cross-line search will look, not a budget it spends. Measured over 39
   // sources up to 200 nodes and 228 edges, the accepted candidate's index never exceeded 2 and the
   // mean was 0.03 -- the lane the layout reserved is almost always clear, which is what it was
@@ -6150,7 +6444,14 @@
     var key = (axis === "y") ? "y" : "x";
     var lo = Math.min(p[key], q[key]);
     var hi = Math.max(p[key], q[key]);
-    var anchor = (preferred !== null && preferred > lo && preferred < hi) ? preferred : snap4((lo + hi) / 2);
+    // Inclusive, because a cross-line exactly on one of the two stations is a legal route -- it is
+    // the single-bend L both endpoint coordinates are offered for below. Excluding the ends threw
+    // the lane away in the one case it is now most needed: the gap reserves ARRIVE at the arrival
+    // face, so the lane nearest that face lands exactly on the arrival station, and rejecting it
+    // sent those edges to the midpoint instead. It and the reserve-respecting `laneAt` go together
+    // and neither works alone: with either one missing, 7 further pairs of connectors came within
+    // 12px of each other over the corpus, and with both, none.
+    var anchor = (preferred !== null && preferred >= lo && preferred <= hi) ? preferred : snap4((lo + hi) / 2);
     var seen = new Map();
     var list = [];
     function add(value) {
@@ -6269,7 +6570,12 @@
     // bounding box; a stub of STUB_PX from the port would leave the route's first corner inside
     // that box, and the router would then be searching for a cross-line from a point behind a node.
     var outS = STUB_PX + edge.start.inset;
-    var outE = STUB_PX + edge.end.inset;
+    // And the arrival station is a whole ARRIVE_PX out, which is the floor on the final leg rather
+    // than a preference: `connect` clamps its cross-line between the two stations, so no route can
+    // put its last corner nearer the target face than this. The 12 four-px arrivals in the corpus
+    // were all this line reading STUB_PX -- the departure constant, borrowed for the end that has
+    // an arrowhead on it.
+    var outE = ARRIVE_PX + edge.end.inset;
 
     if (edge.selfLoop) {
       return {
@@ -6326,6 +6632,11 @@
   // A run of ONE grid unit still returns 0, and no on-grid radius exists for it: two arcs need 8px
   // of a 4px run. Those runs are why `alignUnitJog` exists in the layout -- it is cheaper to not
   // produce a 4px sidestep than to try to round one.
+  //
+  // The cap of two units is the other half of ARRIVE's arithmetic, so the two move together: this
+  // takes up to 8px off the front of the final leg and the 8px head takes the back, which is why
+  // the leg has to be 24 for 8px of shaft to survive in the middle. Raise the cap and ARRIVE has
+  // to follow it.
   function cornerRadius(inLen, outLen) {
     return GRID * Math.min(2, Math.floor((inLen / GRID) / 2), Math.floor((outLen / GRID) / 2));
   }

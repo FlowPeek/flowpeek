@@ -445,10 +445,23 @@ describe('[Layout] edges', () => {
       expect(edge.channel.value).toBeGreaterThan(a.y + a.height);
       expect(edge.channel.value).toBeLessThan(target.y);
     }
-    // Two edges moving sideways in one gap get lanes of their own, 12px apart at least.
-    const lanes = out.edges.map((e) => e.channel.value);
-    expect(new Set(lanes).size).toBe(2);
-    expect(Math.abs(lanes[0] - lanes[1])).toBeGreaterThanOrEqual(12);
+    // One lane, not two. A fork's two arms leave A in opposite directions, so the stretches of the
+    // gap they need are disjoint and one lane holds both -- which is what makes them turn at the
+    // same height and read as a pair. Asserting two lanes here was asserting the defect a reader
+    // reported: the turn height followed the order the edges were declared in and nothing that was
+    // in the drawing.
+    expect(new Set(out.edges.map((e) => e.channel.value)).size).toBe(1);
+
+    // Two that cannot share -- their stretches overlap -- still get a lane each, 12px apart at
+    // least. Rule 3 is about the stretch actually occupied, not about the count of edges in a gap.
+    const fan = draw('flowchart TD\n  N0 --> Z\n  N1 --> Z\n  N2 --> Z\n  N3 --> Z\n  N4 --> Z');
+    const armOf = (from) => fan.edges.find((e) => e.from === from);
+    const spans = ['N0', 'N1'].map((k) => [
+      Math.min(armOf(k).start.x, armOf(k).end.x),
+      Math.max(armOf(k).start.x, armOf(k).end.x),
+    ]);
+    expect(Math.min(spans[0][1], spans[1][1]) - Math.max(spans[0][0], spans[1][0])).toBeGreaterThan(0);
+    expect(Math.abs(armOf('N0').channel.value - armOf('N1').channel.value)).toBeGreaterThanOrEqual(12);
   });
 
   it('reserves a corridor through every rank a long edge passes', () => {

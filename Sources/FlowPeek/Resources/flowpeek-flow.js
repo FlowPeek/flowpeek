@@ -4658,8 +4658,34 @@
     // sources, claiming at the source alone costs 13.1% of drawing area against 13.8% and leaves
     // one more label inside rule 2's 8px of a stroke, 6 against 5. It is chosen for being the
     // statement that does not depend on which end of an edge the author happened to write first.
+    //
+    // Room on the OTHER side too, but only where a face carries two labelled runs into the same
+    // gap. Reserving one side is enough for one label and cannot be enough for two: both of them
+    // want the side the placer tries first, the second takes what is left, and on
+    // `P -- "derivedQuoteId (representative)" --> Q / P -. "originalQuoteId" .-> Q` what was left
+    // was a 136px mask lying across a 12px lane pitch with both strokes under it. The placer finds
+    // the answer on its own once the room exists -- given an unbounded ownership weight it put that
+    // mask at x=-84, 8px clear of its own line and 20px from the sibling, which is off a 232px
+    // canvas by 84px. This is that 84px, asked for at layout time.
+    //
+    // Only the SECOND widest of a face's labels is claimed back here, not all of them: the widest
+    // still goes on the first side, and a third label in one corridor is stacked along the run
+    // rather than given a third side, which is what `placeEdgeLabel` does with the height it has.
+    // Reserving both sides of EVERY run was measured and rejected at 18.5% of drawing area against
+    // 13.8%; this is the same reserve spent only where one side is provably not enough. Measured
+    // over the corpus it costs 3.6% of total area -- 7.95 Mpx to 8.24 -- and buys three masks their
+    // ownership, one of them on a drawing the reader sent, where it was 40px nearer a connector
+    // that was not its own. It also takes the last two masks out of rule 2's gap of a node and the
+    // last two out of rule 2's gap of another mask.
     var labelRoom = [];
-    for (i = 0; i < m; i += 1) labelRoom.push(0);
+    var labelRoomBack = [];
+    var perFace = [];
+    for (i = 0; i < m; i += 1) { labelRoom.push(0); labelRoomBack.push(0); perFace.push(new Map()); }
+    var claim = function (item, gap, extent) {
+      var byGap = perFace[item];
+      if (!byGap.has(gap)) byGap.set(gap, []);
+      byGap.get(gap).push(extent);
+    };
     for (i = 0; i < segments.length; i += 1) {
       var lseg = segments[i];
       if (lseg.gap >= maxRank) continue;
@@ -4669,8 +4695,15 @@
       // or RL one -- the same switch `gapLabel` makes for the other axis, and for the same reason:
       // a box is not rotated when the drawing is.
       var oExtent = vertical ? lbox.w : lbox.h;
-      if (oExtent > labelRoom[lseg.u]) labelRoom[lseg.u] = oExtent;
-      if (oExtent > labelRoom[lseg.v]) labelRoom[lseg.v] = oExtent;
+      claim(lseg.u, lseg.gap, oExtent);
+      claim(lseg.v, lseg.gap, oExtent);
+    }
+    for (i = 0; i < m; i += 1) {
+      perFace[i].forEach(function (extents, gap) {
+        extents.sort(function (a, b) { return b - a; });
+        if (extents[0] > labelRoom[this.i]) labelRoom[this.i] = extents[0];
+        if (extents.length > 1 && extents[1] > labelRoomBack[this.i]) labelRoomBack[this.i] = extents[1];
+      }, { i: i });
     }
     // Which way the placer looks first, in this level's own O frame. `placeEdgeLabel` offers the
     // right of a vertical run and the top of a horizontal one before the other side, and `localOf`
@@ -4681,10 +4714,18 @@
     var labelAfter = vertical;
     // The minimum distance between two neighbours' centres: what they need to not touch, or what the
     // label between them needs, whichever is larger. `a` is the earlier of the two along the rank.
+    // One label between two neighbours needs a gap from its stroke and a gap from the neighbour, so
+    // `room + 2 * LABEL_GAP`. Two -- one hanging back off the later neighbour, one hanging forward
+    // off the earlier -- need a third gap between the two masks.
     var centreSep = function (a, b) {
       var plain = (items[a].oSize + items[b].oSize) / 2 + env.spaceU;
-      var room = labelAfter ? labelRoom[a] : labelRoom[b];
-      return room > 0 ? Math.max(plain, room + 2 * LABEL_GAP) : plain;
+      var forward = labelAfter ? labelRoom[a] : labelRoomBack[a];
+      var backward = labelAfter ? labelRoomBack[b] : labelRoom[b];
+      var need = 0;
+      if (forward > 0) need += forward + LABEL_GAP;
+      if (backward > 0) need += backward + LABEL_GAP;
+      if (need > 0) need += LABEL_GAP;
+      return Math.max(plain, need);
     };
 
     // --- coordinates along the rank (the O axis) --------------------------
@@ -4753,8 +4794,9 @@
     var first = true;
     for (i = 0; i < m; i += 1) {
       var low = oPos[i];
-      if (!labelAfter && labelRoom[i] > 0) {
-        low = Math.min(low, oPos[i] + items[i].oSize / 2 - LABEL_GAP - labelRoom[i]);
+      var lowRoom = labelAfter ? labelRoomBack[i] : labelRoom[i];
+      if (lowRoom > 0) {
+        low = Math.min(low, oPos[i] + items[i].oSize / 2 - LABEL_GAP - lowRoom);
       }
       if (first || low < minO) { minO = low; first = false; }
     }
@@ -4763,8 +4805,9 @@
     var totalO = 0;
     for (i = 0; i < m; i += 1) {
       var end = oPos[i] + items[i].oSize;
-      if (labelAfter && labelRoom[i] > 0) {
-        end = Math.max(end, oPos[i] + items[i].oSize / 2 + LABEL_GAP + labelRoom[i]);
+      var highRoom = labelAfter ? labelRoom[i] : labelRoomBack[i];
+      if (highRoom > 0) {
+        end = Math.max(end, oPos[i] + items[i].oSize / 2 + LABEL_GAP + highRoom);
       }
       if (end > totalO) totalO = end;
     }
@@ -6499,6 +6542,18 @@
   // than as an 8 of its own: the layout reserves the room and the placer spends it, and two
   // spellings of one number is how those two stop agreeing.
   var LABEL_GAP_PX = px(LABEL_GAP);
+  // How much nearer a label's plate has to be to its own connector than to the nearest connector
+  // that is not, before "which line is this naming?" stops needing an answer.
+  //
+  // One and a half times rule 2's own gap, because the gap is the unit the question is asked in:
+  // a mask BESIDE its line stands 8px off it, so a rival 12px further away is at 20px, and the one
+  // the mask is attached to is the near one by half again. Swept over the 47-source corpus at 8,
+  // 12, 16, 24 and 32: the corpus floor is 4px at every one of them, and what moves is the three
+  // drawings the reader sent -- 8px at a target of 8, 12px at 12 and at 16, and back to 4px at 24
+  // and 32, where the target stops being reachable and the taper flattens into the verdict this
+  // pass exists to get rid of. 12 is the smallest setting that reaches the best margin any
+  // position on those three drawings' connectors offers.
+  var LABEL_MARGIN_PX = px(3);
   // A self-loop's bulge, and its return leg -- one number, because a loop is symmetric about the
   // face it leaves and lands on. It was half the 32px node spacing, so the loop sat inside the gap
   // the layout already left beside the node rather than reaching the next column; what that missed
@@ -7076,8 +7131,72 @@
       && a.y < b.y + b.height && b.y < a.y + a.height;
   }
 
-  // How far a point is from a segment. The mask's centre is the point, because that is the
-  // question a reader answers without thinking: a label belongs to the line it sits nearest.
+  // How far a mask's PLATE is from a stroke: positive outside it, negative under it.
+  //
+  // The plate and not the plate's centre, and the change is the whole of the reader's complaint.
+  // Measured on cand.mmd, "negotiate(adjustRate, original)" -- a 176x40 plate naming the solid
+  // O -> N1 edge -- stood 8px from its own line by the plate and 8px from the dotted N2 -> O edge
+  // by the plate, while by the CENTRE its own line was 96px away and the dotted one 104px: nearest,
+  // and the reader still read the sentence off the wrong line. A centre 8px nearer decides nothing
+  // when the plate is a hundred pixels wide; what the eye uses is which stroke the plate touches.
+  //
+  // Both arguments are axis-aligned -- routes are orthogonal and plates are rectangles -- so
+  // outside the plate this is the gap between two intervals per axis, hypotenuse when the segment
+  // misses on both.
+  //
+  // Under the plate the same question is asked as a NEGATIVE distance, because zero is not an
+  // answer and a third of the corpus lands there. A mask centred on its own run has its own stroke
+  // at 0; so does every foreign stroke that happens to cross it, and clamped at zero 25 masks tied
+  // at exactly that -- the placer was being asked which of two buried lines the plate was on and
+  // the measurement had nothing to say. What a reader uses there is what a plate over a stroke actually
+  // looks like: the stroke goes under one edge and comes out of the opposite one, the longer the
+  // covered stretch the plainer it is, and the nearer the middle the plainer again. So the depth is
+  // the covered length plus how far the stroke runs from the nearest parallel edge, and the two
+  // terms are summed because each alone gets a case wrong -- covered length alone ties two parallel
+  // runs 12px apart (both covered end to end), and the distance-from-the-edge alone calls a 40px
+  // vertical crossing of a 136x40 plate a deeper claim than the 136px horizontal the plate is
+  // sitting on.
+  function rectSegDist(rect, p, q) {
+    var loX = Math.min(p.x, q.x), hiX = Math.max(p.x, q.x);
+    var loY = Math.min(p.y, q.y), hiY = Math.max(p.y, q.y);
+    var gx = Math.max(0, Math.max(rect.x - hiX, loX - (rect.x + rect.width)));
+    var gy = Math.max(0, Math.max(rect.y - hiY, loY - (rect.y + rect.height)));
+    if (gx > 0 || gy > 0) return Math.sqrt(gx * gx + gy * gy);
+    var covered, depth;
+    if (p.y === q.y) {
+      covered = Math.min(hiX, rect.x + rect.width) - Math.max(loX, rect.x);
+      depth = Math.min(p.y - rect.y, rect.y + rect.height - p.y);
+    } else if (p.x === q.x) {
+      covered = Math.min(hiY, rect.y + rect.height) - Math.max(loY, rect.y);
+      depth = Math.min(p.x - rect.x, rect.x + rect.width - p.x);
+    } else {
+      // Routes are orthogonal, so this is the rounding of a corner arrived at as its two tangent
+      // legs elsewhere; treat it as a touch and let the legs either side carry the claim.
+      return 0;
+    }
+    return -(Math.max(0, covered) + Math.max(0, depth));
+  }
+
+  // The nearest stroke to a plate that is NOT part of the route the label annotates. Own segments
+  // are excluded by the identity of their endpoint objects, not by comparing coordinates: `emit`
+  // fills `ctx.drawn` from the very `points` array this route was routed into, and two different
+  // edges running the same lane do share coordinates.
+  function nearestRival(rect, own, ctx) {
+    var best = Infinity;
+    for (var i = 0; i < ctx.drawn.length; i += 1) {
+      var seg = ctx.drawn[i];
+      var mine = false;
+      for (var j = 0; j < own.length; j += 1) {
+        if (own[j][0] === seg[0] && own[j][1] === seg[1]) { mine = true; break; }
+      }
+      if (mine) continue;
+      var d = rectSegDist(rect, seg[0], seg[1]);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  // How far a point is from a segment, for the tie-break below the plate measurement.
   function pointSegDist(x, y, p, q) {
     var dx = q.x - p.x, dy = q.y - p.y;
     var len = dx * dx + dy * dy;
@@ -7087,20 +7206,37 @@
     return Math.sqrt(ex * ex + ey * ey);
   }
 
-  // The nearest stroke to (cx, cy) that is NOT part of the route the label annotates. Own segments
-  // are excluded by the identity of their endpoint objects, not by comparing coordinates: `emit`
-  // fills `ctx.drawn` from the very `points` array this route was routed into, and two different
-  // edges running the same lane do share coordinates.
-  function nearestRival(cx, cy, own, ctx) {
-    var best = Infinity;
-    for (var i = 0; i < ctx.drawn.length; i += 1) {
+  // The same two questions asked of the mask's middle rather than of its plate, as one number:
+  // positive when the route it annotates is the nearer. See `placeEdgeLabel` for what it is worth
+  // and why a second measurement earns its place at all.
+  function centreMargin(cx, cy, own, ctx) {
+    var mine = Infinity, rival = Infinity, i;
+    for (i = 0; i < own.length; i += 1) {
+      var d = pointSegDist(cx, cy, own[i][0], own[i][1]);
+      if (d < mine) mine = d;
+    }
+    for (i = 0; i < ctx.drawn.length; i += 1) {
       var seg = ctx.drawn[i];
-      var mine = false;
+      var isMine = false;
       for (var j = 0; j < own.length; j += 1) {
-        if (own[j][0] === seg[0] && own[j][1] === seg[1]) { mine = true; break; }
+        if (own[j][0] === seg[0] && own[j][1] === seg[1]) { isMine = true; break; }
       }
-      if (mine) continue;
-      var d = pointSegDist(cx, cy, seg[0], seg[1]);
+      if (isMine) continue;
+      var r = pointSegDist(cx, cy, seg[0], seg[1]);
+      if (r < rival) rival = r;
+    }
+    return rival - mine;
+  }
+
+  // How near the plate comes to the route it annotates. BESIDE this is the rule 2 gap; ON it is
+  // the negative depth above, because the stroke runs under the plate. Taken over the whole route
+  // rather than the one segment the placement was built around: a corner leg of the SAME edge
+  // passing closer only makes the label's owner plainer, and pricing that as a failure sent the
+  // placer looking for positions further from its own connector.
+  function nearestOwn(rect, own) {
+    var best = Infinity;
+    for (var i = 0; i < own.length; i += 1) {
+      var d = rectSegDist(rect, own[i][0], own[i][1]);
       if (d < best) best = d;
     }
     return best;
@@ -7111,7 +7247,10 @@
   // outside the viewBox is clipped and the word is gone; a mask inside a node is covered by the
   // node's fill, because nodes are painted last (SKILL.md §6 rule 6); a mask over another mask
   // makes two words one; a mask straddling a zone wall cuts the outline of the box it stands in;
-  // a mask over a stroke hides a connector. In that order.
+  // a mask whose owner cannot be told attaches its sentence to the wrong line; a mask over a
+  // stroke hides a connector. In that order, and the ambiguity term is scored in `placeEdgeLabel`
+  // rather than here because it is the only one of them that depends on where the mask's OWN
+  // route runs.
   //
   // `sitting` is the one segment the mask is deliberately covering when it is placed ON its own
   // connector, and it is the only segment of the route exempted -- the legs around the corner from
@@ -7157,7 +7296,12 @@
       var inside = near.x >= rail.x && near.y >= rail.y
         && near.x + near.width <= rail.x + rail.width
         && near.y + near.height <= rail.y + rail.height;
-      if (!inside) penalty += 20;
+      // Level with a mask over another mask, and for the same reason: both erase something
+      // outright rather than making it harder to read. It was 20, which put it under the ambiguity
+      // term added below, and the corpus came back with 4 masks astride a zone border. Ordering it
+      // above costs nothing measurable -- 0 of the 162 masks lose ownership margin by it -- so
+      // this is not the trade it looks like; two properties that can both be held are both held.
+      if (!inside) penalty += 200;
     }
     for (i = 0; i < ctx.drawn.length; i += 1) {
       if (segmentCrossesRect(ctx.drawn[i][0], ctx.drawn[i][1], near)) penalty += 10;
@@ -7185,13 +7329,18 @@
   //
   // So the second way: the mask sits ON the run, centred on the stroke, the way mermaid places
   // every label (see the three *-mermaid.png the reader sent). Ownership is then not a judgement --
-  // the line enters one edge of the mask and leaves the opposite edge on the same axis, and the
-  // distance from the mask to its own connector is zero, which nothing can beat.
+  // the line enters one edge of the mask and leaves the opposite edge on the same axis, and it is
+  // the stroke the plate covers most of, which is what `rectSegDist` measures under a plate.
   //
-  // Rejected: doing what mermaid does everywhere. It buys the 63 ambiguous masks by covering all
-  // 216 strokes, and rule 2's gap is what makes the other 153 traceable -- they are already
+  // Rejected: doing what mermaid does everywhere. It buys the ambiguous masks by covering every
+  // stroke in the drawing, and rule 2's gap is what makes the rest traceable -- they are already
   // unambiguous and they lose nothing by staying beside the line. The two are ordered by score
-  // instead: a clean BESIDE scores 0 and wins, an ON scores 4, and an ambiguous BESIDE scores 40.
+  // instead: a clean BESIDE scores 0 and wins, an ON scores 16, and the worst BESIDE can do is 180.
+  //
+  // What is scored is a MARGIN, not a verdict, and that is the whole of this pass. Measured over
+  // the 47-source corpus before it, by the metric below: 29 of 147 masks stood no nearer their own
+  // connector than some other, the worst of them 64px nearer a line it does not name, and one of
+  // the 29 was on a drawing the reader sent. After it: 0, with 143 of the 147 clear by 12px.
   //
   // ON is offered only where the run is longer than the mask plus a visible tail of stroke at each
   // end. A mask longer than the segment it sits on swallows the whole connector, and then rule 2's
@@ -7284,24 +7433,53 @@
             }
           }
           var penalty = labelPenalty(rect, own, ctx, onLine ? seg.pair : null);
-          // Ambiguity, scored: how far the mask's centre stands from its own stroke, against how
-          // far it stands from the nearest stroke that is not its own. BESIDE, that distance is the
-          // perpendicular offset, which grows with the mask -- a wide label hung off a vertical run
-          // stands further from the line it names than the next lane over is. ON, it is zero, or
-          // the slide if the mask had to come back onto the canvas, and almost nothing can tie it.
+          // Ambiguity, scored as a margin rather than as a verdict: how much nearer the plate is to
+          // its own stroke than to the nearest stroke that is not its own.
           //
-          // Two weights, because winning by 4px is not winning. On cand.mmd the placer found a
-          // position for "derivedQuoteId (representative)" whose own connector was 76px away and
-          // the sibling connector between the SAME two nodes 80px away: nearest, and unreadable as
-          // an answer. The second weight is deliberately small -- 6 buys a move onto the line,
-          // which costs 4, but never buys a move over a node or another mask. Raising the hard
-          // test to this margin instead of adding a soft one was tried and measured: every
-          // candidate then scored 40, the search lost its gradient, and nego.mmd came back with a
-          // mask 72px from its own line and 33px from a different one, which is the fault itself.
-          var ownDist = onLine ? Math.abs(slid) : (seg.horizontal ? halfH : halfW) + LABEL_GAP_PX;
-          var rival = nearestRival(cx, cy, own, ctx);
-          if (rival <= ownDist) penalty += 40;
-          else if (rival < ownDist + LABEL_GAP_PX) penalty += 6;
+          // A verdict was what was here before -- a flat 40 for "some rival is at least as near",
+          // a 6 for "a rival is within a gap of as near" -- and the corpus says what a verdict
+          // costs. Of 147 masks that have a rival at all, it left 29 at a margin of zero or less,
+          // 20 of them exact ties, and gave the placer no reason to prefer any one of the 29 over
+          // any other: every candidate along the whole connector scored the same 40, so it took
+          // whichever it reached first. Graded, the same measurement leaves 0 of the 147 at zero
+          // or less and 143 of them at a clear 12px or better, and it is the same arithmetic.
+          //
+          // The taper ends at LABEL_MARGIN_PX. Below that the reader is being asked to judge two
+          // distances that differ by less than the gap rule 2 already leaves, which is the judgement
+          // the report says is not available: the plate is 8px off its own line and 8px off a
+          // different one and there is no third fact to break it.
+          var ownDist = nearestOwn(rect, own);
+          var rival = nearestRival(rect, own, ctx);
+          var margin = rival - ownDist;
+          if (margin < LABEL_MARGIN_PX) {
+            // 180 at the floor, which is where the reader put it: worse than a mask standing too
+            // near a node (100) and not as bad as two masks printed over each other (200). The
+            // taper is therefore 7.5 points a pixel, which has to be read against the two
+            // tie-breaks below -- at 90 it was 3.75 and the pair of them outbid eight pixels of
+            // margin on cand.mmd's "discardedQuoteId", which came out 8px from its own line and
+            // 12px from a different one when a position 8 and 20 existed. Swept at 90, 120, 150,
+            // 180 and 240: 180 is where all three of the reader's drawings reach the best margin
+            // any position on their connectors offers, which is 12px, checked by running this
+            // term at 100000 and reading off the floor. Past it the extra weight buys nothing and
+            // starts pushing masks onto zone borders.
+            //
+            // Measured at the chosen setting, the trade this ranking permits is not taken: no
+            // mask in the corpus ends within rule 2's gap of a node or of another mask. Before
+            // this pass two did each, so the ranking costs nothing and the room reserve in the
+            // layout takes those four back.
+            var shortfall = Math.min(LABEL_MARGIN_PX - margin, 2 * LABEL_MARGIN_PX);
+            penalty += Math.round((180 * shortfall) / (2 * LABEL_MARGIN_PX));
+          }
+          // And the same question of the mask's MIDDLE, at 5 -- half the cheapest real harm this
+          // function charges for, so it can only order candidates the rest of the score calls equal
+          // and can never overturn one of them. It earns the line because the two readings disagree
+          // in a way that is not noise: with it at 0, three masks came out attached by their plates
+          // and with a foreign stroke nearer their MIDDLES than their own, which is a mask whose
+          // text leans on somebody else's line while its plate leans on its own. cand.mmd's
+          // "derivedQuoteId (representative)" was one of them. At 5 all three are clean, and 5, 9,
+          // 15 and 25 give the same drawing, so this is the cheapest setting that works rather than
+          // a tuned one.
+          if (centreMargin(cx, cy, own, ctx) <= 0) penalty += 5;
           // What the reader actually loses here, before the ordering between the two ways of
           // attaching a label is applied. `crowded` is read as a warning slug, and a label sitting
           // on its own line is a choice this function makes on a clear canvas, not a compromise it
@@ -7310,7 +7488,20 @@
           var harm = penalty;
           // The tie-break that keeps rule 2 the default: an ON placement is worse than a clean
           // BESIDE one and better than every failure BESIDE can have.
-          if (onLine) penalty += 4;
+          //
+          // 16, which against the gradient above is two pixels of ownership margin. It was 4, and
+          // 4 was priced against a verdict: a verdict is cheap to satisfy, so a 4 let the placer
+          // take the line for a pixel of margin and the share of masks sitting on their own stroke
+          // went from 44 of 148 to 53.
+          //
+          // Swept at 16, 30, 45, 60, 90, 120 and 180, with everything else at its final setting.
+          // The share falls the whole way -- 49, 48, 47, 43, 35, 33, 21 of 148 -- and what it is
+          // bought with is ownership: at 60 two masks lose it outright and at 180 twenty-four do,
+          // and the three drawings the reader sent drop from a 12px floor to 8 at 30 and to 4 from
+          // 45 on. 16 is the only setting on that curve that holds both, which is the trade this
+          // block is about: rule 2 is the default, and it stops being the default at the exact
+          // point where honouring it costs the reader the ownership of a label.
+          if (onLine) penalty += 16;
           if (best === null || penalty < best.penalty) {
             best = { x: cx, y: cy, rect: rect, penalty: penalty, onLine: onLine, crowded: harm > 0 };
             if (penalty === 0) return best;
@@ -7842,6 +8033,23 @@
     // to dodge, and no edge label is placed yet, which is what has to dodge the title.
     for (i = 0; i < titles.length; i += 1) slideTitle(titles[i].cluster, titles[i].rect, ctx);
 
+    // In source order, each label seeing the masks placed before it and not the ones after --
+    // greedy, which is the shape that usually means the last label gets the leavings.
+    //
+    // It does not mean that here, and the reason is structural rather than lucky. Ownership is the
+    // property this pass exists to get right, and the ownership term compares the plate against
+    // STROKES: every route is drawn before any label is placed, so what it measures is the same for
+    // the first mask and the last. Only the collision terms see the other masks, and over the
+    // 53-source corpus they never bind hard enough to matter -- re-offering every label the
+    // finished drawing with its own mask lifted out, and moving it on any improvement at all,
+    // moved no mask at all and changed not one byte of the 53 SVGs. That second pass was written,
+    // run, and taken back out: it cost 56% of the render time (39ms a corpus pass against 25) to
+    // confirm a fixed point the first pass already lands on.
+    //
+    // It was not always so. While ambiguity was scored as a verdict rather than as a margin -- a
+    // flat 40 for "a rival is at least as near" -- the repair pass DID move masks, and nego.mmd
+    // needed it: "negotiate(adjustRate, self)" came out of the greedy pass 8px from its own
+    // connector and flush against a different one. The gradient is what removed the need for it.
     for (i = 0; i < routed.length; i += 1) {
       if (!routed[i]) continue;
       var placed = placeEdgeLabel(routed[i].edge, routed[i].points, ctx, routed[i].transit);
@@ -7850,6 +8058,7 @@
       routed[i].label = placed;
       ctx.labelRects.push(placed.rect);
     }
+
     // After the labels, not before: a bridge may not land under a mask, and where the masks are is
     // only settled once every one of them has been placed.
     bridgeCrossings(routed, ctx);

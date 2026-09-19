@@ -1455,6 +1455,13 @@ describe('[Render] which connector a label belongs to', () => {
   // So ownership is scored, and where beside cannot be owned the mask sits ON the run instead --
   // the line enters one edge of it and leaves the opposite edge, which is what mermaid does on all
   // three of the drawings the reader sent us alongside ours.
+  //
+  // Scored as a MARGIN. The first cut of this block scored it as a verdict -- some rival is at
+  // least as near, or it is not -- and measured from the mask's MIDDLE, and it left the reader's
+  // own case passing: on cand.mmd the mask naming the solid O -> N1 edge had its own line nearer
+  // its middle and a dotted edge touching its plate. Both halves of that are corrected below: the
+  // measurement is taken from the plate, and what it yields is a number the placer can improve
+  // rather than a pass mark it can reach and stop at.
 
   const GAP = 8;
   const grow = (r, by) => ({ x: r.x - by, y: r.y - by, width: r.width + 2 * by, height: r.height + 2 * by });
@@ -1720,21 +1727,133 @@ describe('[Render] which connector a label belongs to', () => {
     expect(astride).toEqual([]);
   });
 
-  it('puts every mask nearer its own connector than any other', () => {
-    // The ambiguity property, stated the way a reader resolves it: a label belongs to the line it
-    // sits nearest. Measured from the mask's middle, because that is what the eye uses and because
-    // it is what makes a wide mask beside a narrow lane fail -- 55 of these 148 masks had some
-    // other connector nearer their middle than their own, "derivedQuoteId" on the reported drawing
-    // among them.
+  /**
+   * How near a mask's PLATE comes to one stroke, signed: positive is the gap between them, and
+   * where the stroke runs UNDER the plate it is minus the length the plate covers plus how far the
+   * stroke runs from the nearest parallel edge of it.
+   *
+   * The plate rather than the middle, because the plate is what a reader sees: on cand.mmd the
+   * mask the reader complained about -- "negotiate(adjustRate, original)", naming the solid
+   * O -> N1 edge -- had its own line 96px from its middle and a dotted N2 -> O edge 104px from it,
+   * so by the middle it was correctly owned, and its plate touched both at 8px. A middle 8px nearer
+   * decides nothing across a plate 176px wide.
+   *
+   * Signed rather than clamped at zero, because half the corpus sits on its own line and zero is
+   * not an answer there: a mask centred on its run has its own stroke at 0 and so has every foreign
+   * stroke that crosses it. Under the plate the two facts a reader actually has are how much of the
+   * stroke went under it and how near the middle it ran, and both terms are needed -- covered
+   * length alone ties two parallel runs 12px apart, and distance-from-the-edge alone calls a 40px
+   * vertical crossing of a 136x40 plate a deeper claim than the 136px horizontal it is sitting on.
+   */
+  function plateToSegment(mask, [p, q]) {
+    const loX = Math.min(p.x, q.x);
+    const hiX = Math.max(p.x, q.x);
+    const loY = Math.min(p.y, q.y);
+    const hiY = Math.max(p.y, q.y);
+    const gx = Math.max(0, Math.max(mask.x - hiX, loX - (mask.x + mask.width)));
+    const gy = Math.max(0, Math.max(mask.y - hiY, loY - (mask.y + mask.height)));
+    if (gx > 0 || gy > 0) return Math.hypot(gx, gy);
+    let covered;
+    let depth;
+    if (p.y === q.y) {
+      covered = Math.min(hiX, mask.x + mask.width) - Math.max(loX, mask.x);
+      depth = Math.min(p.y - mask.y, mask.y + mask.height - p.y);
+    } else if (p.x === q.x) {
+      covered = Math.min(hiY, mask.y + mask.height) - Math.max(loY, mask.y);
+      depth = Math.min(p.x - mask.x, mask.x + mask.width - p.x);
+    } else {
+      return 0;
+    }
+    return -(Math.max(0, covered) + Math.max(0, depth));
+  }
+
+  const plateTo = (mask, d) => Math.min(...segmentsOf(polyline(d)).map((s) => plateToSegment(mask, s)));
+
+  /** Every mask, with how near its own connector is and how near the nearest one that is not. */
+  function ownership(source) {
+    const svg = drawn(source).svg;
+    const paths = edgePaths(svg);
+    const out = [];
+    for (const mask of masks(svg)) {
+      const own = paths.find((p) => p.id === mask.id);
+      if (!own) continue;
+      let rival = Infinity;
+      let who = null;
+      for (const other of paths) {
+        if (other.id === mask.id) continue;
+        const d = plateTo(mask, other.d);
+        if (d < rival) { rival = d; who = other.id; }
+      }
+      if (rival === Infinity) continue;
+      out.push({ id: mask.id, mine: plateTo(mask, own.d), rival, who });
+    }
+    return out;
+  }
+
+  it('puts every mask nearer its own connector than any other, with nothing excused', () => {
+    // The reader's complaint in one line, and the property this whole block exists for: you can
+    // tell which line a label names without tracing it, because it is the nearest one to the plate.
     //
-    // Two are left, and they are not the placer's to fix. `P -- "..." --> Q / P -. "..." .-> Q`
-    // routes its two connectors 12px apart, and both labels are wider than 128px: every position
-    // on either side has both strokes inside the mask, and so does every position on either line.
-    // Placement cannot separate two lines 12px apart; the lane pitch has to.
-    const KNOWN = [
-      '"flowchart TD" (3 lines) / L_P_Q_0 is nearer L_P_Q_2',
-      '"flowchart BT" (3 lines) / L_P_Q_0 is nearer L_P_Q_2',
+    // Before this pass, measured exactly this way: 29 of the 147 masks here that have a rival at
+    // all stood no nearer their own connector than some other, 20 of them at an exact tie and 9
+    // nearer a foreign line than their own, the worst by 64px. On cand.mmd the mask naming the
+    // solid O -> N1 edge tied with a dotted edge running the other way, and the sentence read
+    // backwards.
+    //
+    // No known-failure list. The two this test used to excuse -- `P -- "..." --> Q` with a second
+    // labelled edge between the same pair -- were not the placer's to fix and are not fixed by the
+    // placer: the layout now keeps room on BOTH sides of a face that carries two labelled runs, so
+    // one mask goes left of the pair and one right of it, at 8px and 20px each.
+    const orphans = [];
+    for (const source of ALL) {
+      for (const m of ownership(source)) {
+        if (m.rival <= m.mine) orphans.push(`${name(source)} / ${m.id} vs ${m.who}: ${m.mine} and ${m.rival}`);
+      }
+    }
+    expect(orphans).toEqual([]);
+  });
+
+  it('wins by a margin the eye can use, and names the four it does not', () => {
+    // "Nearest" is not the promise; "clearly nearest" is. The margin is 12px, one and a half times
+    // the gap rule 2 puts between a mask and its stroke -- a mask beside its line stands 8px off
+    // it, so a rival 12px further away is at 20, and the line it belongs to is the near one by half
+    // again. Swept at 8, 12, 16, 24 and 32: the corpus floor is 4px at all five, and what moves is
+    // the reader's three drawings, which reach 8px at a target of 8, 12px at 12 and at 16, and
+    // fall back to 4px at 24 and 32 where the target stops being reachable.
+    //
+    // 143 of 147 reach it. The four that do not are all margin 4 and all the same shape: a plate
+    // lying over two long parallel runs of the drawing that are 4px apart, where the only thing
+    // separating its own stroke from the other is 4px more of it being covered. Placement cannot
+    // separate two lines 4px apart -- rule 3 asks for 12 between lanes and these are legs of two
+    // routes that meet outside any gap, so nothing reserved a pitch for them.
+    //
+    // They could be bought. Running the ownership weight up until all 147 reach 12 was measured:
+    // it puts 2 masks INSIDE a node, where the node's fill is painted over them and the author's
+    // word is gone, and 4 astride a zone border. A label you cannot attribute is worse than one
+    // that stands close to a box and better than one that is not there, which is where the weight
+    // sits.
+    const SHORT = [
+      '"flowchart LR" (11 lines) / L_A2_B2_0',
+      '"flowchart LR" (11 lines) / L_B2_A1_0',
+      '"flowchart RL" (11 lines) / L_A2_B2_0',
+      '"flowchart RL" (11 lines) / L_B2_A1_0',
     ];
+    const MARGIN = 12;
+    const short = [];
+    for (const source of ALL) {
+      for (const m of ownership(source)) {
+        if (m.rival - m.mine < MARGIN) short.push(`${name(source)} / ${m.id}`);
+      }
+    }
+    expect(short.sort()).toEqual(SHORT.slice().sort());
+  });
+
+  it('puts every mask nearer its own connector by its middle too', () => {
+    // The plate is what the reader sees and the middle is where the words are, and the two
+    // measurements are not the same question: a mask can be attached to its own line by its plate
+    // and have its text leaning over somebody else's. This used to excuse two masks and now excuses
+    // none: the two it excused were the `P -> Q` pair, and the room the layout now keeps on both
+    // sides of a doubly-labelled face is what took them off the list.
     const orphans = [];
     for (const source of ALL) {
       const svg = drawn(source).svg;
@@ -1749,7 +1868,23 @@ describe('[Render] which connector a label belongs to', () => {
         }
       }
     }
-    expect(orphans).toEqual(KNOWN);
+    expect(orphans).toEqual([]);
+  });
+
+  it('owns every label on the three drawings the reader sent, by the full margin', () => {
+    // The sources of the complaint, asserted on their own rather than only inside the corpus, so a
+    // regression on them cannot hide in an aggregate. 16 masks between them; every one of them is
+    // at least 12px nearer its own connector than any other, which is the best margin any position
+    // on those connectors offers -- checked by running the ownership weight to 100000 and reading
+    // the floor back off the drawings.
+    for (const [label, source] of REPORTED) {
+      const found = ownership(source);
+      for (const m of found) {
+        expect(`${label}/${m.id}: ${m.rival - m.mine >= 12}`).toBe(`${label}/${m.id}: true`);
+      }
+    }
+    const counted = REPORTED.reduce((n, [, source]) => n + masks(drawn(source).svg).length, 0);
+    expect(counted).toBe(16);
   });
 
   it('leaves the stroke showing past both ends of a mask that sits on it', () => {
@@ -1783,8 +1918,14 @@ describe('[Render] which connector a label belongs to', () => {
     // Rule 2 is still the default and this is the count that says so: sitting on the line is what
     // the placer falls back to, not what it prefers. An all-on-the-line placer -- mermaid's rule,
     // tried and rendered -- put 179 of 216 masks over a stroke and stacked 18 of them on each
-    // other; this one puts 44 of 148 over a stroke and stacks none. On a drawing with nothing
+    // other; this one puts 49 of 148 over a stroke and stacks none. On a drawing with nothing
     // crowding it, none at all.
+    //
+    // 49 and not the 44 it was: scoring ownership as a margin rather than as a verdict made the
+    // line worth taking in five more places, which is the price of the block above and is paid in
+    // the currency rule 2 cares about. Buying them back was swept and costs more than it saves --
+    // the price of an on-the-line placement is 16 in `placeEdgeLabel`, and at 30 the share falls
+    // to 48 of 148 while the reader's three drawings drop from a 12px ownership floor to 8.
     let on = 0;
     let total = 0;
     for (const source of ALL) {

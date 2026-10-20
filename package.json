@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "vendor:mermaid": "cp node_modules/mermaid/dist/mermaid.min.js Sources/FlowPeek/Resources/mermaid.min.js",
+    "vendor:pele": "cp node_modules/pele/dist/pele.global.js Sources/FlowPeek/Resources/pele.global.js",
     "conformance": "node Scripts/conformance.mjs",
     "verify:xcodeproj": "before=$(shasum FlowPeek.xcodeproj/project.pbxproj); ruby Scripts/generate_xcodeproj.rb >/dev/null; test \"$before\" = \"$(shasum FlowPeek.xcodeproj/project.pbxproj)\" || { echo \"FAIL FlowPeek.xcodeproj is stale - re-run ruby Scripts/generate_xcodeproj.rb and commit the result\"; exit 1; }",
     "test:flow": "vitest run",
@@ -10,7 +11,8 @@
     "vendor:mermaid-tests": "node Scripts/vendor-mermaid-tests.mjs"
   },
   "dependencies": {
-    "mermaid": "11.17.2"
+    "mermaid": "11.17.2",
+    "pele": "1.7.0"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

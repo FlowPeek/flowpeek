@@ -427,13 +427,17 @@ final class MermaidWebViewPool {
 
     /// Parsing 3.5 MB is the expensive part, so the sources — and the `WKUserScript`s built from
     /// them — are read once per process and shared by every view. The order is the injection
-    /// order: mermaid, then FlowPeek's own flowchart renderer, then the glue that chooses
-    /// between them.
+    /// order: the three renderers, then the glue that chooses between them. Each renderer only
+    /// defines its global at load — `mermaid`, `window.__flowpeekFlow`, `pele` — and reads none of
+    /// the others, so their order among themselves is free; Pele's half of that was measured by
+    /// loading its bundle alone in a bare `vm` context, where it renders with nothing else
+    /// present. The glue is last because it is the only one that reads any of them.
     private func userScripts() throws(MermaidRenderError) -> [WKUserScript] {
         if let cachedScripts { return cachedScripts }
         let sources = [
             try MermaidEngineAssets.engineSource(),
             try MermaidEngineAssets.flowSource(),
+            try MermaidEngineAssets.peleSource(),
             try MermaidEngineAssets.glueSource(),
         ]
         let scripts = sources.map {
@@ -467,7 +471,7 @@ final class MermaidWebViewPool {
     }
 }
 
-/// Where the engine and the glue come from, and the content world all three share.
+/// Where the renderers and the glue come from, and the content world all four share.
 @MainActor
 enum MermaidEngineAssets {
     static let world = WKContentWorld.world(name: MermaidEnginePage.contentWorldName)
@@ -484,6 +488,13 @@ enum MermaidEngineAssets {
     /// three scripts is broken, and a flowchart silently drawn by mermaid would hide it.
     static func flowSource() throws(MermaidRenderError) -> String {
         try source(MermaidEnginePage.flowResourceName, MermaidEnginePage.flowResourceExtension)
+    }
+
+    /// Pele. `.engineMissing` for the same reason as the flow renderer: the four scripts are one
+    /// shipped set, so a build carrying three of them is broken whichever one is missing, and the
+    /// first render should say so rather than the diagram that happens to need it.
+    static func peleSource() throws(MermaidRenderError) -> String {
+        try source(MermaidEnginePage.peleResourceName, MermaidEnginePage.peleResourceExtension)
     }
 
     private static func source(_ name: String, _ extension: String) throws(MermaidRenderError) -> String {
@@ -538,6 +549,12 @@ enum MermaidThemeFactory {
            let data = try? JSONEncoder().encode(theme.arrangement),
            let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             object["arrangement"] = fields
+        }
+        // Same argument, one step further: under a Pele theme the canary is not drawing in another
+        // palette, it is drawing through another renderer. Omitted for every other theme, because
+        // the key's presence is what selects that renderer.
+        if case .pele(let variables) = theme.engine {
+            object["peleVariables"] = variables
         }
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               let json = String(data: data, encoding: .utf8) else { return "{}" }

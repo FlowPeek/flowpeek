@@ -126,19 +126,24 @@ final class MermaidEngineTests: XCTestCase {
         XCTAssertGreaterThan(painted, 500, "the stage rendered \(painted) non-background pixels")
     }
 
+    /// Pele is read here rather than in its own test because this is already the assertion it
+    /// needs: that a vendored renderer is injected into FlowPeek's world and reaches no further.
+    /// It is the only check that Pele is loaded at all -- nothing routes to it yet, so no render
+    /// would miss it.
     func testEngineAndGlueAreInvisibleToThePageWorld() async throws {
         let engine = try Self.pool.checkOut()
         defer { Self.pool.checkIn(engine) }
 
-        let inWorld = try await engine.evaluate("return typeof window.mermaid + '/' + typeof window.__flowpeek;") as? String
-        XCTAssertEqual(inWorld, "object/object")
+        let probe = "return typeof window.mermaid + '/' + typeof window.__flowpeek + '/' + typeof window.pele;"
+        let inWorld = try await engine.evaluate(probe) as? String
+        XCTAssertEqual(inWorld, "object/object/object")
 
         let inPage = try await engine.webView.callAsyncJavaScript(
-            "return typeof window.mermaid + '/' + typeof window.__flowpeek;",
+            probe,
             in: nil,
             contentWorld: .page
         ) as? String
-        XCTAssertEqual(inPage, "undefined/undefined")
+        XCTAssertEqual(inPage, "undefined/undefined/undefined")
     }
 
     // MARK: - T2

@@ -89,6 +89,18 @@ public enum MermaidEnginePage {
     /// in that both must be in place before the first render -- neither calls the other at load.
     public static let flowResourceName = "flowpeek-flow"
     public static let flowResourceExtension = "js"
+    /// Pele (https://github.com/obsidianmd/pele), vendored from npm at a pinned 1.7.0. A third
+    /// renderer offered ALONGSIDE the other two, never replacing either: it is a proven renderer
+    /// that draws well, but it honours mermaid's own direction less than `.system` does, and that
+    /// is a trade a reader should get to make rather than inherit. It claims every diagram type in
+    /// Mermaid 12.1.0 against the 11.17.2 we bundle, so it parses more than we do, not less.
+    /// The file keeps the name the package publishes it under, `dist/pele.global.js`, so the
+    /// vendored copy and its origin are the same string -- the same reason the engine is
+    /// `mermaid.min.js` here and not `engine.js`. It defines `window.pele` and calls nothing at
+    /// load: measured by loading the bundle alone in a bare `vm` context and rendering a flowchart
+    /// out of it, which `Scripts/conformance.mjs` keeps doing on every release.
+    public static let peleResourceName = "pele"
+    public static let peleResourceExtension = "global.js"
 
     /// The one call the integrator makes per render; `payload` is `MermaidRenderRequest.payloadJSON()`.
     public static let renderInvocation = "return await window.__flowpeek.render(payload);"

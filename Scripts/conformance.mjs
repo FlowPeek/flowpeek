@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// engine_spec §9 T4 — offline conformance pass over the VENDORED mermaid bundle.
+// engine_spec §9 T4 — offline conformance pass over the VENDORED renderer bundles.
 // Loads Sources/FlowPeek/Resources/mermaid.min.js into a bare vm context (no DOM, no
 // fetch, no fs) and asserts the bundle is self-contained, that its detector registry
-// matches the checked-in table byte for byte, and that zenuml is absent.
+// matches the checked-in table byte for byte, and that zenuml is absent. Then the same
+// self-containment pass over pele.global.js, plus the version pin.
 // Exits non-zero on any violation.
 
 import { readFileSync } from "node:fs";
@@ -41,6 +42,18 @@ const FORBIDDEN = [
 const failures = [];
 const fail = (message) => failures.push(message);
 
+// Shared by both bundles, because the rule is the same one and a copy of this loop is how the
+// second bundle ends up checked against a stale list.
+function scanForbidden(label, text) {
+  for (const [name, pattern] of FORBIDDEN) {
+    const count = (text.match(pattern) ?? []).length;
+    console.log(`${count === 0 ? "ok   " : "FAIL "} ${label} ${name}: ${count}`);
+    if (count !== 0) {
+      fail(`${name} appears ${count} time(s) in ${label}; that bundle is no longer self-contained`);
+    }
+  }
+}
+
 let source;
 try {
   source = readFileSync(bundlePath, "utf8");
@@ -55,13 +68,7 @@ console.log(`bundle  ${bundlePath}`);
 console.log(`bytes   ${Buffer.byteLength(source)}`);
 
 // (a) self-containment
-for (const [label, pattern] of FORBIDDEN) {
-  const count = (source.match(pattern) ?? []).length;
-  console.log(`${count === 0 ? "ok   " : "FAIL "} ${label}: ${count}`);
-  if (count !== 0) {
-    fail(`${label} appears ${count} time(s) in the bundle; the engine is no longer self-contained`);
-  }
-}
+scanForbidden("mermaid", source);
 
 // Bare context: no document, no window, no fetch, no require, no process.
 const sandbox = { console: { log() {}, warn() {}, error() {}, debug() {}, info() {} } };
@@ -179,6 +186,91 @@ if (zenumlDetects) {
   console.error("FAIL  detectType('zenuml …') resolved instead of throwing");
 } else {
   console.log("ok    detectType rejects zenuml");
+}
+
+// ---------------------------------------------------------------------------
+// (e) Pele — the third renderer, vendored the same way and so checked the same way.
+//
+// Extended here rather than written as a sibling script. What this gate asserts is that the
+// scripts injected into the engine's content world reach nothing at render time; that is a
+// property of the SET FlowPeek ships, not of mermaid, and the set is now four files. Release CI
+// runs one command for it (.github/workflows/release.yml, "Run the test suites"), and a sibling
+// would be a second line there, a second entry in docs/RELEASING.md and a second habit — the one
+// that is forgotten is the one that drifts, which is the same reason `vendor:pele` copies from
+// node_modules instead of fetching.
+//
+// Pele's half is shorter than mermaid's because less is pinned. There is no Swift-side table for
+// it to agree with: nothing routes to Pele yet, so no detector list, no corpus. What is left is
+// what vendoring itself promises — self-containment, a render with no DOM, and that the bundle
+// in the repo is the release package.json names.
+const pelePath = join(root, "Sources/FlowPeek/Resources/pele.global.js");
+
+let peleSource;
+try {
+  peleSource = readFileSync(pelePath, "utf8");
+} catch (error) {
+  console.error(`FAIL  cannot read the vendored bundle at ${pelePath}`);
+  console.error(`      ${error.message}`);
+  console.error("      run `npm run vendor:pele` first");
+  process.exit(1);
+}
+
+console.log(`\nbundle  ${pelePath}`);
+console.log(`bytes   ${Buffer.byteLength(peleSource)}`);
+
+scanForbidden("pele", peleSource);
+
+// The pin. Pele exports no version — `Object.keys(pele)` is PeleError, detectType, enableZoom,
+// forgetTextWidths, mount, parse, register, registered, render, supports — so the only version
+// the bundle states about itself is its first-line banner. FlowPeek ships offline: a `pele@1`
+// that drifted under a later `npm install` while this file stayed put would be a renderer nobody
+// could reproduce from package.json, so the two are compared rather than trusted.
+const pinned = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).dependencies.pele;
+const banner = /^\/\*!\s*Pele\s+(\d+\.\d+\.\d+)\b/.exec(peleSource);
+if (!banner) {
+  fail("pele.global.js has no `/*! Pele <version>` banner; the vendored bundle cannot be pinned");
+  console.error("FAIL  pele banner missing");
+} else if (banner[1] !== pinned) {
+  fail(`pele.global.js is ${banner[1]} but package.json pins ${pinned}; re-run \`npm run vendor:pele\``);
+  console.error(`FAIL  pele version drift: bundle ${banner[1]}, package.json ${pinned}`);
+} else {
+  console.log(`ok    pele banner ${banner[1]} matches the package.json pin`);
+}
+
+// Its own bare context, so nothing mermaid left on the first one can stand in for something Pele
+// would otherwise need.
+const peleSandbox = { console: { log() {}, warn() {}, error() {}, debug() {}, info() {} } };
+const peleContext = createContext(peleSandbox);
+
+let pele;
+try {
+  runInContext(peleSource, peleContext, { filename: "pele.global.js" });
+  pele = peleSandbox.pele;
+} catch (error) {
+  console.error(`FAIL  pele.global.js threw while loading in a bare vm context: ${error.message}`);
+  process.exit(1);
+}
+
+if (!pele || typeof pele.render !== "function") {
+  console.error("FAIL  pele.global.js did not expose a usable `pele` global in a bare vm context");
+  process.exit(1);
+}
+
+// Rendering in this context is the self-containment proof, and a stronger one than `node --check`:
+// a bare vm has no document, no window, no fetch and no filesystem, so an SVG coming back out of
+// it is a renderer that builds its own markup as a string. That is what lets Pele be injected as a
+// plain WKUserScript beside the other two instead of needing a page to be ready first.
+try {
+  const drawn = pele.render("flowchart TD\n  A[Start] --> B[End]");
+  if (typeof drawn?.svg !== "string" || !drawn.svg.startsWith("<svg")) {
+    fail("pele.render() returned no SVG markup offline");
+    console.error(`FAIL  pele.render() gave ${JSON.stringify(drawn)?.slice(0, 120)}`);
+  } else {
+    console.log(`ok    pele.render() offline in a bare vm context: ${drawn.mermaidType}, ${drawn.width}x${drawn.height}`);
+  }
+} catch (error) {
+  console.error(`FAIL  pele.render() threw offline: ${error.message}`);
+  process.exit(1);
 }
 
 if (failures.length) {

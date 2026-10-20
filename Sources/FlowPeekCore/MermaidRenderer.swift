@@ -125,6 +125,17 @@ public struct MermaidRenderRequest: Sendable, Equatable {
     /// The JSON string handed to `window.__flowpeek.render`.
     public func payloadJSON() throws(MermaidRenderError) -> String {
         try MermaidRenderLimits.validate(source)
+        // `MacMermaidTheme.Engine` is a sum type and JSON has no obvious shape for one, so it
+        // crosses as the values of the only case that carries any: present for a Pele theme,
+        // absent for a mermaid one, and the glue reads that presence as the choice of renderer.
+        // A `renderer: "pele"` field beside the values would be a second place to say the same
+        // thing and therefore a place for the two to disagree -- the same argument the enum makes
+        // on this side of the seam.
+        let peleVariables: [String: String]?
+        switch theme.engine {
+        case .mermaid: peleVariables = nil
+        case .pele(let variables): peleVariables = variables
+        }
         let payload = MermaidRenderPayload(
             source: source,
             renderID: renderID,
@@ -137,7 +148,8 @@ public struct MermaidRenderRequest: Sendable, Equatable {
             // The reader's switch decides whether labels are corrected; the theme decides what
             // colour a corrected one becomes.
             labelContrast: labelContrast.inked(dark: theme.darkInk, light: theme.lightInk),
-            arrangement: theme.arrangement
+            arrangement: theme.arrangement,
+            peleVariables: peleVariables
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -178,6 +190,12 @@ struct MermaidRenderPayload: Codable, Equatable, Sendable {
     /// The spacing and edge-shape values this theme asks for. Empty for every theme that asks for
     /// nothing, in which case the glue emits no diagram config and mermaid keeps its own defaults.
     let arrangement: MermaidArrangement
+    /// Pele's CSS custom properties, keyed by their full names (`--pele-bg`), for a theme written
+    /// in Pele's vocabulary -- and absent for every theme that is not, which is how the glue knows
+    /// which renderer this theme chose. `nil` encodes as a missing key rather than a null, so the
+    /// payload a mermaid theme produces is byte-identical to the one it produced before Pele
+    /// existed; the 124 goldens are recorded through that payload.
+    let peleVariables: [String: String]?
 }
 
 public struct MermaidRenderResult: Sendable, Equatable {
@@ -196,11 +214,13 @@ public struct MermaidRenderResult: Sendable, Equatable {
     /// the reader has the switch off, so a number here says the drawing named its own fills.
     public let labelsCorrected: Int
     /// Which renderer drew this: `"flowpeek-flow"` for FlowPeek's own flowchart renderer,
-    /// `"mermaid"` for everything else. Diagnostic only -- nothing the reader sees depends on it,
-    /// which is the point: a fallback must look like no fallback.
+    /// `"pele"` for the vendored third-party one, `"mermaid"` for everything else. Diagnostic only
+    /// -- nothing the reader sees depends on it, which is the point: a fallback must look like no
+    /// fallback.
     public let renderer: String
-    /// Why FlowPeek's renderer did not draw this one -- an anonymous slug such as `"wrong-type"`,
-    /// `"no-ladder"` or `"unsupported:click"`, never source text. `nil` when it did draw.
+    /// Why the renderer this theme asked for did not draw this one -- an anonymous slug such as
+    /// `"wrong-type"`, `"no-ladder"`, `"unsupported:click"` or `"threw:syntax"`, never source
+    /// text. `nil` when it did draw.
     public let rendererFallback: String?
 
     public init(

@@ -187,7 +187,11 @@ jobs:
         run: |
           set -euo pipefail
           app="$RUNNER_TEMP/export/FlowPeek.app"
-          for resource in AppIcon.icns Assets.car mermaid.min.js flowpeek-glue.js en.lproj ko.lproj; do
+          # Every render script, not a sample of them: the app bundle is where a resource that
+          # `Scripts/generate_xcodeproj.rb` stopped naming goes missing, and a renderer absent from
+          # the exported app fails at the reader's first diagram rather than here. flowpeek-flow.js
+          # and pele.global.js were both outside this list until the third renderer was vendored.
+          for resource in AppIcon.icns Assets.car mermaid.min.js flowpeek-flow.js pele.global.js flowpeek-glue.js en.lproj ko.lproj; do
             if [ ! -e "$app/Contents/Resources/$resource" ]; then
               echo "::error::$resource is missing from the exported app" >&2
               exit 1

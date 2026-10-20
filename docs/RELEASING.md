@@ -105,11 +105,15 @@ Each of these fails the run rather than shipping something broken:
   it, so the run never depends on the image's default.
 - **`swift test` and `Scripts/conformance.mjs`.** The conformance script loads the vendored
   `mermaid.min.js` in a bare `vm` context and asserts it has no dynamic imports, no workers and no
-  `eval`, and that its diagram registry still matches the Swift detector table.
+  `eval`, and that its diagram registry still matches the Swift detector table. It then puts
+  `pele.global.js` through the same self-containment pass, renders a flowchart from it with no DOM
+  in reach, and checks its banner version against the `pele` pin in `package.json` — the bundle
+  ships offline, so the file in the repo and the release `package.json` names must be one release.
 - **The checked-in `FlowPeek.xcodeproj` matches `Scripts/generate_xcodeproj.rb`.** A stale project
   is how a source file ends up compiling under SPM and silently vanishing from the shipping app.
-- **The exported app really contains** `AppIcon.icns`, `Assets.car`, `mermaid.min.js`,
-  `flowpeek-glue.js` and both `.lproj` directories.
+- **The exported app really contains** `AppIcon.icns`, `Assets.car`, all three render scripts
+  (`mermaid.min.js`, `flowpeek-flow.js`, `pele.global.js`), `flowpeek-glue.js` and both `.lproj`
+  directories.
 - **`codesign --verify --deep --strict`** before notarization, then **`spctl --assess`** on both the
   stapled app and the stapled DMG afterwards. `Scripts/notarize_dmg.sh` notarizes and staples the
   app *before* packaging it: a DMG's ticket stays with the DMG, and Homebrew copies the app out, so

@@ -124,6 +124,42 @@ final class MermaidRendererTests: XCTestCase {
         XCTAssertEqual(try request.payloadJSON(), json, "payload encoding must be deterministic")
     }
 
+    /// Which renderer a theme chose, as the payload states it: the Pele values are there or they
+    /// are not, and there is no second field that could disagree with them.
+    ///
+    /// The absence matters as much as the presence. A mermaid theme must encode the same bytes it
+    /// encoded before Pele existed — a `null` for the new key would be a different payload, and
+    /// the 124 goldens are recorded through this one.
+    func testOnlyAPeleThemePutsPeleValuesInThePayload() throws {
+        func payload(_ id: MermaidThemeID) throws -> (json: String, decoded: MermaidRenderPayload) {
+            let request = MermaidRenderRequest(
+                source: "flowchart TD\n  A --> B",
+                theme: MermaidThemeCatalogue.theme(
+                    id, appearance: .light, accentHex: "#0A84FF", increaseContrast: false
+                ),
+                seed: "fp-seed",
+                renderID: "fp-7"
+            )
+            let json = try request.payloadJSON()
+            return (json, try JSONDecoder().decode(MermaidRenderPayload.self, from: Data(json.utf8)))
+        }
+
+        for id in [MermaidThemeID.system, .editorial] {
+            let (json, decoded) = try payload(id)
+            XCTAssertNil(decoded.peleVariables, "\(id.rawValue) is not written in Pele's vocabulary")
+            XCTAssertFalse(json.contains("peleVariables"), "\(id.rawValue) encoded a key it has no value for")
+        }
+
+        let (json, decoded) = try payload(.pele)
+        let variables = try XCTUnwrap(decoded.peleVariables)
+        XCTAssertEqual(variables["--pele-bg"], "#F5F5F5")
+        XCTAssertEqual(variables["--pele-fg"], "#2D3142")
+        XCTAssertEqual(variables.count, 20, "the twelve properties plus the eight-colour series ramp")
+        XCTAssertTrue(decoded.themeVariables.isEmpty, "a Pele theme has nothing to say in mermaid's vocabulary")
+        XCTAssertEqual(decoded.themeCSS, "", "and no stylesheet, which is what keeps it out of the ladder sweep")
+        XCTAssertEqual(json, try payload(.pele).json, "payload encoding must be deterministic")
+    }
+
     /// The two thresholds are the whole policy, so they are stated once and carried, never
     /// re-derived in the page. A label on a fill the diagram chose has to clear AA outright; every
     /// other label is left to the theme until it is not readable at all.

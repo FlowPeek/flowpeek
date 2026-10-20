@@ -13,6 +13,10 @@ public enum MermaidThemeID: String, CaseIterable, Codable, Sendable {
     /// An imitation of the editorial language at github.com/cathrynlavery/diagram-design, as far as
     /// mermaid can be made to go. Experimental: what mermaid cannot express is skipped, not faked.
     case editorial
+    /// The editorial palette handed to Pele (github.com/obsidianmd/pele), a third-party renderer
+    /// that draws it its own way. The only entry here whose values are not mermaid's; see
+    /// `MacMermaidTheme.Engine`.
+    case pele
 }
 
 /// What the settings card and the preview need to know about a theme without knowing what it looks
@@ -53,6 +57,7 @@ public enum MermaidThemeCatalogue {
     public static let all: [MermaidThemeDescriptor] = [
         .init(id: .system, nameKey: "theme.system.name", blurbKey: "theme.system.blurb", isExperimental: false),
         .init(id: .editorial, nameKey: "theme.editorial.name", blurbKey: "theme.editorial.blurb", isExperimental: true),
+        .init(id: .pele, nameKey: "theme.pele.name", blurbKey: "theme.pele.blurb", isExperimental: true),
     ]
 
     public static func descriptor(_ id: MermaidThemeID) -> MermaidThemeDescriptor {
@@ -81,6 +86,10 @@ public enum MermaidThemeCatalogue {
         case .editorial:
             // No `accentHex`: this theme's accent is its own, and why is on `MacMermaidTheme.editorial`.
             return .editorial(appearance: appearance, increaseContrast: increaseContrast)
+        case .pele:
+            // Same palette as `.editorial` and the same reason for keeping the reader's accent out
+            // of it. What differs is the vocabulary, not the colours.
+            return .pele(appearance: appearance, increaseContrast: increaseContrast)
         }
     }
 

@@ -51,6 +51,29 @@ final class MermaidThemeCatalogueTests: XCTestCase {
     /// Persisted, so it may never be renamed on a whim.
     func testTheStoredSpellingOfEveryThemeIsPinned() {
         XCTAssertEqual(MermaidThemeID.system.rawValue, "system")
+        XCTAssertEqual(MermaidThemeID.editorial.rawValue, "editorial")
+        XCTAssertEqual(MermaidThemeID.pele.rawValue, "pele")
+    }
+
+    /// Every entry but one is mermaid's vocabulary, and the one that is not says so in the type.
+    /// This is the guard on the promise the Pele work was added under: `.system` and `.editorial`
+    /// draw exactly what they drew, which starts with being handed to the engine they always were.
+    func testOnlyThePeleEntryIsDrawnBySomethingOtherThanMermaid() {
+        for appearance in appearances {
+            for increaseContrast in contrasts {
+                for id in MermaidThemeID.allCases {
+                    let theme = MermaidThemeCatalogue.theme(
+                        id, appearance: appearance, accentHex: "#0A84FF", increaseContrast: increaseContrast
+                    )
+                    switch (id, theme.engine) {
+                    case (.pele, .pele), (.system, .mermaid), (.editorial, .mermaid):
+                        break
+                    default:
+                        XCTFail("\(id) is drawn by \(theme.engine) at \(appearance) contrast=\(increaseContrast)")
+                    }
+                }
+            }
+        }
     }
 
     func testEveryDescriptorNamesKeysInBothCatalogues() {

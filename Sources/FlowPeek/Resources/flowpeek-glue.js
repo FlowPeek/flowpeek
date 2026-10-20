@@ -922,10 +922,10 @@
     }
     if (!flow || typeof flow.render !== "function") return { ok: false, reason: "no-renderer" };
     if (!FLOW_TYPES[String(diagramType || "")]) return { ok: false, reason: "wrong-type" };
-    // The load-bearing clause. A theme with no `.fp-` rules cannot paint what this renderer tags,
-    // and it is the same opt-in the editorial passes read -- which is what keeps the system theme,
-    // and therefore its 124 goldens, entirely on mermaid.
-    if (String(p.themeCSS || "").indexOf(LADDER_MARKER) === -1) return { ok: false, reason: "no-ladder" };
+    // The theme clause that used to sit here is now the table's `claims` below, because it is not
+    // a question about this diagram: it asks whose vocabulary the payload is written in, and with
+    // a third renderer that question has to be asked once for all of them rather than again inside
+    // each. What it protects is unchanged -- see `RENDERERS`.
     var measurer = makeMeasurer();
     if (!measurer) return { ok: false, reason: "no-measure-host" };
     var out;
@@ -936,6 +936,179 @@
     }
     if (out.ok !== true) measurer.dispose();
     return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pele (github.com/obsidianmd/pele), vendored at Resources/pele.global.js and loaded as
+  // `window.pele` in this same content world.
+  //
+  // The one renderer here that answers for every diagram type. It claims all of Mermaid 12.1.0
+  // against the 11.17.2 we bundle, and measured, it drew every one of the 35 rows of
+  // `MermaidEngineTests.conformanceTable` -- the four railroad dialects and `eventmodeling`
+  // included. So once a theme chooses Pele there is nothing left to divide up by type, which is
+  // why nothing below asks about `diagramType`.
+  //
+  // It is synchronous and touches no DOM: `render(text)` returns `{type, mermaidType, svg, width,
+  // height, links}` or throws. A throw is a decline, exactly as it is for FlowPeek's renderer --
+  // the reader gets mermaid's drawing and is told nothing.
+  // ---------------------------------------------------------------------------
+
+  function peleEngine() {
+    try {
+      return (typeof pele !== "undefined" && pele) ? pele : (typeof window !== "undefined" ? window.pele : undefined);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function tryPele(p, diagramType) {
+    var px = peleEngine();
+    if (!px || typeof px.render !== "function") return { ok: false, reason: "no-renderer" };
+    var out;
+    try {
+      out = px.render(p.source);
+    } catch (e) {
+      // Only the code crosses this line. A `PeleError` carries `message` and `snippet` and both
+      // quote the diagram back -- measured, the message for `A[[[` is "Parse error on line 2:\n
+      // A[[[\n-----^" -- and `rendererFallback` is reported to Swift and logged, where a reader's
+      // source has no business being. Every throw out of `render()` measured so far was a
+      // `PeleError` with code "syntax" or "unsupported-diagram"; anything else is a bug in Pele
+      // and says so without quoting anything.
+      var code = (e && typeof e.code === "string" && e.code) ? e.code : "error";
+      return { ok: false, reason: "threw:" + code.slice(0, 40) };
+    }
+    if (!out || typeof out.svg !== "string" || !out.svg) return { ok: false, reason: "no-result" };
+    // The type is the one mermaid's `parse` already gave this diagram, for both renderers: it is
+    // the string the host, the health canary and the goldens speak, and a diagram must not rename
+    // itself because the reader changed theme. Pele reports mermaid's vocabulary on purpose and
+    // agrees on "flowchart-v2", but it is answering for 12.1.0 where we parsed with 11.17.2, so
+    // its answer is kept only for the case `parse` cannot produce one.
+    return { ok: true, svg: out.svg, diagramType: String(diagramType || out.mermaidType || "") };
+  }
+
+  // A theme's Pele values, named in full (`--pele-bg`), so what arrives from Swift is written out
+  // as a declaration rather than reassembled from a prefix and a stem here.
+  var PELE_PROPERTY = /^--pele-[a-z0-9-]+$/;
+
+  function peleDeclarations(variables) {
+    if (!variables || typeof variables !== "object") return "";
+    var out = [];
+    // Sorted, so the same theme writes the same bytes whatever order the payload's keys arrive in
+    // -- the attribute ends up in the exported SVG, and `testTheSameSourceRendersToTheSameBytes`
+    // is the kind of assertion that would otherwise pass or fail by accident.
+    Object.keys(variables).sort().forEach(function (name) {
+      if (!PELE_PROPERTY.test(name)) return;
+      var value = variables[name];
+      if (typeof value !== "string" || !value) return;
+      // The same reading the scrub gives a mermaid theme's stylesheet, done before this is written
+      // instead of after. It has to be before: the scrub's only move against a `style` attribute
+      // is to remove the whole thing, and removing this one removes every colour the drawing
+      // resolves through. `;` and `}` are added to the hazards because this lands in an attribute,
+      // where either would end our declaration and start something that is not a colour.
+      if (STYLE_HAZARDS.test(value) || value.indexOf(";") !== -1 || value.indexOf("}") !== -1) return;
+      out.push(name + ":" + value);
+    });
+    return out.join(";");
+  }
+
+  /// Pele's output, in this theme's colours.
+  ///
+  /// THE TRAP, and it is silent: the emitted <svg> carries a `style` attribute that defines every
+  /// `--_*` shorthand the drawing paints through, each one a `var(--pele-x, <default>)`. Setting a
+  /// second `style` attribute drops the first and every definition in it, and the diagram paints
+  /// in whatever it inherits -- a solid black picture. So the declarations are APPENDED to the
+  /// attribute that is already there, and last-wins means they are what resolves.
+  ///
+  /// On the <svg> itself rather than on `#diagram`, although a parent would resolve just as well
+  /// on screen: `live.outerHTML` is what the host copies and exports, and a drawing whose colours
+  /// live on a parent it does not carry would export in Pele's defaults instead of this theme's.
+  function dressPele(node, p) {
+    var decls = peleDeclarations(p.peleVariables);
+    if (!decls) return;
+    var existing = String(node.getAttribute("style") || "");
+    node.setAttribute("style", existing ? existing + ";" + decls : decls);
+  }
+
+  // ---------------------------------------------------------------------------
+  // The seam: which renderer draws, and what its output still needs.
+  //
+  // One decision, not three, and it is the THEME that makes it. Every theme is written in exactly
+  // one renderer's vocabulary -- mermaid's `themeVariables` plus a stylesheet, or Pele's custom
+  // properties -- so asking "whose values are these?" picks at most one renderer to put in front
+  // of mermaid, and only that one is then asked whether it can draw this particular diagram.
+  // Asking in the other order is what would need three nested ifs: every renderer would have to be
+  // consulted about every diagram, and two of them would be answering about a theme they cannot
+  // paint.
+  //
+  // mermaid is not in the table. It is what happens when the table has nothing to say, it is the
+  // only one of the three that is async, and it is the only one that cannot decline.
+  // ---------------------------------------------------------------------------
+
+  // Reported when no theme claimed a renderer at all. The word is the flow renderer's, from when
+  // it was the only candidate and a missing `.fp-ladder` was the only way to arrive here. It stays
+  // because it is the slug Swift documents on `MermaidRenderResult.rendererFallback` and the one
+  // `FlowRendererSeamTests` asserts for the system theme: that theme's route to mermaid has not
+  // changed, and a new word here would say it had.
+  var UNCLAIMED = "no-ladder";
+
+  var RENDERERS = [
+    {
+      name: "pele",
+      // Presence is the choice. It mirrors `MacMermaidTheme.Engine`, where `variables` exists only
+      // on the `.pele` case, so a theme cannot half-ask for Pele on either side of the payload.
+      claims: function (p) { return !!p.peleVariables && typeof p.peleVariables === "object"; },
+      draw: tryPele,
+      finish: dressPele
+    },
+    {
+      name: "flowpeek-flow",
+      // The load-bearing clause, and still the same one: a theme with no `.fp-` rules cannot paint
+      // what this renderer tags, and it is the same opt-in the editorial passes read -- which is
+      // what keeps the system theme, and therefore its 124 goldens, entirely on mermaid.
+      claims: function (p) { return String(p.themeCSS || "").indexOf(LADDER_MARKER) !== -1; },
+      draw: tryFlowRenderer,
+      // Nothing to do. This renderer tags its own rungs, routes on the axes and emits the
+      // specified arrowhead from the start, so there is nothing for a repair pass to repair.
+      finish: null
+    }
+  ];
+
+  // mermaid's output, and the three passes that exist to repair it. All three are guarded as one,
+  // by whose output this is, rather than left to the pattern matching inside them: measured
+  // against Pele's markup, `tagStructure` finds no `g.nodes > g.node` (its nodes are `g.pele-node`
+  // inside `g.pele-nodes`), `roundEdges` finds nothing matching EDGE_SELECTOR (its edges are
+  // `path` inside `g.pele-edge`), and `reshapeArrowheads` finds no `<marker>` at all, because Pele
+  // draws each arrowhead as a filled `path.pele-marker`. So all three would be inert on it -- an
+  // accident of class names, and not a thing to route on.
+  function finishMermaid(node, p, reportedType) {
+    // Structural rungs, on the detached node: this pass touches no layout, so it costs nothing
+    // here, and it must run before makeLabelsReadable(), which reads computed fills.
+    tagStructure(node, String(p.renderID || "fp-0"), reportedType, p.themeCSS);
+    // After the rungs and before anything measures the drawing: this only rewrites `d`, so no
+    // geometry the viewBox depends on moves.
+    roundEdges(node, p.themeCSS, reportedType);
+    reshapeArrowheads(node, p.themeCSS);
+  }
+
+  function chooseRenderer(p, diagramType) {
+    for (var i = 0; i < RENDERERS.length; i++) {
+      var candidate = RENDERERS[i];
+      if (!candidate.claims(p)) continue;
+      var out = candidate.draw(p, diagramType);
+      if (out && out.ok === true) {
+        return { name: candidate.name, out: out, finish: candidate.finish, fallback: null };
+      }
+      // The theme's own renderer declined, so mermaid draws it and that decline is the reason
+      // worth reporting. No second candidate is tried: no other renderer's vocabulary is in this
+      // payload, so the next one along would only decline for the theme it was never given.
+      return {
+        name: "mermaid",
+        out: null,
+        finish: finishMermaid,
+        fallback: String((out && out.reason) || "declined").slice(0, 200)
+      };
+    }
+    return { name: "mermaid", out: null, finish: finishMermaid, fallback: UNCLAIMED };
   }
 
   async function render(rawPayload) {
@@ -975,15 +1148,12 @@
       if (diagramType && needsTypedConfig(p, diagramType)) {
         mm.initialize(buildConfig(p, diagramType));
       }
-      var attempt = tryFlowRenderer(p, diagramType);
-      var flowOut = attempt.ok === true ? attempt : null;
-      var rendererName = flowOut ? "flowpeek-flow" : "mermaid";
-      var rendererFallback = flowOut ? null : String(attempt.reason || "declined").slice(0, 200);
+      var choice = chooseRenderer(p, diagramType);
 
       var svgText, reportedType;
-      if (flowOut) {
-        svgText = flowOut.svg;
-        reportedType = flowOut.diagramType;
+      if (choice.out) {
+        svgText = choice.out.svg;
+        reportedType = choice.out.diagramType;
       } else {
         // Render into an attached, off-screen box rather than mermaid's default container: a
         // renderer that measures with getBBox() needs a live render tree, and without this
@@ -997,24 +1167,18 @@
       var svg = doc.body.querySelector("svg");
       if (!svg) { wipeMeasure(); return fail("render-no-svg", "the renderer returned no <svg> element"); }
       var node = document.importNode(svg, true);
-      // Kept for flow output too, and not as a formality: it is the boundary that does not move
-      // when the renderer is edited, and `scrubbed` is the channel the host turns into a reader-
-      // visible notice. On correct flow output it finds nothing, which is itself worth asserting.
+      // Kept for the other two renderers' output too, and not as a formality: it is the boundary
+      // that does not move when a renderer is edited or re-vendored, and `scrubbed` is the channel
+      // the host turns into a reader-visible notice. On correct output from either it finds
+      // nothing -- Pele escapes its own text and filters its own links -- which is why both
+      // `testFlowOutputGivesTheScrubNothingToDo` and `testPeleOutputGivesTheScrubNothingToDo`
+      // assert the empty list rather than ignoring it.
       var scrubbed = scrub(node);
-      // The three editorial passes are mermaid's repairs, and FlowPeek's renderer does not need
-      // repairing: it tags the rungs, routes on the axes and emits the specified arrowhead from
-      // the start. Guarding all three rather than the one that matters -- tagStructure would
-      // re-tag every node and clone a second set of markers; the other two happen to be inert on
-      // this output, which is an accident of pattern matching and not something to lean on.
-      if (!flowOut) {
-        // Structural rungs, on the detached node: this pass touches no layout, so it costs nothing
-        // here, and it must run before makeLabelsReadable(), which reads computed fills.
-        tagStructure(node, String(p.renderID || "fp-0"), reportedType, p.themeCSS);
-        // After the rungs and before anything measures the drawing: this only rewrites `d`, so no
-        // geometry the viewBox depends on moves.
-        roundEdges(node, p.themeCSS, reportedType);
-        reshapeArrowheads(node, p.themeCSS);
-      }
+      // Whatever this renderer's output still needs, and nobody else's: mermaid's three repair
+      // passes, Pele's colours, or nothing at all. The table decides, so a fourth renderer adds a
+      // row rather than another clause here. Run after the scrub, and the one case where that
+      // ordering is a decision rather than an accident is `dressPele` -- see it for why.
+      if (choice.finish) choice.finish(node, p, reportedType);
       diagram.replaceChildren(node);
 
       // Post-condition: an <svg> is really in the live DOM, or this is a failure.
@@ -1057,13 +1221,14 @@
         // finally read from. Swift keys its "size estimated" notice off the latter's
         // marker and shows the rest as engine detail.
         measurementFallbacks: measurementFallbacks.concat(geometry.measurementFallbacks),
-        // Which renderer drew this, and why the other one did not. Deliberately not in
-        // `measurementFallbacks`: that array is a reader-visible notice channel keyed on "bbox",
-        // and a fallback is a route rather than a degraded render. Nothing about provenance goes
-        // into the markup either -- `normalised()` erases only `fp-[0-9]+`, so a marker there
-        // would move every golden the day a flowchart is recorded under a ladder theme.
-        renderer: rendererName,
-        rendererFallback: rendererFallback
+        // Which renderer drew this, and why the one the theme asked for did not. Deliberately not
+        // in `measurementFallbacks`: that array is a reader-visible notice channel keyed on
+        // "bbox", and a fallback is a route rather than a degraded render. Nothing about
+        // provenance goes into the markup either -- `normalised()` erases only `fp-[0-9]+`, so a
+        // marker there would move every golden the day a flowchart is recorded under a ladder
+        // theme.
+        renderer: choice.name,
+        rendererFallback: choice.fallback
       });
     } catch (e) {
       diagram.replaceChildren();
@@ -1090,6 +1255,11 @@
         seed: p.seed || "flowpeek-selftest",
         themeVariables: p.themeVariables,
         themeCSS: p.themeCSS,
+        // Forwarded for the same reason the arrangement is: the canary proves the page can draw
+        // with the theme it is about to be given, and under a Pele theme that is a different
+        // renderer and not merely a different palette. Without this the health check would clear
+        // a page whose actual renderer is missing.
+        peleVariables: p.peleVariables,
         fontFamily: p.fontFamily
       }));
     } catch (e) {

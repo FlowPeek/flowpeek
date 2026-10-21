@@ -1862,7 +1862,7 @@ describe('[Render] which connector a label belongs to', () => {
     expect(orphans).toEqual([]);
   });
 
-  it('wins by a margin the eye can use, and names the four it does not', () => {
+  it('wins by a margin the eye can use, and names the two it does not', () => {
     // "Nearest" is not the promise; "clearly nearest" is. The margin is 12px, one and a half times
     // the gap rule 2 puts between a mask and its stroke -- a mask beside its line stands 8px off
     // it, so a rival 12px further away is at 20, and the line it belongs to is the near one by half
@@ -1870,7 +1870,7 @@ describe('[Render] which connector a label belongs to', () => {
     // the reader's three drawings, which reach 8px at a target of 8, 12px at 12 and at 16, and
     // fall back to 4px at 24 and 32 where the target stops being reachable.
     //
-    // 143 of 147 reach it. The four that do not are all margin 4 and all the same shape: a plate
+    // 165 of the 167 masks here reach it. The two that do not are both margin 4 and the same shape: a plate
     // lying over two long parallel runs of the drawing that are 4px apart, where the only thing
     // separating its own stroke from the other is 4px more of it being covered. Placement cannot
     // separate two lines 4px apart -- rule 3 asks for 12 between lanes and these are legs of two
@@ -1881,11 +1881,13 @@ describe('[Render] which connector a label belongs to', () => {
     // word is gone, and 4 astride a zone border. A label you cannot attribute is worse than one
     // that stands close to a box and better than one that is not there, which is where the weight
     // sits.
+    //
+    // There were four. `L_B2_A1_0` in both drawings went from 4px to 12px when `renderOrDecline`
+    // started growing the canvas to hold a plate the first pass had put past the content box: on the
+    // grown canvas the placer has a position off the two parallel runs that the old edge excluded.
     const SHORT = [
       '"flowchart LR" (11 lines) / L_A2_B2_0',
-      '"flowchart LR" (11 lines) / L_B2_A1_0',
       '"flowchart RL" (11 lines) / L_A2_B2_0',
-      '"flowchart RL" (11 lines) / L_B2_A1_0',
     ];
     const MARGIN = 12;
     const short = [];

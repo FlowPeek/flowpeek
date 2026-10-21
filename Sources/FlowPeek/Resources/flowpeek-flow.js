@@ -6493,13 +6493,16 @@
         if (child.kind === "cluster") place(child.id, child.x + child.contentDX, child.y + child.contentDY);
       }
     }
-    place("", marginU, marginU);
+    // Grid units added to one side of the margin, for a plate the first pass placed outside the
+    // content box. See `renderOrDecline`.
+    var grow = opts.grow || { left: 0, top: 0, right: 0, bottom: 0 };
+    place("", marginU + grow.left, marginU + grow.top);
 
     assignPorts(model);
     var counts = tagLadder(model);
 
-    var widthU = root.contentW + 2 * marginU;
-    var heightU = root.contentH + 2 * marginU;
+    var widthU = root.contentW + 2 * marginU + grow.left + grow.right;
+    var heightU = root.contentH + 2 * marginU + grow.top + grow.bottom;
     // A drawing with nothing in it still has to have a positive size: Swift turns a zero width into
     // `.renderProducedNoSVG` (MermaidRenderer.swift:502-522), which would report an engine failure
     // for a source whose only sin is being empty.
@@ -8763,7 +8766,9 @@
       + '<g class="nodes">' + nodes.join("") + "</g>"
       + "</g><defs>" + defs.join("") + "</defs></svg>";
 
-    return { svg: svg, css: css, warnings: warnings };
+    var plates = [];
+    for (i = 0; i < routed.length; i += 1) if (routed[i] && routed[i].label) plates.push(routed[i].label.rect);
+    return { svg: svg, css: css, warnings: warnings, plates: plates };
   }
 
   // ===========================================================================
@@ -8813,6 +8818,39 @@
 
     var drawing = layout(db, { measureText: p.measureText, theme: theme });
     var out = emit(db, drawing, theme, renderID);
+    // A plate the placer put outside the content box is given a canvas that holds it, by laying the
+    // drawing out again with that much more room on that side. The layout reserves room for the
+    // labels it can predict, and the placer still sometimes finds its best position past the last
+    // node: 2 plates of 68 over the sweep and the review's 16 sources, the review's 13 by 16px
+    // (a 208px label beside the left exit of a diamond whose right exit already has one) and 07 by
+    // 8px. Until this, those plates landed in the outer margin, which made the margin a reserve
+    // nobody had declared: at 20px 13's plate came out 4px from the image edge, at 16px flush with
+    // it, and at 8px the placer could no longer reach it and laid it over both of the diamond's
+    // exits. With it, the margin is the same distance from every drawing's last mark again.
+    //
+    // A second pass rather than a wider first one, because the first is what finds the plate and
+    // only it knows how far out it went; on 186 of those 188 drawings it never runs. The
+    // limit is the same fact read the other way: the first pass places against the canvas it was
+    // given, so a margin too narrow to reach the position it would have chosen still changes the
+    // choice, as at 8px.
+    var m = drawing.padding;
+    var grow = { left: 0, top: 0, right: 0, bottom: 0 };
+    for (var k = 0; k < out.plates.length; k += 1) {
+      var r = out.plates[k];
+      grow.left = Math.max(grow.left, m - r.x);
+      grow.top = Math.max(grow.top, m - r.y);
+      grow.right = Math.max(grow.right, r.x + r.width - (drawing.width - m));
+      grow.bottom = Math.max(grow.bottom, r.y + r.height - (drawing.height - m));
+    }
+    if (grow.left > 0 || grow.top > 0 || grow.right > 0 || grow.bottom > 0) {
+      grow = { left: gridUp(grow.left, 0) / GRID, top: gridUp(grow.top, 0) / GRID,
+        right: gridUp(grow.right, 0) / GRID, bottom: gridUp(grow.bottom, 0) / GRID };
+      db = new FlowDB();
+      db.clear();
+      parse(p.source, db);
+      drawing = layout(db, { measureText: p.measureText, theme: theme, grow: grow });
+      out = emit(db, drawing, theme, renderID);
+    }
 
     // Post-conditions on this module's own output, asserted rather than sanitised: `themeCSS` is
     // app-authored and a source cannot reach it (it is in the glue's SECURE_KEYS), so a hazard here

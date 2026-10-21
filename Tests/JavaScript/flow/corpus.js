@@ -206,17 +206,20 @@ export const STEPPED_PAIRS = [];
 
 export const ALIGNED_PAIRS = 188;
 
-// --- what six visual reviews left ------------------------------------------------------------
+// --- what seven visual reviews left ----------------------------------------------------------
 //
 // Separately from the records above, which are properties of the generated space, this renderer
 // was compared against Pele -- the other engine in this app, drawing the same sources under the
-// `.pele` theme -- by six reader-facing reviews of the same eighteen drawings. The per-source
+// `.pele` theme -- by seven reader-facing reviews of the same eighteen drawings. The per-source
 // verdict, "which would a reader rather have", moved PELE 9 : OURS 3 : TIE 4, then 5:5:6, 3:5:8,
-// 2:5:9 and finally OURS 6 : PELE 1 : TIE 9 over sixteen sources, and OURS 7 : PELE 2 : TIE 9 once
-// the two a reader had actually sent in as broken are counted.
+// 2:5:9, 1:6:9 and finally OURS 7 : PELE 1 : TIE 10 across all eighteen, counting the two a reader
+// had actually sent in as broken.
 //
-// Two things are deliberately left, and they are written here rather than in a commit message so
-// that the next person finds them from the test corpus rather than from `git log`.
+// The one drawing still given to Pele is the dense DAG below, and the seventh review graded what
+// is left of it a defensible style difference rather than a defect. Both items here are therefore
+// recorded rather than open: they are written beside the corpus so the next person finds them from
+// the tests rather than from `git log`, and neither is a reason to change the renderer again
+// without a reader asking for it.
 //
 // FACE-PRESSED HOPS IN A DENSE DAG. A crossing that lands hard against a box face has nowhere for
 // its bump to sit: a hop needs 16px of straight run on each side and may not lie under a node.

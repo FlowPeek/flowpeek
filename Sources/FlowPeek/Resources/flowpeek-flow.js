@@ -7446,6 +7446,12 @@
         // between its baseline box and the first enclosed node. The 2 units here plus the padding
         // below buy 20px, which is the near side of that.
         header = even(cluster.label.h + 2);
+        // A zone the drawing found a route crossing its title along the band (see `titleRoom` in
+        // `renderOrDecline`) takes a lane under the title: deep enough that a first-row node's
+        // arrival station, ARRIVE above its face, sits a gap below the title's box rather than in
+        // it, so the turn into the zone is made under the words instead of through them.
+        var room = opts.titleRoom && opts.titleRoom[cluster.id];
+        if (room && room.lane) header = Math.max(header, even(cluster.label.h + 1 + LABEL_GAP + ARRIVE - padU));
       } else {
         cluster.label = null;
       }
@@ -7457,6 +7463,10 @@
       // of the widened zone; leaving them against the left padding put a short row of nodes under
       // one end of a long title and read as a misalignment rather than as a wide title.
       var bandU = cluster.label ? Math.max(inner.contentW, cluster.label.w) : inner.contentW;
+      // And one crossed straight through by a line it cannot slide clear of is widened by what the
+      // drawing measured it needs; the contents stay centred, so the line moves half of it.
+      var roomW = opts.titleRoom && opts.titleRoom[cluster.id];
+      if (cluster.label && roomW && roomW.wide > 0) bandU = even(bandU + Math.ceil(roomW.wide / GRID));
       cluster.contentDX = padU + Math.floor((bandU - inner.contentW) / 2);
       cluster.contentDY = padU + header;
       cluster.offCentre = !!inner.offCentre;
@@ -10176,6 +10186,28 @@
     // Between the two passes on purpose: every stroke is drawn by now, which is what the title has
     // to dodge, and no edge label is placed yet, which is what has to dodge the title.
     for (i = 0; i < titles.length; i += 1) slideTitle(titles[i].cluster, titles[i].rect, ctx);
+    // Which titles a stroke still crosses once every title has slid as far as its band allows, and
+    // what room would clear it -- the layout's to give, on a second pass (`titleRoom`). A crossing
+    // ALONG the band asks for a lane under the title; one ACROSS it asks for the band to widen
+    // until the title, at home, ends a gap short of the line. Where both happen it is one route's
+    // turn into a first-row node, whose last leg drops across the title's foot, and the lane alone
+    // removes both, so the width is not asked for.
+    var struck = {};
+    for (i = 0; i < titles.length; i += 1) {
+      var tc = titles[i].cluster;
+      for (var sd = 0; sd < ctx.drawn.length; sd += 1) {
+        var sp = ctx.drawn[sd][0], sq = ctx.drawn[sd][1];
+        if (!segmentCrossesRect(sp, sq, titles[i].rect)) continue;
+        var mark = struck[tc.id] || (struck[tc.id] = { lane: false, wide: 0 });
+        if (sp.y === sq.y) { mark.lane = true; continue; }
+        // A struck title is at its home: `slideTitle` leaves it there when nothing clears.
+        var home = tc.labelX;
+        mark.wide = Math.max(mark.wide, 2 * (home + tc.labelWidth + LABEL_GAP_PX - sp.x));
+      }
+    }
+    for (var sz in struck) {
+      if (Object.prototype.hasOwnProperty.call(struck, sz) && struck[sz].lane) struck[sz].wide = 0;
+    }
 
     // In source order, each label seeing the masks placed before it and not the ones after --
     // greedy, which is the shape that usually means the last label gets the leavings.
@@ -10475,7 +10507,7 @@
 
     var plates = [];
     for (i = 0; i < routed.length; i += 1) if (routed[i] && routed[i].label) plates.push(routed[i].label.rect);
-    return { svg: svg, css: css, warnings: warnings, plates: plates };
+    return { svg: svg, css: css, warnings: warnings, plates: plates, struck: struck };
   }
 
   // ===========================================================================
@@ -10496,6 +10528,12 @@
       return { ok: false, reason: "threw:" + String((e && e.message) || e).slice(0, 120) };
     }
   }
+
+  // How many times a drawing is laid out again for its titles. Room given to one zone moves the
+  // routes into the others, so a struck title can appear where none was; one round settles every
+  // drawing in the sweep and the held-out twenty, and a first draft of the nested-zone family needed
+  // two. Bounded because a route that could follow its title forever must still draw.
+  var TITLE_ROUNDS = 3;
 
   function renderOrDecline(input) {
     var p = input || {};
@@ -10525,6 +10563,46 @@
 
     var drawing = layout(db, { measureText: p.measureText, theme: theme });
     var out = emit(db, drawing, theme, renderID);
+    // A route through a zone's title, answered by laying the drawing out again with room for it.
+    //
+    // The title names the whole group, and a stroke through it leaves the group unnamed: the
+    // held-out review's one clear loss to Pele, h14, had three, and h07 one. The router could not
+    // avoid them. A node in a zone's first row has its arrival station ARRIVE above its face, and
+    // the header leaves less than that between the title and the node, so the station itself is
+    // in the title's box: a route arriving from a lane beside the zone turns across the title to
+    // reach it, and no cross-line between two stations, one of them inside the box, clears it.
+    // Where the route arrives straight down a zone narrower than twice its title, the port is under
+    // the title and `slideTitle` has nowhere to go.
+    //
+    // Rejected on the geometry, not built: the title box as an obstacle in `legIsClear`. It refuses
+    // the route but offers it nothing -- the arrival station is in the box -- so the edge would fall
+    // to a weaker pass and through the title anyway, and a straight drop could only go round it by
+    // two corners more, against a bend budget this file holds at Pele's or better. Measured and
+    // rejected: the lane under every titled zone. It clears every title too, but changes 32 of the
+    // 248 drawings in the sweep and the held-out twenty and adds 608,128px2 of content to
+    // differential.mjs's 231; this changes the 9 that had a struck title and adds 322,304.
+    // Strikes over those 248: 13 -> 0, bends unchanged, render 176 -> 184ms a pass. It is a second
+    // pass for the reason the plate pass below is: only the first knows where the routes went.
+    var titleRoom = null;
+    for (var round = 0; round < TITLE_ROUNDS; round += 1) {
+      var more = false;
+      for (var zid in out.struck) {
+        if (!Object.prototype.hasOwnProperty.call(out.struck, zid)) continue;
+        titleRoom = titleRoom || {};
+        var had = titleRoom[zid] || { lane: false, wide: 0 };
+        var got = out.struck[zid];
+        var lane = had.lane || got.lane;
+        var wide = had.wide + got.wide;
+        if (lane !== had.lane || wide !== had.wide) more = true;
+        titleRoom[zid] = { lane: lane, wide: wide };
+      }
+      if (!more) break;
+      db = new FlowDB();
+      db.clear();
+      parse(p.source, db);
+      drawing = layout(db, { measureText: p.measureText, theme: theme, titleRoom: titleRoom });
+      out = emit(db, drawing, theme, renderID);
+    }
     // A plate the placer put outside the content box is given a canvas that holds it, by laying the
     // drawing out again with that much more room on that side. The layout reserves room for the
     // labels it can predict, and the placer still sometimes finds its best position past the last
@@ -10555,7 +10633,7 @@
       db = new FlowDB();
       db.clear();
       parse(p.source, db);
-      drawing = layout(db, { measureText: p.measureText, theme: theme, grow: grow });
+      drawing = layout(db, { measureText: p.measureText, theme: theme, grow: grow, titleRoom: titleRoom });
       out = emit(db, drawing, theme, renderID);
     }
 

@@ -184,3 +184,52 @@ describe('[Zones] a connector stays out of a zone it does not belong to', () => 
     }
   });
 });
+
+// A connector does not run through a zone's title.
+//
+// The title is the one label that names a whole group, and a stroke through it leaves the group
+// unnamed. The held-out review counted it on unseen sources -- h14's three nested namespace and
+// availability-zone titles and one in h07 -- and it decided h14 for Pele. The cause is upstream of
+// the router: a node in a zone's first row has its arrival station, a 24px approach above its
+// face, inside the band the title is printed in, so a route arriving from a lane beside the zone
+// turns across the title to reach it, and one arriving straight down a narrow zone crosses a
+// title that fills the half of the band left of the port.
+//
+// Measured on the title's own box at the position the drawing printed it, after `slideTitle` has
+// moved it wherever the band let it.
+function titleStrikes(source) {
+  const drawing = laidOut(source);
+  const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText });
+  expect(out.reason || 'ok').toBe('ok');
+  const titles = [];
+  const tre = /<g class="cluster[^"]*" id="fp-0-([^"]*)"><rect[^>]*\/><g class="cluster-label" transform="translate\((-?\d+),(-?\d+)\)"/g;
+  for (const m of out.svg.matchAll(tre)) {
+    const zone = drawing.clusters.find((c) => c.id === m[1]);
+    if (!zone || !(zone.labelWidth > 0)) continue;
+    titles.push({ id: zone.id, x: Number(m[2]), y: Number(m[3]), width: zone.labelWidth, height: zone.labelHeight });
+  }
+  expect(titles.length).toBe(drawing.clusters.filter((c) => c.labelWidth > 0).length);
+  const re = /<path class="[^"]*flowchart-link[^"]*" data-id="([^"]*)" d="([^"]*)"/g;
+  const found = [];
+  for (const [, id, d] of out.svg.matchAll(re)) {
+    const points = skeleton(d);
+    for (const title of titles) {
+      for (let i = 0; i + 1 < points.length; i += 1) {
+        if (crossesInterior(points[i], points[i + 1], title)) { found.push(`${id} through ${title.id}'s title`); break; }
+      }
+    }
+  }
+  return found;
+}
+
+describe('[Zones] a connector stays off a zone title', () => {
+  it('holds on every SWEEP source that has a zone, and on both review drawings', () => {
+    const withZones = SWEEP.filter(({ source }) => /\bsubgraph\b/.test(source));
+    const found = [
+      ...titleStrikes(NESTED).map((f) => `nested: ${f}`),
+      ...titleStrikes(CROWDED).map((f) => `crowded: ${f}`),
+      ...withZones.flatMap(({ name, source }) => titleStrikes(source).map((f) => `${name}: ${f}`)),
+    ];
+    expect(found).toEqual([]);
+  });
+});

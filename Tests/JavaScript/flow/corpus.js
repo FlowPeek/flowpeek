@@ -139,6 +139,27 @@ const FAMILIES = {
   'fork with a returning arm': (dir) => [
     `flowchart ${dir}`, '  A[Idle] -->|connect| B[Busy]', '  A -->|sleep| C[Paused]', '  C -->|wake| A',
   ].join('\n'),
+  // Zones whose title a route has to pass. Every zone family above enters its zones where the
+  // title is not: a single column wider than its title, or an edge arriving from below. None put a
+  // zone's first-row node under a title that fills the band, with the route arriving from a lane
+  // beside the zone or straight down a narrow one, and the held-out review found exactly that on
+  // unseen sources: three titles struck through in h14 and one in h07. One family arrives from
+  // the side into two sibling zones, one straight down into a zone narrower than twice its title,
+  // and one into sibling zones nested inside a third.
+  'entry beside a zone title': (dir) => [
+    `flowchart ${dir}`, '  dns[Latency routing] --> ing1[Ingress]', '  dns --> ing2[Ingress]',
+    '  subgraph blue[namespace: checkout]', '    ing1 --> api1[Checkout API]', '  end',
+    '  subgraph green[namespace: checkout]', '    ing2 --> api2[Checkout API]', '  end',
+  ].join('\n'),
+  'entry through a zone title': (dir) => [
+    `flowchart ${dir}`, '  A[Gateway] --> B[Handler]',
+    '  subgraph back[Backend services]', '    B --> C[Worker]', '  end', '  C --> D[(Store)]',
+  ].join('\n'),
+  'nested entry under titles': (dir) => [
+    `flowchart ${dir}`, '  R[Router] --> I[Ingress]', '  R --> J[Ingress]',
+    '  subgraph region[us-east-1]', '    subgraph az[AZ us-east-1a]', '      I --> P[API pod]', '    end',
+    '    subgraph db[AZ us-east-1b]', '      J --> Q[API pod]', '    end', '  end',
+  ].join('\n'),
   'long forward edge': (dir) => [
     `flowchart ${dir}`, '  A[Start] --> B[One] --> C[Two] --> D[Three] --> E[End]',
     '  A --> P[Wide parallel step] --> Q[Another one] --> E', '  A -->|skip| E',
@@ -272,8 +293,8 @@ export const TIGHT_MASKS = [];
  * 222 pairs in the generated space, against 23 in the twelve literals it replaced. It was 188 until
  * the three link-form families went in; their 14 pairs are all one segment, and 202 until the three
  * long-edge families added 10 more, which were one segment before their fix as well as after, and
- * 212 until the two labelled-decision families added 10, and 222 until the two busy labelled-face
- * families added 20.
+ * 212 until the two labelled-decision families added 10, 222 until the two busy labelled-face
+ * families added 20, and 242 until the three zone-title families added 20.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -284,7 +305,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 242;
+export const ALIGNED_PAIRS = 262;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

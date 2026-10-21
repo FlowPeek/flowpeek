@@ -727,18 +727,25 @@ describe('[Render] the six connector rules', () => {
   });
 
   for (const source of SWEEP_SOURCES) {
-    it(`keeps every mask a visible distance from every stroke: ${name(source)}`, () => {
+    it(`keeps every mask a visible distance from every stroke it does not sit on: ${name(source)}`, () => {
       // SKILL.md §6 rule 2 wants 6-10px. Everything here moves in fours, so the reachable answers
-      // are 8 or nothing -- and the annotated segment sits at exactly 8 by construction.
+      // are 8 or nothing -- and a mask beside the segment it annotates sits at exactly 8 by
+      // construction. The one stroke excused is the mask's own run when the mask sits ON it, the
+      // line entering one edge and leaving the opposite one: that is the placement the placer
+      // prefers, and a gap to the stroke under the plate is not a question it can be asked.
       const out = drawn(source);
-      const strokes = edgePaths(out.svg).flatMap((p) => segmentsOf(polyline(p.d)));
-      const re = /<g class="label[^"]*" data-id="[^"]*" transform="translate\((-?\d+),(-?\d+)\)"><rect class="background" x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/g;
+      const paths = edgePaths(out.svg);
+      const re = /<g class="label[^"]*" data-id="([^"]*)" transform="translate\((-?\d+),(-?\d+)\)"><rect class="background" x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/g;
       let m;
       while ((m = re.exec(out.svg)) !== null) {
         const box = {
-          x: Number(m[1]) + Number(m[3]), y: Number(m[2]) + Number(m[4]),
-          width: Number(m[5]), height: Number(m[6]),
+          x: Number(m[2]) + Number(m[4]), y: Number(m[3]) + Number(m[5]),
+          width: Number(m[6]), height: Number(m[7]),
         };
+        const strokes = paths.flatMap((path) => segmentsOf(polyline(path.d)).filter(([p, q]) => path.id !== m[1]
+          || !(p.y === q.y
+            ? p.y > box.y && p.y < box.y + box.height && Math.min(p.x, q.x) <= box.x && Math.max(p.x, q.x) >= box.x + box.width
+            : p.x > box.x && p.x < box.x + box.width && Math.min(p.y, q.y) <= box.y && Math.max(p.y, q.y) >= box.y + box.height)));
         for (const [p, q] of strokes) {
           let gap = null;
           if (p.y === q.y && Math.max(p.x, q.x) > box.x && Math.min(p.x, q.x) < box.x + box.width) {
@@ -1943,18 +1950,21 @@ describe('[Render] which connector a label belongs to', () => {
     expect(swallowed).toEqual([]);
   });
 
-  it('keeps the mask beside the stroke wherever beside is legible', () => {
-    // Rule 2 is still the default and this is the count that says so: sitting on the line is what
-    // the placer falls back to, not what it prefers. An all-on-the-line placer -- mermaid's rule,
-    // tried and rendered -- put 179 of 216 masks over a stroke and stacked 18 of them on each
-    // other; this one puts 49 of 148 over a stroke and stacks none. On a drawing with nothing
-    // crowding it, none at all.
+  it('puts the mask on its own line wherever the line can carry it cleanly', () => {
+    // The default, and the count that says so. It was the other way round -- BESIDE first, ON
+    // only where beside could not be owned -- and that is what the reader's review of sixteen
+    // drawings ranked first of ten weaknesses: "edge labels float off their lines, so a reader
+    // can't tell which edge a label names". Beside means 8px of white between the plate and its
+    // stroke, and in a drawing with more than one line in view that gap reads as open space: of
+    // 128 labels over the sweep, the three reported drawings, eight crowded stress sources and the
+    // review's sixteen, 110 touched no stroke at all before this, and Pele, which sits every label
+    // on its line, has 0.
     //
-    // 49 and not the 44 it was: scoring ownership as a margin rather than as a verdict made the
-    // line worth taking in five more places, which is the price of the block above and is paid in
-    // the currency rule 2 cares about. Buying them back was swept and costs more than it saves --
-    // the price of an on-the-line placement is 16 in `placeEdgeLabel`, and at 30 the share falls
-    // to 48 of 148 while the reader's three drawings drop from a 12px ownership floor to 8.
+    // 48 of 168 here sat on their own line before; 115 do now. The rest are where ON would harm
+    // something -- a run too short for the plate, a sibling exit 16px away under it, a node --
+    // and the plain drawing below is one of them: both branches leave the rhombus 16px apart and
+    // turn within 44px, so a plate on either first leg covers the other and the last legs are too
+    // short to carry it.
     let on = 0;
     let total = 0;
     for (const source of ALL) {
@@ -1967,8 +1977,8 @@ describe('[Render] which connector a label belongs to', () => {
         if (sitsOn(mask, own.d)) on += 1;
       }
     }
-    expect(total).toBeGreaterThanOrEqual(148);
-    expect(on / total).toBeLessThan(0.35);
+    expect(total).toBeGreaterThanOrEqual(168);
+    expect(on / total).toBeGreaterThan(0.65);
 
     const plain = drawn('flowchart TD\n  A[Start] --> B{Is it ready?}\n  B -->|yes| C[(Store)]\n  B -->|no| D((Retry))');
     const plainPaths = edgePaths(plain.svg);
@@ -1982,5 +1992,42 @@ describe('[Render] which connector a label belongs to', () => {
           .toBe(`${mask.id} vs its own stroke: false`);
       }
     }
+  });
+
+  it('puts every label of the reviewed state machine on its own line and on no other', () => {
+    // The review's source 03, drawn by this renderer and by Pele side by side. In ours "timeout",
+    // "backoff elapsed", "heartbeat lost", "give up", "drained", "user logout" and "auth error"
+    // each stood 8px beside a run in open space, touching no line, and the reader could not say
+    // which edge any of them named; in Pele every label sits on its own curve. Asserted as the
+    // reader's question rather than as a score: the plate's own stroke enters one edge of it and
+    // leaves the opposite one, and no other stroke touches it.
+    const source = [
+      'flowchart TD',
+      '    idle[Idle] -->|connect| connecting[Connecting]',
+      '    connecting -->|success| online[Online]',
+      '    connecting -->|timeout| retry[Retry wait]',
+      '    connecting -->|auth error| failed[Failed]',
+      '    retry -->|backoff elapsed| connecting',
+      '    online -->|heartbeat lost| retry',
+      '    online -->|user logout| idle',
+      '    failed -->|user retries| connecting',
+      '    failed -->|give up| idle',
+      '    online -->|server shutdown notice| draining[Draining]',
+      '    draining -->|drained| idle',
+    ].join('\n');
+    const svg = drawn(source).svg;
+    const paths = edgePaths(svg);
+    const found = masks(svg);
+    expect(found.length).toBe(11);
+    const loose = [];
+    for (const mask of found) {
+      const own = paths.find((p) => p.id === mask.id);
+      if (!sitsOn(mask, own.d)) loose.push(`${mask.id} is not on its own line`);
+      for (const other of paths) {
+        if (other.id === mask.id) continue;
+        if (segmentsOf(polyline(other.d)).some((leg) => crosses(leg, mask))) loose.push(`${mask.id} covers ${other.id}`);
+      }
+    }
+    expect(loose).toEqual([]);
   });
 });

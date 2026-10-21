@@ -6669,6 +6669,9 @@
   // than as an 8 of its own: the layout reserves the room and the placer spends it, and two
   // spellings of one number is how those two stop agreeing.
   var LABEL_GAP_PX = px(LABEL_GAP);
+  // How long a marker is along its route: `markerMarkup` draws every one of them 8 wide. Only the
+  // placer needs it as a length -- it is how much of an ON label's tail an arrowhead takes.
+  var HEAD_PX = px(2);
   // How much nearer a label's plate has to be to its own connector than to the nearest connector
   // that is not, before "which line is this naming?" stops needing an answer.
   //
@@ -7572,7 +7575,19 @@
       // this is not the trade it looks like; two properties that can both be held are both held.
       if (!inside) penalty += 200;
     }
+    // Foreign strokes only. `ctx.drawn` holds every route, this one included, and the label's own
+    // legs are charged by the loop below, which is the one that knows which leg the mask is SITTING
+    // on. Counted here as well, every leg was charged twice and the sitting one -- exempt below --
+    // was charged anyway: every ON candidate in the review's source 03 came out at 10 with its
+    // nearest foreign stroke 24-60px away, so ON cost 26 against the 16 the tie-break in
+    // `placeEdgeLabel` was swept to mean, and every ON placement was reported as crowded. Same
+    // identity test as `nearestRival`: two edges sharing a lane share coordinates, not objects.
     for (i = 0; i < ctx.drawn.length; i += 1) {
+      var mine = false;
+      for (var j = 0; j < own.length; j += 1) {
+        if (own[j][0] === ctx.drawn[i][0] && own[j][1] === ctx.drawn[i][1]) { mine = true; break; }
+      }
+      if (mine) continue;
       if (segmentCrossesRect(ctx.drawn[i][0], ctx.drawn[i][1], near)) penalty += 10;
     }
     // Its own route counts too: the perpendicular offset clears only the segment the label
@@ -7587,29 +7602,30 @@
   // Where an edge label goes, and which of the two ways of attaching it to its line is used.
   //
   // SKILL.md §6 rule 2 puts the mask BESIDE the stroke with a 6-10px gap so the connector stays
-  // traceable under its own annotation, and that is still the first thing tried on every segment,
-  // both sides, longest first. It is not always available. The rule was written for the labels the
-  // guide asks for -- fourteen characters, all caps -- and the reported sources carry thirty:
+  // traceable under its own annotation. Two cases have taken that default apart. The labels the
+  // reported sources carry are thirty characters where the guide asks for fourteen:
   // `negotiate(adjustRate, original)` is a 152px mask, so BESIDE a vertical run its centre stands
-  // 84px off its own line. In nego.mmd the edge it names and the edge beside it are 16px apart, so
-  // the mask's own stroke was 84px away and a different stroke was 8px away, and the reader
-  // reported exactly that: a label whose owner could not be told. Measured over 79 sources, 63 of
-  // 216 masks had some other connector nearer their centre than their own.
+  // 84px off its own line, and in nego.mmd a different stroke was 8px away. And a short label
+  // beside its line is still 8px of white away from it: the review of sixteen drawings beside
+  // Pele found labels a reader could not attach in a drawing where every margin this function
+  // scores was safe. See the tie-break at the bottom.
   //
-  // So the second way: the mask sits ON the run, centred on the stroke, the way mermaid places
-  // every label (see the three *-mermaid.png the reader sent). Ownership is then not a judgement --
-  // the line enters one edge of the mask and leaves the opposite edge on the same axis, and it is
-  // the stroke the plate covers most of, which is what `rectSegDist` measures under a plate.
+  // So the mask sits ON the run, centred on the stroke, wherever that is clean -- the way mermaid
+  // and Pele place every label. Ownership is then not a judgement: the line enters one edge of the
+  // mask and leaves the opposite edge on the same axis, and it is the stroke the plate covers most
+  // of, which is what `rectSegDist` measures under a plate. BESIDE is what is left where ON would
+  // harm something: a run too short for the plate, another stroke under it or within its gap, a
+  // node, a mask, a zone wall.
   //
-  // Rejected: doing what mermaid does everywhere. It buys the ambiguous masks by covering every
-  // stroke in the drawing, and rule 2's gap is what makes the rest traceable -- they are already
-  // unambiguous and they lose nothing by staying beside the line. The two are ordered by score
-  // instead: a clean BESIDE scores 0 and wins, an ON scores 16, and the worst BESIDE can do is 180.
+  // Rejected: ON at any price, which is what mermaid does. The ordering below never takes ON over a
+  // clean BESIDE once ON costs it anything, because the price of ON in a crowded drawing is another
+  // connector under the plate or inside its gap.
   //
-  // What is scored is a MARGIN, not a verdict, and that is the whole of this pass. Measured over
-  // the 47-source corpus before it, by the metric below: 29 of 147 masks stood no nearer their own
-  // connector than some other, the worst of them 64px nearer a line it does not name, and one of
-  // the 29 was on a drawing the reader sent. After it: 0, with 143 of the 147 clear by 12px.
+  // What is scored is a MARGIN, not a verdict. Measured over the 47-source corpus before it, by the
+  // metric below: 29 of 147 masks stood no nearer their own connector than some other, the worst of
+  // them 64px nearer a line it does not name, and one of the 29 was on a drawing the reader sent.
+  // After it: 0, with 143 of the 147 clear by 12px. render.spec.js still asserts both, unchanged,
+  // and both still hold.
   //
   // ON is offered only where the run is longer than the mask plus a visible tail of stroke at each
   // end. A mask longer than the segment it sits on swallows the whole connector, and then rule 2's
@@ -7646,6 +7662,11 @@
       // Half the mask's extent ALONG the run, which is what decides whether the run can carry it.
       var alongHalf = seg.horizontal ? halfW : halfH;
       var onFits = (hi - lo) >= 2 * (alongHalf + LABEL_GAP_PX);
+      // Where along this run a marker is drawn, if it carries one: the route's first point for a
+      // start head, its last for an end head. See the head term below.
+      var tips = [];
+      if (seg.at === 0 && ARROW_MARKERS[edge.arrowStart]) tips.push(seg.horizontal ? seg.p.x : seg.p.y);
+      if (seg.at === points.length - 2 && ARROW_MARKERS[edge.arrowEnd]) tips.push(seg.horizontal ? seg.q.x : seg.q.y);
       for (var m = 0; m < 3; m += 1) {
         var onLine = (m === 2);
         if (onLine && !onFits) continue;
@@ -7749,28 +7770,76 @@
           // 15 and 25 give the same drawing, so this is the cheapest setting that works rather than
           // a tuned one.
           if (centreMargin(cx, cy, own, ctx) <= 0) penalty += 5;
+          // A foreign stroke UNDER the plate, charged apart from one merely within the gap. The stroke
+          // term in `labelPenalty` gives both the same 10, and under the plate the ownership margin
+          // stays positive -- the plate covers its own run more deeply than a line crossing it -- so
+          // nothing else in the score could tell a plate that erases a connector from one that
+          // stands 4px off it. With ON the default it mattered at once: on a labelled crossing mesh
+          // "crossing alpha one to two" took an ON with another edge's leg running under it (10)
+          // over a BESIDE that only stood near two (20), and over 128 labels the plates erasing a
+          // foreign stroke went from 9 to 12.
+          //
+          // 10, so a stroke under the plate costs twice one beside it. Swept at 0, 5, 10, 20, 26,
+          // 28, 40, 50, 60, 75 and 90: 12 erasures at 0 and 5, 9 from 10 to 50, 6 at 90 -- and from
+          // 60 on the ownership tests in render.spec.js fail, because the taper above charges 90
+          // for a margin of zero and a label tied between two lines starts to win over an ON that
+          // covers a crossing. A label whose line cannot be told is the worse of the two: a crossing
+          // under a plate still comes out of the far edge. 10 is the bottom of the flat stretch.
+          if (rival < 0) penalty += 10;
+          // An ON plate inside a marker's length plus rule 2's gap of the tip it points at. The head
+          // then sits flush on the plate with no shaft and reads as a barb on the label rather than
+          // as the end of a line: without this term 7 of 91 ON plates did, against Pele's nearest
+          // at 19px. Priced, not forbidden, and at 10, a stroke within the gap. Forbidden -- the
+          // tail at that end lengthened by HEAD_PX -- it took 7 labels off their lines and moved
+          // `H{Hub} -->|route two| B` up onto its two siblings' lanes, which is worse than the
+          // flush head it avoided. Priced, 3 of 87 ON plates stand that close, as 3 of 18 did before.
+          if (onLine) {
+            for (var k = 0; k < tips.length; k += 1) {
+              var along = seg.horizontal ? cx : cy;
+              if (Math.abs(along - tips[k]) - alongHalf < LABEL_GAP_PX + HEAD_PX) penalty += 10;
+            }
+          }
           // What the reader actually loses here, before the ordering between the two ways of
-          // attaching a label is applied. `crowded` is read as a warning slug, and a label sitting
-          // on its own line is a choice this function makes on a clear canvas, not a compromise it
-          // was forced into -- scoring the tie-break into it would have reported 43 crowded
-          // drawings in a corpus of 47.
+          // attaching a label is applied. `crowded` is read as a warning slug, and which of the two
+          // ways a clean label takes is a choice this function makes on a clear canvas, not a
+          // compromise it was forced into.
           var harm = penalty;
-          // The tie-break that keeps rule 2 the default: an ON placement is worse than a clean
-          // BESIDE one and better than every failure BESIDE can have.
+          // The tie-break, and it now runs the other way: ON is the default and BESIDE pays.
           //
-          // 16, which against the gradient above is two pixels of ownership margin. It was 4, and
-          // 4 was priced against a verdict: a verdict is cheap to satisfy, so a 4 let the placer
-          // take the line for a pixel of margin and the share of masks sitting on their own stroke
-          // went from 44 of 148 to 53.
+          // It was ON that paid, 16, so that rule 2's gap was the default and the line was taken
+          // only where beside could not be owned. Two things were wrong with it. The price was not
+          // 16: `labelPenalty` charged every ON for the run it was sitting on, through `ctx.drawn`,
+          // so every ON scored at least 26, and the sweep that settled on 16 -- at 16, 30, 45, 60,
+          // 90, 120 and 180 -- was really run 10 higher at every point. And ownership by margin was
+          // the wrong measure of what the reader loses. The review of sixteen drawings beside Pele
+          // ranked "edge labels float off their lines" first of ten weaknesses, and named labels
+          // with every margin the score called safe: in its source 03 "timeout" stood 8px off its
+          // own line with the nearest other one 64px from the plate, and in 04 "Yes, within
+          // policy" stood the same 8 and 64. A plate beside its line is 8px of white away from
+          // it, and with more than one line in view that reads as open space. Over
+          // 128 labels -- the sweep, the three reported drawings, eight crowded stress sources and
+          // the review's sixteen -- 110 touched no stroke at all; Pele, which sits every label on
+          // its line, has 0.
           //
-          // Swept at 16, 30, 45, 60, 90, 120 and 180, with everything else at its final setting.
-          // The share falls the whole way -- 49, 48, 47, 43, 35, 33, 21 of 148 -- and what it is
-          // bought with is ownership: at 60 two masks lose it outright and at 180 twenty-four do,
-          // and the three drawings the reader sent drop from a 12px floor to 8 at 30 and to 4 from
-          // 45 on. 16 is the only setting on that curve that holds both, which is the trade this
-          // block is about: rule 2 is the default, and it stops being the default at the exact
-          // point where honouring it costs the reader the ownership of a label.
-          if (onLine) penalty += 16;
+          // Rejected: keeping BESIDE wherever it is unambiguous, which is what the 16 meant to do.
+          // Scored as "no foreign stroke within D of the plate", and measured with the rest of this
+          // score as it stood, D has to pass 64 to move the review's labels at all -- at 48, 87 of
+          // 128 still touch nothing -- and at 100 it still leaves 49 that way, "connect" in source
+          // 03 among them, beside its line while the ten around it sit on theirs.
+          //
+          // 8 because it has to sit between two terms above: over the 5 the centre tie-break
+          // charges, and under the 10 a stroke within the gap does, so that ON is taken only while
+          // it is clean and any real harm on it hands the label back to a clean BESIDE. Swept at 1,
+          // 4, 9, 10, 12 and 16: 86 of 128 on their lines at 1 and 4, 87 from 8 to 10, and from 12
+          // on an ON with a stroke inside its gap beats a clean BESIDE -- plates erasing a foreign
+          // stroke rise from 9 to 12 and render.spec.js's gap and parallel-run tests fail.
+          //
+          // Measured at this setting over the same 128: on their own lines 18 -> 87, touching no
+          // stroke 110 -> 41, and ambiguous -- a foreign stroke under the plate, or one less than
+          // twice as far from the label's middle as its own -- 60 -> 45. What is left is mostly the
+          // layout's: a rhombus's two exits leave 16px apart, so a plate on either first leg covers
+          // the other, and five edges between one pair share a corridor no placement can separate.
+          if (!onLine) penalty += 8;
           if (best === null || penalty < best.penalty) {
             best = { x: cx, y: cy, rect: rect, penalty: penalty, onLine: onLine, crowded: harm > 0 };
             if (penalty === 0) return best;

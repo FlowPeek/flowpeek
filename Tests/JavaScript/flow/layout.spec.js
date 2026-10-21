@@ -632,7 +632,8 @@ describe('[Layout] edges', () => {
 });
 
 describe('[Layout] the room an edge label needs', () => {
-  // A label sits BESIDE its stroke, never on it (SKILL.md §6 rule 2), so in a TB drawing it needs
+  // A label that cannot sit ON its stroke falls back to BESIDE it (SKILL.md §6 rule 2), and the
+  // layout cannot know in advance which of the two the placer will take, so in a TB drawing it needs
   // room ACROSS the ranks -- the axis `gapLabel` does not reserve. Before this the layout counted
   // only the other one and the placer was left to put the label down somewhere regardless: over 79
   // sources 41 of 88 labels ended within rule 2's own 8px of a node and 8 outside the viewBox.

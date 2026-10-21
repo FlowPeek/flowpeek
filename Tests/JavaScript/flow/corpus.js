@@ -9,7 +9,8 @@
 // SWEEP is generated, and it is what a test means by "on every source". It is the same shape as
 // the corpus `arrival.spec.js` built for itself: every node geometry on every rank direction, each
 // one also drawn with two more edges onto the same face so the port is fanned off centre, plus the
-// structural families -- back edges, rank skips, fans, self loops, crossings, nested subgraphs.
+// structural families -- back edges, rank skips, fans, self loops, crossings, nested subgraphs --
+// and the link forms: open links, heads at both ends, crosses, circles and the invisible link.
 //
 // WHY THE SPLIT EXISTS. Until this file, "the corpus" was twelve literals in render.spec.js, and a
 // sweep over them was an assertion about twelve drawings rather than about the renderer. Three
@@ -66,6 +67,30 @@ const FAMILIES = {
   ladder: (dir) => [
     `flowchart ${dir}`, '  R[Request] --> V{Valid?}', '  V -->|no| E[Reject]', '  V -->|yes| P[Process]',
     '  P --> S[(Store)]', '  S --> N[Notify]', '  N --> R', '  E --> R',
+  ].join('\n'),
+  // The link forms. Until these, every generated edge was `-->`, and the held-out review found
+  // the cost: an open link `---` was drawn with an arrowhead on 6 of 6 occurrences. Two specimens
+  // above already wrote `---`, but no assertion read the head on them -- one asserted that `A --- B`
+  // HAD a pointEnd marker -- and none of the 18 reviewed sources wrote one. One family per kind of end:
+  // open (no head, every stroke and length, labelled both ways), headed at both ends or with a
+  // cross or circle, and open links that leave a zone, which is where `fp-cross` decides a head.
+  //
+  // 'open links' is `ladder` above with its links swapped, so that what it adds is the link forms
+  // and not a new shape of graph. A first draft packed every open form and four labels onto five
+  // nodes; it tripped label-crowded and the shared-corridor and mask rules in TD, BT and RL -- and
+  // so did the same source with every link written `-->`, so that was density, the held-out
+  // review's bundling weakness, rather than anything the link form decides.
+  'open links': (dir) => [
+    `flowchart ${dir}`, '  R[Request] --- V{Valid?}', '  V -- no --- E[Reject]', '  V ---|yes| P[Process]',
+    '  P -.- S[(Store)]', '  S === N[Notify]', '  N ---- R', '  E -. retry .- R', '  P == bulk === N',
+  ].join('\n'),
+  'heads at both ends': (dir) => [
+    `flowchart ${dir}`, '  A[Alpha] <--> B[Beta]', '  B x--x C[Gamma]', '  C o--o D[Delta]', '  A --x C',
+    '  B --o D', '  D <-.-> E[Epsilon]', '  E <==> A', '  C -.-x E', '  D ==o A', '  A ~~~ E',
+  ].join('\n'),
+  'open links across zones': (dir) => [
+    `flowchart ${dir}`, '  subgraph left[Left]', '    L1[Writer] --> L2[Queue]', '  end',
+    '  subgraph right[Right]', '    R1[Reader] --> R2[Sink]', '  end', '  L2 --- R1', '  L1 === R2',
   ].join('\n'),
 };
 
@@ -193,7 +218,8 @@ export const TIGHT_MASKS = [];
 /**
  * Pairs of boxes that share a centre line with nothing between them and are nonetheless drawn with
  * a step. The property is "an aligned, unobstructed pair is one segment", and it is measured over
- * 188 pairs in the generated space, against 23 in the twelve literals it replaced.
+ * 202 pairs in the generated space, against 23 in the twelve literals it replaced. It was 188 until
+ * the three link-form families went in; their 14 pairs are all one segment.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -204,7 +230,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 188;
+export const ALIGNED_PAIRS = 202;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

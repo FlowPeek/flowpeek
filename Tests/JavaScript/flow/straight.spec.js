@@ -246,12 +246,17 @@ describe('[Straight] over a corpus', () => {
     for (const { name, source } of SWEEP) {
       const drawing = laidOut(source);
       const drawnPaths = paths(source);
-      expect(drawnPaths).toHaveLength(drawing.edges.length);
+      // `~~~` is laid out and never painted, so the n-th path is the n-th VISIBLE edge. Every edge
+      // drew a path until the link-form families put an invisible link into the sweep.
+      const pathOf = new Map();
+      drawing.edges.forEach((edge, index) => { if (edge.pattern !== 'invisible') pathOf.set(index, pathOf.size); });
+      expect(drawnPaths).toHaveLength(pathOf.size);
       for (const pair of alignedAndClear(drawing)) {
+        if (!pathOf.has(pair.index)) continue;
         aligned += 1;
         // Named by drawing as well as by pair: `A->D` occurs in a dozen of the generated sources
         // and a bare pair name cannot be traced back to one.
-        if (!STRAIGHT.test(drawnPaths[pair.index])) stepped.push(`${name}: ${pair.from}->${pair.to}`);
+        if (!STRAIGHT.test(drawnPaths[pathOf.get(pair.index)])) stepped.push(`${name}: ${pair.from}->${pair.to}`);
       }
     }
     expect(`${aligned} aligned, stepped ${stepped.sort().join(',') || 'none'}`)

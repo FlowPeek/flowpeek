@@ -1290,6 +1290,42 @@ describe('[Render] the classes the editorial stylesheet paints', () => {
     expect(edgePaths(svg)).toEqual([]);
   });
 
+  // What mermaid 11.17.2 draws at each end of every link form its grammar accepts, read off the
+  // `.system` theme's own SVG (marker-start / marker-end per `L_A<i>_B<i>` path) for one source that
+  // writes all of them. An open link -- `---`, `-.-`, `===`, any length, with or without a label --
+  // has no head at either end; this renderer gave every one of them `pointEnd`, which turns "Event
+  // store is joined to Place order" into "Event store feeds Place order". The table is mermaid's
+  // answer rather than a reading of the grammar, so a form is right here only when the two agree.
+  // `~~~` is absent because neither engine draws it at all (the test above).
+  const MERMAID_HEADS = {
+    '-->': ['none', 'point'], '---': ['none', 'none'], '-.->': ['none', 'point'], '-.-': ['none', 'none'],
+    '==>': ['none', 'point'], '===': ['none', 'none'], '--x': ['none', 'cross'], '--o': ['none', 'circle'],
+    '<-->': ['point', 'point'], 'x--x': ['cross', 'cross'], 'o--o': ['circle', 'circle'],
+    '<-.->': ['point', 'point'], 'x-.-x': ['cross', 'cross'], 'o-.-o': ['circle', 'circle'],
+    '<==>': ['point', 'point'], 'x==x': ['cross', 'cross'], 'o==o': ['circle', 'circle'],
+    '-.-x': ['none', 'cross'], '-.-o': ['none', 'circle'], '==x': ['none', 'cross'], '==o': ['none', 'circle'],
+    '---->': ['none', 'point'], '----': ['none', 'none'], '-...-': ['none', 'none'], '-...->': ['none', 'point'],
+    '====': ['none', 'none'], '====>': ['none', 'point'],
+    '-- txt ---': ['none', 'none'], '-- txt -->': ['none', 'point'], '-. txt .-': ['none', 'none'],
+    '-. txt .->': ['none', 'point'], '== txt ===': ['none', 'none'], '== txt ==>': ['none', 'point'],
+    '---|txt|': ['none', 'none'], '-->|txt|': ['none', 'point'], '-.-|txt|': ['none', 'none'],
+    '===|txt|': ['none', 'none'], '<-- txt -->': ['point', 'point'], 'x-- txt --x': ['cross', 'cross'],
+  };
+
+  it('draws the heads mermaid draws on every link form, and none on an open link', () => {
+    const forms = Object.keys(MERMAID_HEADS);
+    const svg = drawn(['flowchart LR', ...forms.map((f, i) => `  A${i} ${f} B${i}`)].join('\n')).svg;
+    const heads = {};
+    for (const m of svg.matchAll(/<path class="[^"]*flowchart-link[^"]*" data-id="L_A(\d+)_B\d+_\d+"[^>]*\/>/g)) {
+      const end = (attr) => {
+        const url = new RegExp(`${attr}="url\\(#fp-0-(?:flowchart-)?([a-z]+)(?:Start|End)\\)"`).exec(m[0]);
+        return url ? url[1] : 'none';
+      };
+      heads[forms[Number(m[1])]] = [end('marker-start'), end('marker-end')];
+    }
+    expect(heads).toEqual(MERMAID_HEADS);
+  });
+
   it('scopes the theme stylesheet to its own root', () => {
     const svg = drawn(CORPUS[0]).svg;
     expect(svg).toContain('#fp-0 .fp-ladder{--fp-ladder: on;}');
@@ -1298,7 +1334,9 @@ describe('[Render] the classes the editorial stylesheet paints', () => {
   });
 
   it('keeps the arrowhead geometry EditorialArrowheadTests reads', () => {
-    const svg = drawn('flowchart TD\n  A --- B').svg;
+    // `-->`, not `---`: this asserted the head on an open link, which is the one place mermaid
+    // draws none.
+    const svg = drawn('flowchart TD\n  A --> B').svg;
     expect(svg).toContain('<marker id="fp-0-flowchart-pointEnd" class="marker flowchart" viewBox="0 0 8 6"'
       + ' markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto" markerUnits="userSpaceOnUse">'
       + '<path d="M 0 0 L 8 3 L 0 6 z"/></marker>');

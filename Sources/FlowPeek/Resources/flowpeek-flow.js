@@ -4299,7 +4299,17 @@
         if (warnings.indexOf("edge-endpoint-missing") === -1) warnings.push("edge-endpoint-missing");
         continue;
       }
-      var arrows = db.destructEdgeType(raw.type);
+      // An open link (`---`, `-.-`, `===`, any length, labelled or not) has no head at either end.
+      // `destructEdgeType` cannot say so -- it is mermaid's, and defaults the end to `arrow_point`
+      // -- and mermaid itself corrects it one step later, in `getData` (`arrowTypeEnd: invisible ?
+      // "none"` above, where `invisible` includes `arrow_open`). This projection called the helper
+      // without that step, so every open link was drawn as an arrow: 6 of 6 in the held-out review,
+      // and 12 of the 39 drawn forms in the link-form table in render.spec.js. Fixing the helper
+      // instead was rejected: it is kept line for line with flowDb.reference.ts, whose vendored
+      // specs read it through `getData`, and mermaid's own default is what `getData` corrects.
+      var arrows = raw.type === "arrow_open"
+        ? { arrowTypeStart: "none", arrowTypeEnd: "none" }
+        : db.destructEdgeType(raw.type);
       var edge = {
         id: raw.id,
         index: edges.length,

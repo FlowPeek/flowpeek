@@ -4565,9 +4565,19 @@
     // 2392x388 to 2316x392 (Advertising 72px to 136px tall), h20's and h19's kept their size (Closed
     // 96px to 200px wide), and the 204-drawing sweep did not change, because none of its faces with
     // four or more ends carries a label.
+    //
+    // Across a horizontal level, only a face that some end ARRIVES at. Both faces the review named
+    // are arrivals -- Advertising's four back edges, Closed's seven -- and there the heads are what
+    // stand 12px apart. A face every end leaves from carries no head, and in LR its lines part where
+    // they turn up or down toward their targets, so each plate stands on a vertical run of its own;
+    // growing the face bought nothing but height. The third held-out set's c11 drew its IVR menu,
+    // seven ends all leaving, as a 160px pillar against Pele's 48 -- 96px without the growth, the
+    // label "성공" back on its line, and nothing else in the 60 held-out drawings changed by a byte.
+    // Not in TD, where the same growth widens a box -- which reads as a box, not a pillar -- and
+    // without it `keyed menu`'s plates ride horizontal turns 12px apart and warn label-crowded.
     {
       var ends = [];
-      for (i = 0; i < n; i += 1) ends.push({ lo: 0, hi: 0, loL: false, hiL: false, loE: [], hiE: [] });
+      for (i = 0; i < n; i += 1) ends.push({ lo: 0, hi: 0, loL: false, hiL: false, loA: false, hiA: false, loE: [], hiE: [] });
       for (i = 0; i < proper.length; i += 1) {
         var be = proper[i];
         var rA = rank[be.a.slot], rB = rank[be.b.slot];
@@ -4577,6 +4587,7 @@
         var high = rA < rB ? be.b.slot : be.a.slot;
         ends[low].hi += 1; if (labelled) ends[low].hiL = true;
         ends[high].lo += 1; if (labelled) ends[high].loL = true;
+        if (be.b.slot === low) ends[low].hiA = true; else ends[high].loA = true;
         // Not `chain`, which does not exist yet: a horizontal edge spanning ranks is labelled on its
         // corridor, so it is no plate at this face.
         var seatable = { labelBox: (!vertical && Math.abs(rA - rB) > 1) ? null : be.labelBox };
@@ -4588,7 +4599,10 @@
         if (bc.kind !== "node") continue;
         var bg = geometryOf(bc.shape);
         var sides = FORWARD_SIDES[level.dir] || FORWARD_SIDES.TB;
-        var want = [[ends[i].hi, ends[i].hiL, sides[0], ends[i].hiE], [ends[i].lo, ends[i].loL, sides[1], ends[i].loE]];
+        var want = [
+          [ends[i].hi, ends[i].hiL && (vertical || ends[i].hiA), sides[0], ends[i].hiE],
+          [ends[i].lo, ends[i].loL && (vertical || ends[i].loA), sides[1], ends[i].loE]
+        ];
         for (var wi = 0; wi < 2; wi += 1) {
           var bn = want[wi][0];
           var bp = (bn >= BUSY_N && want[wi][1]) ? BUSY_PITCH : 0;

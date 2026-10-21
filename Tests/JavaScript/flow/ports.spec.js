@@ -543,9 +543,9 @@ describe('[Ports] a vertex shared by three or more', () => {
 // 12px the held-out review's h04 ran six lines along one face of Advertising with three labels in
 // the bundle, each plate 24px tall over the lines either side of its own, and h20 ran seven into
 // Closed; `labelled fan in` and `labelled returns to one face` are those two loads with nothing
-// else of either drawing kept.
+// else of either drawing kept. A face every end leaves from in LR or RL is the second test's.
 describe('[Ports] a busy labelled face', () => {
-  it('holds two pitches between its ends over the sweep', () => {
+  it('holds two pitches between its ends over the sweep, unless it only sends across a level', () => {
     const tight = [];
     let held = 0;
     for (const { name, source } of SWEEP) {
@@ -560,14 +560,15 @@ describe('[Ports] a busy labelled face', () => {
           const node = nodes.get(id);
           if (!node || !port || node.geometry === 'diamond') continue;
           const key = `${id}.${port.side}`;
-          if (!faces.has(key)) faces.set(key, { along: [], labelled: false });
+          if (!faces.has(key)) faces.set(key, { along: [], labelled: false, arrives: false });
           const face = faces.get(key);
           face.along.push(port.side === 'top' || port.side === 'bottom' ? port.x : port.y);
           if (edge.label) face.labelled = true;
+          if (id === edge.to) face.arrives = true;
         }
       }
-      for (const [key, { along, labelled }] of faces) {
-        if (along.length < 4 || !labelled) continue;
+      for (const [key, { along, labelled, arrives }] of faces) {
+        if (along.length < 4 || !labelled || (!arrives && /flowchart (LR|RL)/.test(source))) continue;
         held += 1;
         along.sort((p, q) => p - q);
         const least = Math.min(...along.slice(1).map((at, k) => at - along[k]));
@@ -576,5 +577,30 @@ describe('[Ports] a busy labelled face', () => {
     }
     expect(held).toBeGreaterThanOrEqual(8);
     expect(tight).toEqual([]);
+  });
+
+  // No head lands on a face that only sends, and in LR its lines part where they turn up or down
+  // for their targets, so each plate has a vertical run of its own; growing the face for them buys
+  // only height. The third held-out set's c11 drew its seven-key IVR menu 160px tall against Pele's
+  // 48. Measured against the same drawing with the keys left off, which only rule 4's 12px sizes.
+  // TD and BT still grow it: there the growth is width, and without it the plates warn crowded.
+  it('does not grow a face every end leaves from across a horizontal level', () => {
+    const extent = (source, id) => {
+      const db = new flow.FlowDB();
+      db.clear();
+      flow.parse(source, db);
+      const laid = flow.layout(db, { measureText, theme: EDITORIAL });
+      return laid.nodes.find((n) => n.id === id).height;
+    };
+    const grown = [];
+    const menus = SWEEP.filter(({ name }) => /^keyed menu (LR|RL)$/.test(name));
+    for (const { name, source } of menus) {
+      const bare = source.replace(/-->\|[^|]*\|/g, '-->');
+      const keyed = extent(source, 'menu');
+      const plain = extent(bare, 'menu');
+      if (keyed !== plain) grown.push(`${name} ${keyed}px against ${plain}`);
+    }
+    expect(menus).toHaveLength(2);
+    expect(grown).toEqual([]);
   });
 });

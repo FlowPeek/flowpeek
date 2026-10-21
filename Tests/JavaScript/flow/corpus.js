@@ -274,6 +274,16 @@ const FAMILIES = {
     `flowchart ${dir}`, '  A --> B', '  A --> C', '  C --> D', '  B --> E', '  E --> F', '  D --> G', '  A --> H',
     '  C --> I', '  D --> E', '  A --> E', '  B --> G', '  C --> E', '  C --> H',
   ].join('\n'),
+  // A menu: one face that seven keyed links all leave, nothing coming back. Every busy labelled face
+  // above is one that ends arrive at -- `fan in`'s sink, the returns to one face -- or carries
+  // labels long enough to want a seat, so nothing asked whether a face that only sends grows for
+  // its labels: the third held-out set's c11 grew its IVR menu to a 160px pillar against Pele's 48.
+  // At b007776 Menu is 160px tall LR and RL, against 96 with the keys left off.
+  'keyed menu': (dir) => [
+    `flowchart ${dir}`, '  call((Call)) --> menu[Menu]', '  menu -->|1| lost[Lost card]', '  menu -->|2| bill[Billing]',
+    '  menu -->|3| limit[Limits]', '  menu -->|4| loan[Loans]', '  menu -->|5| point[Points]',
+    '  menu -->|6| issue[Reissue]', '  menu -->|0| agent[Agent]',
+  ].join('\n'),
   // A two-way pair slid apart beside a route of its own corridor. `two-way pair past a held lane`
   // asks that the pair stop crossing; nothing asked where the slide leaves a THIRD route: the
   // held-out set's b11, once 643afb8 slid Resume's riser past Esc's, ran Resume 4px under Quit to
@@ -487,7 +497,8 @@ export const TIGHT_MASKS = [];
  * `labelled exits that step into heads` added 2, one segment before a seated straight was sized as
  * after, and 444 until `nesting past a third route` added 4, one segment before a nest was offered
  * a free lane as after, and 448 until `third route beside a two-way pair` added 8, one segment
- * before a third route was eased off a slid pair as after.
+ * before a third route was eased off a slid pair as after, and 456 until `keyed menu` added 8, one
+ * segment before a face that only sends stopped growing as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -498,7 +509,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 456;
+export const ALIGNED_PAIRS = 464;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

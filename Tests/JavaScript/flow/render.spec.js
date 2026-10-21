@@ -959,7 +959,7 @@ describe('[Render] the classes the editorial stylesheet paints', () => {
   it('writes the rung ladder the theme defines, and never a focal', () => {
     for (const source of SWEEP_SOURCES) {
       const out = drawn(source);
-      const rungs = (out.svg.match(/class="node default fp-([a-z]+)"/g) || [])
+      const rungs = (out.svg.match(/class="node default fp-([a-z]+)(?: fp-on-depth-\d+)?"/g) || [])
         .map((s) => /fp-([a-z]+)/.exec(s)[1]);
       for (const rung of rungs) expect(THEME_SWIFT).toContain(`.node.fp-\\(rung.token)`);
       // Was "at most one": the sweep promoted the busiest node to `fp-focal` on 8 of these 172
@@ -1063,6 +1063,17 @@ describe('[Render] the classes the editorial stylesheet paints', () => {
       .map((m) => [m[2], Number(m[1])]);
     expect(zones).toEqual([['A', 0], ['E', 0], ['B', 1], ['C', 2], ['D', 3]]);
     expect(THEME_SWIFT).toContain('.cluster.fp-depth-1 rect');
+  });
+
+  it('tells a node which zone depth it sits on, and says nothing for a node in none', () => {
+    // The theme composites a rung's wash over the zone under it (MacMermaidTheme.swift `onZones`):
+    // with the fixed paper-based fills a sink one zone deep was the zone's own grey, 1.000:1.
+    const svg = drawn('flowchart TD\n  subgraph A\n    subgraph B\n      x --> y\n    end\n    w --> x\n  end\n'
+      + '  v --> w').svg;
+    const on = Object.fromEntries([...svg.matchAll(/<g class="node default fp-[a-z]+((?: fp-on-depth-\d+)?)" id="fp-0-flowchart-(\w+)-/g)]
+      .map((m) => [m[2], m[1].trim()]));
+    expect(on).toEqual({ v: '', w: 'fp-on-depth-0', x: 'fp-on-depth-1', y: 'fp-on-depth-1' });
+    expect(THEME_SWIFT).toContain('.fp-on-depth-');
   });
 });
 

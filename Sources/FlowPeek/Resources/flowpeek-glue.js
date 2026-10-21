@@ -715,6 +715,9 @@
       if (n.edges > 0 && n.dotted === n.edges) rung = "optional";
       n.rung = rung;
       n.el.classList.add("fp-" + rung);
+      // The ground the theme composites this rung over. Every zone mermaid draws takes the first
+      // zone rung -- it carries no depth to say otherwise -- so a node in any of them is on depth 0.
+      if (zoneOf(n)) n.el.classList.add("fp-on-depth-0");
       counts[rung]++;
     });
 

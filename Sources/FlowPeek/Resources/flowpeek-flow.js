@@ -8710,6 +8710,13 @@
     }
 
     // --- nodes ---
+    //
+    // A node in a zone also says which zone depth it sits on, for the same reason the zone says its
+    // own: the stylesheet cannot see it, because `g.node` and `g.cluster` are flat siblings. The
+    // theme composites a rung's wash over that ground (MacMermaidTheme.swift, `onZones`); without
+    // it a sink one zone deep was filled with exactly the zone's own grey.
+    var zoneDepth = new Map();
+    for (i = 0; i < drawing.clusters.length; i += 1) zoneDepth.set(drawing.clusters[i].id, drawing.clusters[i].depth);
     var nodes = [];
     for (i = 0; i < drawing.nodes.length; i += 1) {
       var n = drawing.nodes[i];
@@ -8720,7 +8727,8 @@
       // written here: this file emits no classDef stylesheet, so they would style nothing -- and a
       // source that named itself `fp-store` would claim a rung its structure never earned. The
       // author's declarations still arrive, inline and validated, above.
-      var classes = "node default" + (n.rung ? " fp-" + n.rung : "");
+      var classes = "node default" + (n.rung ? " fp-" + n.rung : "")
+        + (n.rung && zoneDepth.has(n.parent) ? " fp-on-depth-" + zoneDepth.get(n.parent) : "");
       nodes.push('<g class="' + classes + '" id="' + esc(renderID + "-" + n.domId)
         + '" transform="translate(' + n.cx + "," + n.cy + ')">'
         + shapeMarkup(n.geometry, n.width, n.height, shapeStyle)

@@ -231,22 +231,54 @@ public struct MacMermaidTheme: Equatable, Sendable {
         // that setting asks for, and scaling the washes by 1.6 would take `soft` to 2.69:1.
         let zones = [0.02, 0.04, 0.06, 0.08].map { Self.blend(ink, $0, over: paper) }
 
+        // A node in a zone takes its rung's wash over the ZONE, not over paper. The washes above
+        // are the source's `ink @ 0.0x`, a translucent layer over whatever is under it; they are
+        // composited over paper only because an rgba fill cannot be shipped (see the ladder note),
+        // and once zones were filled that shortcut stopped meaning what the source means. The
+        // fixed hexes landed on the zone ladder's own values: terminal (0.04) IS the depth-1 wash
+        // and optional (0.02) the depth-0 wash, so a sink one zone deep measured 1.000:1 against
+        // its ground in light and dark -- the second review's ghosted NAT Gateway -- and one rung
+        // further down the sign flipped and the "marked" node was lighter than its zone. Dark's
+        // backend has the same problem from the other side: paper-2 is 1.020:1 on the depth-2 wash
+        // and darker than the depth-3 one. Composited over the ground, every rung keeps the ratio
+        // and direction it has on paper at every depth, in all four appearances, within 0.06:1
+        // (terminal light 1.073 on paper, 1.068-1.075 in zones; entry dark+IC 1.759 on paper,
+        // 1.663-1.738 in zones); ink text stays 5.59:1 or better on the deepest of them.
+        //
+        // Dark's backend is not a wash of anything, so it is carried as the step from paper to
+        // paper-2, taken from the ground instead. Light's is white, which no zone reaches.
+        //
+        // The rejected alternative was a shallower zone ladder that steps between the rungs. Five
+        // node washes and four zone washes cannot all be kept apart in the 0.02-0.10 band the
+        // `soft` stroke allows (see above), and it would still be the zone choosing how a node
+        // reads; the node knowing its ground is one class (`fp-on-depth-N`) the renderer already
+        // has the answer for.
+        let onZones = { (fill: (String) -> String) in zones.map(fill) }
+        let backendOnZones = onZones { ground in
+            dark ? Self.shift(ground, by: paper2, from: paper) : backendFill
+        }
+
         let ladder: [Rung] = [
             // The workhorse, and what a decision diamond gets too: the source's own legend draws
             // DECISION as a plain white diamond.
-            Rung(token: "backend", fill: backendFill, stroke: ink, width: strokeWidth, dash: nil),
+            Rung(token: "backend", fill: backendFill, onZones: backendOnZones,
+                 stroke: ink, width: strokeWidth, dash: nil),
             // A cylinder [(…)] is the author declaring a datastore out loud -- the one place shape
             // decides a rung, and import-mermaid.md's own mapping.
-            Rung(token: "store", fill: storeFill, stroke: muted, width: strokeWidth, dash: nil),
+            Rung(token: "store", fill: storeFill, onZones: onZones { Self.blend(ink, 0.10 * wash, over: $0) },
+                 stroke: muted, width: strokeWidth, dash: nil),
             // In-degree 0. import-mermaid.md gives exactly this to its two entry rects, which are
             // the same shape as the backend rect beside them: structure decides, not shape.
-            Rung(token: "entry", fill: entryFill, stroke: soft, width: strokeWidth, dash: nil),
+            Rung(token: "entry", fill: entryFill, onZones: onZones { Self.blend(muted, 0.16 * wash, over: $0) },
+                 stroke: soft, width: strokeWidth, dash: nil),
             // Out-degree 0. The quietest surface on the page -- measured, all three non-focal ovals
             // in the source's own flowchart take this, including the start oval.
-            Rung(token: "terminal", fill: terminalFill, stroke: quietStroke, width: strokeWidth, dash: nil),
+            Rung(token: "terminal", fill: terminalFill, onZones: onZones { Self.blend(ink, 0.04 * wash, over: $0) },
+                 stroke: quietStroke, width: strokeWidth, dash: nil),
             // Reached only by `-.->`: the author saying "conditional". Same stroke as terminal, so
             // the dash is what tells them apart, and it survives greyscale.
-            Rung(token: "optional", fill: optionalFill, stroke: quietStroke, width: strokeWidth, dash: "4,3"),
+            Rung(token: "optional", fill: optionalFill, onZones: onZones { Self.blend(ink, 0.02 * wash, over: $0) },
+                 stroke: quietStroke, width: strokeWidth, dash: "4,3"),
             // No focal rung. The source spends its one coral on the node its author chose; a
             // flowchart names none, and the renderers picked one by degree instead -- measured, 8
             // of 172 sweep drawings and 6 of the review's 16 sources, five of which a reader took
@@ -790,6 +822,8 @@ public struct MacMermaidTheme: Equatable, Sendable {
     private struct Rung {
         let token: String
         let fill: String
+        /// The fill on each zone depth, deepest last; the last entry also serves every depth below it.
+        let onZones: [String]
         let stroke: String
         let width: String
         let dash: String?
@@ -809,7 +843,28 @@ public struct MacMermaidTheme: Equatable, Sendable {
         .node.fp-\(rung.token) g.outer-path path:nth-child(2) {
             fill: none; stroke: \(rung.stroke); stroke-width: \(rung.width);\(dash)
         }
-        """
+        """ + rung.onZones.enumerated().compactMap { depth, fill -> String? in
+            // Every depth or none: the selectors do not cascade into one another, so a depth left
+            // out would fall back to the paper fill, not to the depth above it.
+            guard rung.onZones.contains(where: { $0 != rung.fill }) else { return nil }
+            // `fp-on-depth-N` is written on a node by flowpeek-flow.js (and as 0 by the glue, whose
+            // zones all take the first rung); the last depth matches as "has one and is not 0..N-1",
+            // the same uncapped form the zone rules use.
+            let on = depth < rung.onZones.count - 1
+                ? ".fp-on-depth-\(depth)"
+                : "[class*=\"fp-on-depth-\"]" + (0..<depth).map { ":not(.fp-on-depth-\($0))" }.joined()
+            let node = ".node.fp-\(rung.token)\(on)"
+            return "\n\(node) rect.basic, \(node) circle.basic, \(node) polygon.label-container, "
+                + "\(node) path.basic.label-container, \(node) g.label-container circle, "
+                + "\(node) g.outer-path path:nth-child(1) { fill: \(fill); }"
+        }.joined()
+    }
+
+    /// `colour`'s step away from `from`, taken from `base` instead, as an opaque hex.
+    private static func shift(_ base: String, by colour: String, from origin: String) -> String {
+        guard let b = channels(base), let c = channels(colour), let o = channels(origin) else { return base }
+        let moved = (0..<3).map { min(255, max(0, b[$0] + c[$0] - o[$0])) }
+        return String(format: "#%02X%02X%02X", moved[0], moved[1], moved[2])
     }
 
     /// `colour @ alpha` over `base`, as an opaque hex.

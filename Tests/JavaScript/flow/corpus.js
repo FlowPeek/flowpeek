@@ -138,46 +138,44 @@ export const SWEEP = [
   ...generate(),
 ];
 
-// --- what the generated space found, and has not fixed ---------------------------------------
+// --- what the generated space found ---------------------------------------------------------
 //
-// Widening the sweep from twelve literals to 172 drawings turned up three failures on the first
-// run. They are recorded here rather than asserted away, and each test below checks the EXACT set
-// rather than a count: a new one fails, and so does fixing one without editing this record, which
-// is the only way a baseline stays honest.
+// Widening the sweep from twelve literals to 172 drawings turned up four failures on the first
+// run, none of them regressions: each had been there since the renderer shipped and no source in
+// the old corpus provoked it. All four are fixed, and these lists are kept EMPTY rather than
+// deleted, because each test compares the exact set -- a new failure of any of these kinds fails
+// here with the drawing named, which is what the lists were for.
 //
-// None is a regression. Each has been there since the renderer shipped and was invisible because
-// no source in the old corpus provoked it. All three are in `flowpeek-flow.js`; nothing in the
-// Pele path or the mermaid path is involved.
+// What fixed them, all in flowpeek-flow.js:
+//   * `straightenDetours` -- offers any two stations that share a coordinate the straight run
+//     between them, longest span first, and takes the first that `routeIsClear` accepts.
+//   * `closeUnitJogs` -- moves the run beside a one-unit sidestep rather than the port, which is
+//     the lever `alignUnitJog` does not have once a face is full.
+//   * one direction added to `laneLabelLo`, settled by counting warnings over the sweep.
+// The first two moved 9 drawings of 169 and the third moved 2, none of which failed to render.
 
 /**
- * A one-grid-unit sidestep that `alignUnitJog` could not close, drawn square because an on-grid
- * radius does not exist at that size.
+ * Square corners: a one-grid-unit sidestep drawn with no fillet, because two corners sharing a 4px
+ * leg could have at most a 2px radius and that is off the grid.
  *
- * Diagnosed, not guessed: with the layout instrumented, `alignUnitJog` sees `delta: 1` on this
- * edge and reports `closed: false` on BOTH of its passes -- `slideAlongFace` refuses to close the
- * step and refuses to widen it to three or two units, because the face cannot spare the move. The
- * route then reaches the emitter as `... L244,108 L340,108 L340,104 L396,104`, and `cornerRadius`
- * returns `4 * Math.floor((4 / 4) / 2)` = 0 for a 4px leg, so `pathOf` takes its `r <= 0` branch
- * and writes the corner square. Two corners sharing a 4px leg can have at most a 2px radius, which
- * is off the grid, so there is no fix at the emitter: the jog has to stop reaching it.
- *
- * The shape of a fix, for whoever takes it: the lane carrying the long run sits one unit off the
- * port it ends at. `alignUnitJog` tries to move the PORT and gives up when the face is full; the
- * lane is the other thing that could move, and widening the jog to two units makes it a pair of
- * touching 4px arcs, which the emitter's own comment already calls legal under rule 1.
+ * Was four, in `rank skip LR` and its RL mirror. `alignUnitJog` had already tried to remove them
+ * in the layout by sliding a port and reported failure on both passes -- the destination face
+ * carried three ports at the minimum pitch -- so the fix moves the RUN instead.
  */
-export const SQUARE_CORNERS = [
-  'rank skip LR at 340,108',
-  'rank skip LR at 340,104',
-  'rank skip RL at 164,108',
-  'rank skip RL at 164,104',
-];
+export const SQUARE_CORNERS = [];
 
 /**
  * The router could not find a cross-line clearing every stroke already drawn, and said so. One
  * source in 172, and an unremarkable one: a four-node fork with four edge labels, drawn bottom-up.
  */
-export const CROWDED_LABELS = ['labelled fork BT'];
+/**
+ * Drawings where the label placer could not find a position with no penalty and said so.
+ *
+ * Was one, `labelled fork BT`, and the cause was upstream of the placer: the drawing is the exact
+ * vertical mirror of `labelled fork TD`, which is clean, except that one edge turned 24px after
+ * leaving its node where TD turns it at 44px. See the note on `laneLabelLo`.
+ */
+export const CROWDED_LABELS = [];
 
 /**
  * A label mask closer than 8px to a stroke it does not belong to. Same source as CROWDED_LABELS
@@ -185,28 +183,25 @@ export const CROWDED_LABELS = ['labelled fork BT'];
  * -- but they are recorded apart because one is the router reporting and the other is the drawing
  * measured, and a fix could close either without closing the other.
  */
-export const TIGHT_MASKS = ['labelled fork BT'];
+/**
+ * Label masks closer than 8px to a stroke they do not belong to. Was one, the same drawing as
+ * CROWDED_LABELS and the same cause; they are kept apart because one is the router reporting and
+ * the other is the drawing measured, and a future fix could close either without the other.
+ */
+export const TIGHT_MASKS = [];
 
 /**
  * Pairs of boxes that share a centre line with nothing between them and are nonetheless drawn with
- * a step. The property is "an aligned, unobstructed pair is one segment", and over the twelve
- * literals it held for 23 pairs with one named exception; over the generated space it is measured
- * against 188 pairs and finds two more.
+ * a step. The property is "an aligned, unobstructed pair is one segment", and it is measured over
+ * 188 pairs in the generated space, against 23 in the twelve literals it replaced.
  *
- * `"graph TD" (5 lines): C->A` is not a defect and never was: it is a back edge whose corridor the
- * layout reserved outside either box, so the port is already hard against the end of its face and
- * the step belongs to the corridor rather than to the fan.
- *
- * The two `two back edges` entries are new and ARE defects, of the kind a reader sees as a line
- * that wanders when it had no reason to. They appear in LR and RL and not in TD or BT, which is
- * the same left-right asymmetry the square corners show, and suggests one cause behind both.
+ * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
+ * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
+ * reserved outside either box, so the port was hard against the end of its face and the step was
+ * said to belong to the corridor rather than to the fan. `straightenDetours` straightens it too,
+ * and `routeIsClear` agrees the straight run is clear of every box, zone and stroke. The exception
+ * was a description of what the router happened to do, not a rule it had to obey.
  */
-export const STEPPED_PAIRS = [
-  '"graph TD" (5 lines): C->A',
-  'two back edges LR: D->B',
-  'two back edges RL: D->B',
-];
+export const STEPPED_PAIRS = [];
 
-/** How many aligned, unobstructed pairs the sweep finds. Recorded so that a change in coverage is
- * visible rather than silent: if the generator grows, this grows, and a reviewer sees it move. */
 export const ALIGNED_PAIRS = 188;

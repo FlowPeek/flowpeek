@@ -255,6 +255,6 @@ describe('[Straight] over a corpus', () => {
       }
     }
     expect(`${aligned} aligned, stepped ${stepped.sort().join(',') || 'none'}`)
-      .toBe(`${ALIGNED_PAIRS} aligned, stepped ${[...STEPPED_PAIRS].sort().join(',')}`);
+      .toBe(`${ALIGNED_PAIRS} aligned, stepped ${[...STEPPED_PAIRS].sort().join(',') || 'none'}`);
   });
 });

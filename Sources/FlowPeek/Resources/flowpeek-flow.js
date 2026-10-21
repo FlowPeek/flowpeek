@@ -5060,7 +5060,27 @@
     // through the same one switch the rest of this function uses: it prefers above a horizontal run
     // and the right of a vertical one, and `localOf` flips R for BT and RL. So the label sits on the
     // low side of its lane in TB and RL and on the high side in BT and LR, and the room goes there.
-    var laneLabelLo = (level.dir === "TB" || level.dir === "RL");
+    // Which side of a lane its label is charged to. BT was added to the set, and the honest note
+    // is that the set it was added to could not be derived from anything: {TB, RL} is not "rank
+    // increases with the coordinate" ({TB, LR}), nor the source's side of the gap, nor the target's,
+    // and nothing else in the file explains it.
+    //
+    // So it was settled by measurement over the 172-source sweep, which is the one ground available.
+    // `labelled fork BT` was the only drawing in it that came out with a `label-crowded` warning
+    // and the only one with a label mask inside the 8px, and the reason is here rather than in the
+    // placer: the drawing is the exact vertical mirror of `labelled fork TD`, which is clean, EXCEPT
+    // that `B -->|no| D` turns 24px after leaving B where TD turns it at 44px -- a shorter run, and
+    // the two labels on B's face then have nowhere clean to sit. Counting warnings across the sweep:
+    // {TB, RL} gives 1, {TB, LR} gives 1, dropping the condition entirely gives 2, and both
+    // {TB, BT, RL} and a flat `true` give 0. Total drawing area is 11.030M px^2 in all five, to the
+    // last digit, so the choice costs nothing in size.
+    //
+    // A flat `true` scored the same as this and would delete the condition. It is not taken because
+    // equal on two metrics is not the same as equal: the variable also decides which side of a lane
+    // a label sits on, and that is a thing to look at rather than to count. Adding the one direction
+    // that measurably misbehaves moves 2 drawings of 169 -- this one and `ladder BT` -- where the
+    // flat rule would also move the LR family on no evidence.
+    var laneLabelLo = (level.dir === "TB" || level.dir === "BT" || level.dir === "RL");
     var laneNeed = [];
     for (i = 0; i < maxRank; i += 1) laneNeed.push([]);
     for (i = 0; i < segments.length; i += 1) {
@@ -6700,6 +6720,148 @@
     return true;
   }
 
+  // A sidestep of one grid unit has no radius it can be drawn with, so it is drawn square.
+  // `cornerRadius` returns zero for a 4px leg -- the two corners share that leg, so each could have
+  // at most 2px, which is off the grid -- and `pathOf` then takes its `r <= 0` branch at both ends.
+  //
+  // `alignUnitJog` removes these in the LAYOUT by sliding a port, and that is the better place
+  // because it is the cheapest and it happens before anything depends on the geometry. What reaches
+  // here is the remainder: the jogs whose face was too full to give the step up. Instrumented on
+  // `rank skip LR`, `alignUnitJog` sees the delta and reports failure on both of its passes --
+  // `slideAlongFace` refuses to close the step, to widen it to three units, and to widen it to two
+  // -- because the destination already carries three ports at the minimum pitch. Over the 172-source
+  // sweep that left 4 square corners, in `rank skip LR` and its RL mirror.
+  //
+  // The lever still available is the RUN rather than the port. A jog sits between two straight runs;
+  // moving whichever of them does not end on a port onto the other's line removes the jog outright,
+  // and usually merges the two runs into one straight line. Where the drawing has no room for that,
+  // widening the jog to two units is the other legal shape -- a pair of 4px arcs that touch, which
+  // the emitter's own note already allows under rule 1.
+  //
+  // Both candidates go through `routeIsClear` at full strictness against every stroke already
+  // drawn, so this cannot buy a straight line by laying one connector along another. A jog that
+  // neither move can fix is left alone and still draws square; the record in Tests/JavaScript/flow/
+  // corpus.js is what says whether any remain.
+  function withoutKinks(points) {
+    var out = [points[0]];
+    for (var i = 1; i < points.length; i += 1) {
+      var p = points[i];
+      var last = out[out.length - 1];
+      if (p.x === last.x && p.y === last.y) continue;
+      if (out.length >= 2) {
+        var prev = out[out.length - 2];
+        if ((prev.x === last.x && last.x === p.x) || (prev.y === last.y && last.y === p.y)) {
+          out[out.length - 1] = p;
+          continue;
+        }
+      }
+      out.push(p);
+    }
+    return out;
+  }
+
+  // Every leg with a turn at both ends has to be long enough for two 4px arcs, which is 8px. A
+  // candidate that fixes one jog by making another is not an improvement.
+  function legsAreDrawable(points) {
+    for (var i = 1; i + 2 < points.length; i += 1) {
+      var run = Math.abs(points[i + 1].x - points[i].x) + Math.abs(points[i + 1].y - points[i].y);
+      if (run < 2 * GRID) return false;
+    }
+    return true;
+  }
+
+  // A detour the drawing no longer needs.
+  //
+  // A route is built from the ports outwards through whatever lane its rank gap assigned it, and
+  // the lane is chosen before the rest of the drawing exists. By the time every box is placed the
+  // reason for a particular excursion may be gone, and nothing went back to look. `D --> B` in
+  // `two back edges LR` is the shape of it: both ports sit at y=96 and the stroke runs
+  // 400,96 -> 376,96 -> 376,108 -> 288,108 -> 288,96 -> 232,96, dropping into the back-edge lane
+  // and climbing straight back out of it, 12px down and 12px up to cover ground it could have
+  // crossed in one line. A reader sees a connector that wanders.
+  //
+  // So: any two stations that share a coordinate are offered the straight run between them, longest
+  // span first, and the first one that is clear wins. `routeIsClear` at full strictness is the
+  // whole of the judgement -- boxes, zones, and running along another stroke -- which is also why
+  // this is safe to do blind: a shortcut that would lie along a connector already drawn is refused
+  // by the same rule that stopped the router taking it in the first place.
+  //
+  // Longest first is the point, not an optimisation. Collapsing the innermost wobble of a detour
+  // leaves the detour, and the pass would then have to be run to a fixed point to find what one
+  // look could have seen.
+  function straightenDetours(points, ctx, edge) {
+    var current = points;
+    var moved = true;
+    while (moved) {
+      moved = false;
+      for (var span = current.length - 1; span >= 2 && !moved; span -= 1) {
+        for (var a = 0; a + span < current.length && !moved; a += 1) {
+          var b = a + span;
+          var p = current[a], q = current[b];
+          if (p.x !== q.x && p.y !== q.y) continue;
+          var candidate = current.slice(0, a + 1).concat(current.slice(b));
+          candidate = withoutKinks(candidate);
+          if (candidate.length < 2) continue;
+          if (candidate.length >= current.length) continue;
+          if (!legsAreDrawable(candidate)) continue;
+          if (!routeIsClear(candidate, ctx, 2, edge)) continue;
+          current = candidate;
+          moved = true;
+        }
+      }
+    }
+    return current;
+  }
+
+  function closeUnitJogs(points, ctx, edge) {
+    var current = points;
+    // Closing is tried on every jog before any is widened, for the same reason `alignUnitJog`
+    // orders its own two passes that way: a widened jog is a wobble that a later close would have
+    // removed outright, and once widened it no longer looks like a jog to find.
+    for (var pass = 0; pass < 2; pass += 1) {
+      var moved = true;
+      while (moved) {
+        moved = false;
+        for (var i = 1; i + 2 < current.length; i += 1) {
+          var b = current[i], c = current[i + 1];
+          if (Math.abs(b.x - c.x) + Math.abs(b.y - c.y) !== GRID) continue;
+          var axis = (b.x === c.x) ? "y" : "x";
+          var step = c[axis] - b[axis];
+          // A run that ends on a port cannot move: the port is the face's answer and sliding it is
+          // what `alignUnitJog` already tried.
+          var sides = [];
+          if (i - 1 > 0) sides.push(-1);
+          if (i + 2 < current.length - 1) sides.push(1);
+          for (var s = 0; s < sides.length && !moved; s += 1) {
+            var side = sides[s];
+            var want = pass === 0
+              ? (side < 0 ? c[axis] : b[axis])
+              : (side < 0 ? b[axis] - step : c[axis] + step);
+            var first = side < 0 ? i - 1 : i + 1;
+            var candidate = [];
+            for (var k = 0; k < current.length; k += 1) {
+              if (k === first || k === first + 1) {
+                var shifted = { x: current[k].x, y: current[k].y };
+                shifted[axis] = want;
+                candidate.push(shifted);
+              } else {
+                candidate.push(current[k]);
+              }
+            }
+            candidate = withoutKinks(candidate);
+            if (candidate.length < 2) continue;
+            if (!legsAreDrawable(candidate)) continue;
+            if (!routeIsClear(candidate, ctx, 2, edge)) continue;
+            current = candidate;
+            moved = true;
+          }
+          if (moved) break;
+        }
+      }
+    }
+    return current;
+  }
+
   function routeIsClear(points, ctx, strict, edge) {
     for (var i = 0; i + 1 < points.length; i += 1) {
       if (!legIsClear(points[i], points[i + 1], ctx, strict, edge)) return false;
@@ -8017,6 +8179,18 @@
       var route = routeEdge(edge, ctx);
       if (route.transit) noteWarning(warnings, "edge-transit");
       else if (route.crowded) noteWarning(warnings, "edge-crowded");
+      // Before the strokes are recorded, so that what the next edge routes around is what this one
+      // actually draws, and before `bridgeCrossings`, which reads the finished points.
+      // Shortcuts first: a detour removed outright takes its jogs with it, and what is left for
+      // `closeUnitJogs` is the jogs that are actually load-bearing.
+      // Not a self-loop. Its two ports are on one box and often share a coordinate, so the
+      // straight run between them is both clear and wrong: the loop IS the detour, and
+      // `alignUnitJog` refuses to touch one for the same reason. Caught by the self-loop test,
+      // which asks for two distinct ports and three right angles and got a line.
+      if (!edge.selfLoop) {
+        route.points = straightenDetours(route.points, ctx, edge);
+        route.points = closeUnitJogs(route.points, ctx, edge);
+      }
       for (var s = 0; s + 1 < route.points.length; s += 1) {
         ctx.drawn.push([route.points[s], route.points[s + 1]]);
       }

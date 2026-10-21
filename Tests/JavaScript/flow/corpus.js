@@ -265,6 +265,23 @@ const FAMILIES = {
   ].join('\n'),
 };
 
+// Families drawn only in LR and RL, where a plate is shorter across its run than along it and so
+// the layout can give each plate a line of its own. TD and BT of the same source warn label-crowded
+// both before and after that rule -- there a plate is wider than it is tall, and the gap stacks
+// plates along the runs rather than spreading them -- which is a defect of its own and not one an
+// EXACT ratchet can carry as found.
+const HORIZONTAL_FAMILIES = {
+  // Three labelled links between one pair of nodes, two out and one back. Every family above that
+  // labels a gap's runs has them leave from different nodes or land on a face a fan of four grew,
+  // so no drawing put three labelled runs closer together than a plate is tall: the held-out set's
+  // b04 ran three such links 24, 20 and 12pt apart under 24pt plates, and the middle plate had no
+  // place on its own line in the gap's column.
+  'labelled links between one pair': (dir) => [
+    `flowchart ${dir}`, '  app[Mini app] -->|send the login code| srv[Server]', '  srv -->|session token| app',
+    '  app -->|call with the token| srv',
+  ].join('\n'),
+};
+
 /**
  * The generated space, as `{ name, source }`. The name is what a failure prints, so it names the
  * family and the direction rather than the index -- an index tells a reader to go and count.
@@ -296,6 +313,11 @@ export function generate() {
     }
     for (const [family, build] of Object.entries(FAMILIES)) {
       out.push({ name: `${family} ${dir}`, source: build(dir) });
+    }
+    if (dir === 'LR' || dir === 'RL') {
+      for (const [family, build] of Object.entries(HORIZONTAL_FAMILIES)) {
+        out.push({ name: `${family} ${dir}`, source: build(dir) });
+      }
     }
   }
   return out;
@@ -413,7 +435,8 @@ export const TIGHT_MASKS = [];
  * until `fork beside corridors` added 10, one segment before the corridor-aware mirror as after, and
  * 408 until `two-way pairs in a state machine` added 8, one segment before the port trade as after,
  * and 416 until `turn onto a lane` added 16, one segment before its tangent bump as after
- * (`trade before nesting` adds none).
+ * (`trade before nesting` adds none), and 432 until `labelled links between one pair` added 6,
+ * one segment before `seatPitch` spread its face as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -424,7 +447,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 432;
+export const ALIGNED_PAIRS = 438;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

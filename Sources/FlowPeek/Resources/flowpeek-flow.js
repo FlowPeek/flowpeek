@@ -4427,6 +4427,41 @@
   // to be given 8px to sit in, and only the layout can hand out room.
   var LABEL_GAP = 2;
 
+  // How far apart one face's ends have to stand for each labelled one to have a seat: its plate ON
+  // its own line, in the same column as its neighbours' plates, with rule 2's gap between plates.
+  // That is the plate's extent across the run plus LABEL_GAP -- 32px under a one-line 24px plate --
+  // and 0 where a face needs nothing of the kind.
+  //
+  // Measured from the runs up, not tuned to a drawing: before this, a face of two or three labelled
+  // ends stood at MIN_PITCH (12px) and one of four at BUSY_PITCH (24px), and neither holds a 24px
+  // plate in a column. The second held-out set's b04 ran three links between one pair of nodes 24,
+  // 20 and 12px apart, and its plates could only stagger along the gap -- the width -- or float off
+  // their lines. `c5fe0f4` lined the plates up and could not seat them; the room has to exist
+  // before the placer looks. Over the three review sets plates with a labelled run closer than
+  // plate + 8 went 115 to 80 and over the 320-drawing sweep 65 to 38; b04 went 1696x296 to
+  // 1416x320.
+  //
+  // Only where a plate is shorter across its run than along it, which is a horizontal level's
+  // one-line labels. In TD a plate is across a vertical run by its WIDTH, and a column of them
+  // would push a face apart by whole label widths where stacking them along the gap costs a
+  // plate's height each. Rejected, by `c5fe0f4`'s measurement: 48px on every labelled face of four
+  // ends (b04 1416x368), and the busy pitch for three links to one neighbour (b04 1544x324 and a
+  // label-crowded warning) -- the first pays twice the height this does, the second does not seat.
+  //
+  // An edge labelled on its corridor carries no plate at this face, so it is not counted.
+  function seatPitch(edges, runsAlongX) {
+    var labelled = 0, across = 0, along = 0;
+    for (var s = 0; s < edges.length; s += 1) {
+      var sb = edges[s].labelBox;
+      if (!sb || (runsAlongX && edges[s].chain && edges[s].chain.length > 2)) continue;
+      labelled += 1;
+      across = Math.max(across, runsAlongX ? sb.h : sb.w);
+      along = Math.max(along, runsAlongX ? sb.w : sb.h);
+    }
+    if (labelled < 2 || across >= along) return 0;
+    return across + LABEL_GAP;
+  }
+
   function layoutLevel(level, env) {
     var vertical = (level.dir === "TB" || level.dir === "BT");
     var children = level.children;
@@ -4528,7 +4563,7 @@
     // four or more ends carries a label.
     {
       var ends = [];
-      for (i = 0; i < n; i += 1) ends.push({ lo: 0, hi: 0, loL: false, hiL: false });
+      for (i = 0; i < n; i += 1) ends.push({ lo: 0, hi: 0, loL: false, hiL: false, loE: [], hiE: [] });
       for (i = 0; i < proper.length; i += 1) {
         var be = proper[i];
         var rA = rank[be.a.slot], rB = rank[be.b.slot];
@@ -4538,16 +4573,25 @@
         var high = rA < rB ? be.b.slot : be.a.slot;
         ends[low].hi += 1; if (labelled) ends[low].hiL = true;
         ends[high].lo += 1; if (labelled) ends[high].loL = true;
+        // Not `chain`, which does not exist yet: a horizontal edge spanning ranks is labelled on its
+        // corridor, so it is no plate at this face.
+        var seatable = { labelBox: (!vertical && Math.abs(rA - rB) > 1) ? null : be.labelBox };
+        ends[low].hiE.push(seatable);
+        ends[high].loE.push(seatable);
       }
       for (i = 0; i < n; i += 1) {
         var bc = children[i];
         if (bc.kind !== "node") continue;
         var bg = geometryOf(bc.shape);
         var sides = FORWARD_SIDES[level.dir] || FORWARD_SIDES.TB;
-        var want = [[ends[i].hi, ends[i].hiL, sides[0]], [ends[i].lo, ends[i].loL, sides[1]]];
+        var want = [[ends[i].hi, ends[i].hiL, sides[0], ends[i].hiE], [ends[i].lo, ends[i].loL, sides[1], ends[i].loE]];
         for (var wi = 0; wi < 2; wi += 1) {
           var bn = want[wi][0];
-          if (bn < BUSY_N || !want[wi][1]) continue;
+          var bp = (bn >= BUSY_N && want[wi][1]) ? BUSY_PITCH : 0;
+          // And a face with two or more labelled ends grows until each has a seat (`seatPitch`):
+          // the pitch `facePitch` will ask of it is only usable if the run holds it.
+          bp = Math.max(bp, seatPitch(want[wi][3], !vertical));
+          if (bp === 0) continue;
           // Grown against the landing run rather than the box, because the run is what `placeFace`
           // spends: a stadium loses its two caps, and Closed sized as 8 x 24px of box still put its
           // seven ports 12-16px apart. A face whose run is one point is a vertex, `slopesOf`'s to
@@ -4556,7 +4600,7 @@
             var tb = { x: 0, y: 0, w: bc.w, h: bc.h };
             var tr = landingRun(bg, tb, want[wi][2], portSpan(bg, tb, want[wi][2]));
             if (tr.hi === tr.lo) break;
-            if (tr.hi - tr.lo >= BUSY_PITCH * (bn - 1)) break;
+            if (tr.hi - tr.lo >= bp * (bn - 1)) break;
             if (bg === "circle" || bg === "doublecircle") { bc.w += 2; bc.h = bc.w; }
             else if (vertical) bc.w += 2;
             else bc.h += 2;
@@ -5488,6 +5532,12 @@
         var across = 0;
         for (var d = 0; d < n; d += 1) if (plates[d].across > across) across = plates[d].across;
         var columns = Math.min(n, Math.ceil((across + 2 * LABEL_GAP) / pitch));
+        // A node face `seatPitch` spaced holds its plates in ONE column, each ON its own line, so
+        // the gap needs the widest plate along it and no more. The formula above asks for rule 2's
+        // gap on both sides of a plate BESIDE a line and would charge it two.
+        var seatedFace = n >= 2 && at >= 0 && items[at].ref && items[at].ref.kind === "node" && !vertexFork(at)
+          && plates.every(function (p) { return p.across < p.along; });
+        if (seatedFace) columns = 1;
         var alongs = plates.map(function (p) { return p.along; }).sort(function (a, b) { return b - a; });
         var depth = (columns - 1) * 2 * LABEL_GAP;
         for (d = 0; d < columns; d += 1) depth += alongs[d];
@@ -7138,13 +7188,24 @@
   var BUSY_PITCH = 2 * MIN_PITCH;
   function facePitch(face) {
     var N = face.group.length;
-    if (N < BUSY_N || face.run.hi === face.run.lo) return MIN_PITCH;
+    if (N < 2 || face.run.hi === face.run.lo) return MIN_PITCH;
     var lab = false;
-    for (var g = 0; g < N; g += 1) if (face.group[g].edge.labelBox) lab = true;
-    if (!lab) return MIN_PITCH;
+    var edges = [];
+    for (var g = 0; g < N; g += 1) {
+      if (face.group[g].edge.labelBox) lab = true;
+      edges.push(face.group[g].edge);
+    }
+    // All or nothing. A face `layoutLevel` did not grow -- its ends cross a zone's border -- may be
+    // too short for the seat pitch, and part of it seats no plate: on the two-zone L1..R3 drawing in
+    // render.spec.js a 16px spread re-routed "back two" off its line and left its middle nearer two
+    // other links than its own. Such a face keeps the pitch it had.
+    var seat = seatPitch(edges, !face.alongX);
+    if (seat > 0 && seat * (N - 1) <= face.run.hi - face.run.lo) return seat;
+    var want = (N >= BUSY_N && lab) ? BUSY_PITCH : MIN_PITCH;
+    if (want === MIN_PITCH) return MIN_PITCH;
     // As much of the busy pitch as the run allows: a face the pass in `layoutLevel` did not grow --
     // an end arriving from another level, which that pass does not count -- keeps what fits.
-    return Math.max(MIN_PITCH, Math.min(BUSY_PITCH, Math.floor((face.run.hi - face.run.lo) / (N - 1))));
+    return Math.max(MIN_PITCH, Math.min(want, Math.floor((face.run.hi - face.run.lo) / (N - 1))));
   }
 
   // A route's first turn is where the stub off a port meets the next station -- the first waypoint

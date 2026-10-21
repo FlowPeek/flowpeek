@@ -135,3 +135,32 @@ describe('the plates of one gap', () => {
     }
   }
 });
+
+// And each plate in that column has a line of its own to stand ON.
+//
+// A column needs the lines under it at least a plate's height plus rule 2's gap apart, or the plate
+// on the middle line covers its neighbours. Three labelled links between one pair of nodes left one
+// face 12pt apart under 24pt plates, so two plates went beside their lines and one lay across two
+// -- the held-out set's b04, whose three such links ran 24, 20 and 12pt apart. `seatPitch` now
+// spaces a face's labelled ends that far apart before the placer looks.
+describe('the labelled lines under one column', () => {
+  const pair = SWEEP.filter(({ name }) => /^labelled links between one pair (LR|RL)$/.test(name));
+  it('is checked on three labelled links between one pair, both horizontal directions', () => {
+    expect(pair.length).toBe(2);
+  });
+  for (const { name, source } of pair) {
+    for (const [ruler, measure] of [['face', measureFace], ['budget', measureText]]) {
+      it(`stand a plate's height plus 8 apart, each plate ON its own: ${name}, ${ruler}`, () => {
+        const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText: measure });
+        expect(out.warnings).toEqual([]);
+        const [field] = fields(out.svg);
+        expect(field.length).toBe(3);
+        expect(new Set(field.map((p) => p.cx)).size).toBe(1);
+        expect(field.filter((p) => !p.on).map((p) => p.id)).toEqual([]);
+        const heights = [...out.svg.matchAll(LABEL)].map((m) => +m[7]);
+        const ys = field.map((p) => p.cy).sort((a, b) => a - b);
+        for (let k = 1; k < ys.length; k += 1) expect(ys[k] - ys[k - 1]).toBeGreaterThanOrEqual(Math.max(...heights) + 8);
+      });
+    }
+  }
+});

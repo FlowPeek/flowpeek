@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CROWDED_LABELS, EXAMPLES, SQUARE_CORNERS, SWEEP, TIGHT_MASKS, describeSource } from './corpus.js';
-import { measureText } from './measure.js';
+import { measureFace, measureText } from './measure.js';
 import { nodeOutlines, segmentEntersShape } from './outline.js';
 
 const require = createRequire(import.meta.url);
@@ -593,6 +593,43 @@ describe('[Render] bridges at crossings', () => {
     expect(which(body('-->', '==>'))).toEqual([true, false]);
   });
 
+  // Crossings are read corner to corner, so one that lands inside an arc is still seen; `polyline`
+  // keeps the point where each arc lets go, and a crossing exactly there would sit on a segment's
+  // end and pass the strict test unseen, so collinear points are merged first.
+  const corners = (d) => polyline(d).filter((p, k, all) => k === 0 || k === all.length - 1
+    || !((all[k - 1].x === p.x && p.x === all[k + 1].x) || (all[k - 1].y === p.y && p.y === all[k + 1].y)));
+  const crossingsAt = (a, b) => {
+    const found = [];
+    for (const [p, q] of segmentsOf(corners(a))) {
+      for (const [r, t] of segmentsOf(corners(b))) {
+        if ((p.y === q.y) === (r.y === t.y)) continue;
+        const [h, v] = p.y === q.y ? [[p, q], [r, t]] : [[r, t], [p, q]];
+        const x = v[0].x, y = h[0].y;
+        if (x <= Math.min(h[0].x, h[1].x) || x >= Math.max(h[0].x, h[1].x)) continue;
+        if (y <= Math.min(v[0].y, v[1].y) || y >= Math.max(v[0].y, v[1].y)) continue;
+        found.push({ x, y });
+      }
+    }
+    return found;
+  };
+  // Every crossing in a drawing that marks its crossings, as "connector x connector at x,y", that
+  // carries no bump on either connector.
+  const plainCrossings = (svg) => {
+    const paths = edgePaths(svg);
+    const plain = [];
+    let crossed = 0;
+    for (let i = 0; i < paths.length; i += 1) {
+      for (let j = i + 1; j < paths.length; j += 1) {
+        for (const c of crossingsAt(paths[i].d, paths[j].d)) {
+          crossed += 1;
+          const bridged = [paths[i], paths[j]].some((p) => bridges(p.d).some((h) => h.at.x === c.x && h.at.y === c.y));
+          if (!bridged) plain.push(`${paths[i].id} x ${paths[j].id} at ${c.x},${c.y}`);
+        }
+      }
+    }
+    return { crossed, plain };
+  };
+
   it('moves a crossing off an elbow so that it can be bridged like every other', () => {
     // A crossing drawn plain while every other in the set had a bump was read as a join. The two
     // reader-reviewed sources this was written for, 07 and 08, no longer cross at all: their one
@@ -600,25 +637,6 @@ describe('[Render] bridges at crossings', () => {
     // finds the order without it (see `[Order]` in order.spec.js). 12 still crosses -- `Parser B`'s
     // climb over `replay` -- and with this pass turned off draws that crossing plain, at 392,280, so it
     // is what holds the pass now.
-    // Crossings are read corner to corner, so one that lands inside an arc is still seen; `polyline`
-    // keeps the point where each arc lets go, and a crossing exactly there would sit on a segment's
-    // end and pass the strict test unseen, so collinear points are merged first.
-    const corners = (d) => polyline(d).filter((p, k, all) => k === 0 || k === all.length - 1
-      || !((all[k - 1].x === p.x && p.x === all[k + 1].x) || (all[k - 1].y === p.y && p.y === all[k + 1].y)));
-    const crossingsAt = (a, b) => {
-      const found = [];
-      for (const [p, q] of segmentsOf(corners(a))) {
-        for (const [r, t] of segmentsOf(corners(b))) {
-          if ((p.y === q.y) === (r.y === t.y)) continue;
-          const [h, v] = p.y === q.y ? [[p, q], [r, t]] : [[r, t], [p, q]];
-          const x = v[0].x, y = h[0].y;
-          if (x <= Math.min(h[0].x, h[1].x) || x >= Math.max(h[0].x, h[1].x)) continue;
-          if (y <= Math.min(v[0].y, v[1].y) || y >= Math.max(v[0].y, v[1].y)) continue;
-          found.push({ x, y });
-        }
-      }
-      return found;
-    };
     const sources = {
       '12 crowded subgraphs': [
         'flowchart LR', '    subgraph ingest[Ingestion]', '        k1[Kafka topic orders] --> p1[Parser]',
@@ -633,21 +651,25 @@ describe('[Render] bridges at crossings', () => {
       ].join('\n'),
     };
     for (const [label, source] of Object.entries(sources)) {
-      const paths = edgePaths(drawn(source).svg);
-      const plain = [];
-      let crossed = 0;
-      for (let i = 0; i < paths.length; i += 1) {
-        for (let j = i + 1; j < paths.length; j += 1) {
-          for (const c of crossingsAt(paths[i].d, paths[j].d)) {
-            crossed += 1;
-            const bridged = [paths[i], paths[j]].some((p) => bridges(p.d).some((h) => h.at.x === c.x && h.at.y === c.y));
-            if (!bridged) plain.push(`${paths[i].id} x ${paths[j].id} at ${c.x},${c.y}`);
-          }
-        }
-      }
+      const { crossed, plain } = plainCrossings(drawn(source).svg);
       expect(crossed, label).toBeGreaterThan(0);
       expect(plain, label).toEqual([]);
     }
+  });
+
+  it('keeps an edge label off the room a crossing needs for its bump', () => {
+    // The eighth reader-facing review's one renderer defect: in the RL mesh, as the app paints it,
+    // two dashed failovers cross the same thick drop 44pt apart, and the lower crossing was bridged
+    // while the upper one, at 708,168, was drawn plain -- a crossing beside a marked one reads as a
+    // join. Neither bump was refused for want of straight run: `w4 -.-> e2`'s own "failover" plate
+    // was placed ending at x=700, 8px from the crossing, clean by every term the label placer
+    // scores, and a bump there needs 12 -- its 8px radius and a grid step of air -- on either
+    // connector. Under measure.js's flat budget the plate is wider and stops elsewhere, so this is
+    // drawn with the face the app paints and the outer margin it ships.
+    const app = { ...EDITORIAL, arrangement: { ...EDITORIAL.arrangement, diagramPadding: 20 } };
+    const { crossed, plain } = plainCrossings(drawn(RL_MESH, { theme: app, measureText: measureFace }).svg);
+    expect(crossed).toBe(3);
+    expect(plain).toEqual([]);
   });
 
   it('moves a crossing off a box face so that its bump has air', () => {

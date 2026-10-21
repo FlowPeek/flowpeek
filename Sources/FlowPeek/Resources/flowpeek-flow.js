@@ -8579,40 +8579,52 @@
     return true;
   }
 
-  function placeHop(seg, x, y, ctx) {
-    var existing = seg.owner.hops[seg.index] || [];
-    var hop;
+  // The bump a crossing at x,y would get on `seg`, or null where the run has no room for it.
+  function hopAt(seg, x, y, existing) {
     if (seg.horizontal) {
-      if (!hopFits(seg.room, x, existing)) return false;
+      if (!hopFits(seg.room, x, existing)) return null;
       // The bump goes to -y on a horizontal run and to -x on a vertical one, whichever way the run
       // travels, so a drawing reads its bridges as one gesture. In SVG's y-down frame sweep 1 is
       // the increasing-angle direction, which lifts a left-to-right arc upwards and drops a
       // right-to-left one; the sign of the run is what keeps the bump on the same side of both.
-      hop = {
+      return {
         at: x, box: { x: x - HOP_R, y: y - HOP_R, width: 2 * HOP_R, height: HOP_R },
         from: { x: x - seg.u * HOP_R, y: y }, to: { x: x + seg.u * HOP_R, y: y },
         sweep: seg.u > 0 ? 1 : 0
       };
-    } else {
-      if (!hopFits(seg.room, y, existing)) return false;
-      hop = {
-        at: y, box: { x: x - HOP_R, y: y - HOP_R, width: HOP_R, height: 2 * HOP_R },
-        from: { x: x, y: y - seg.u * HOP_R }, to: { x: x, y: y + seg.u * HOP_R },
-        sweep: seg.u > 0 ? 0 : 1
-      };
     }
-    // A grid step of air around the bump, not just no overlap. A crest that stops on a node's
-    // border is read as part of the border; the nodes are painted after the strokes, so it would be
-    // a bump with its top shaved off.
-    var near = {
+    if (!hopFits(seg.room, y, existing)) return null;
+    return {
+      at: y, box: { x: x - HOP_R, y: y - HOP_R, width: HOP_R, height: 2 * HOP_R },
+      from: { x: x, y: y - seg.u * HOP_R }, to: { x: x, y: y + seg.u * HOP_R },
+      sweep: seg.u > 0 ? 0 : 1
+    };
+  }
+
+  // A grid step of air around the bump, not just no overlap. A crest that stops on a node's
+  // border is read as part of the border; the nodes are painted after the strokes, so it would be
+  // a bump with its top shaved off.
+  function hopAir(hop) {
+    return {
       x: hop.box.x - GRID, y: hop.box.y - GRID,
       width: hop.box.width + 2 * GRID, height: hop.box.height + 2 * GRID
     };
-    var i;
-    for (i = 0; i < ctx.boxes.length; i += 1) {
-      if (rectsOverlap(near, ctx.boxes[i])) return false;
+  }
+
+  function clearOfBoxes(rect, ctx) {
+    for (var i = 0; i < ctx.boxes.length; i += 1) {
+      if (rectsOverlap(rect, ctx.boxes[i])) return false;
     }
-    for (i = 0; i < ctx.labelRects.length; i += 1) {
+    return true;
+  }
+
+  function placeHop(seg, x, y, ctx) {
+    var existing = seg.owner.hops[seg.index] || [];
+    var hop = hopAt(seg, x, y, existing);
+    if (!hop) return false;
+    var near = hopAir(hop);
+    if (!clearOfBoxes(near, ctx)) return false;
+    for (var i = 0; i < ctx.labelRects.length; i += 1) {
       if (rectsOverlap(near, ctx.labelRects[i])) return false;
     }
     existing.push(hop);
@@ -8621,16 +8633,15 @@
     return true;
   }
 
-  function bridgeCrossings(routed, ctx) {
+  // Every place two connectors cross on their drawn straight runs, each with the two runs.
+  function crossingsOf(routed) {
     var segs = [];
     var i;
     for (i = 0; i < routed.length; i += 1) {
       var r = routed[i];
       if (!r) continue;
-      r.hops = [];
       var runs = straightRuns(r.points);
       for (var s = 0; s + 1 < r.points.length; s += 1) {
-        r.hops.push(null);
         var p = r.points[s], q = r.points[s + 1];
         // The STRAIGHT stretch, not the corner-to-corner segment. Two routes whose segments meet
         // inside one of them's corner arc do not cross as drawn -- one of them has already turned
@@ -8661,6 +8672,17 @@
         found.push({ H: H, V: V, x: x, y: y });
       }
     }
+    return found;
+  }
+
+  function bridgeCrossings(routed, ctx) {
+    var i;
+    for (i = 0; i < routed.length; i += 1) {
+      if (!routed[i]) continue;
+      routed[i].hops = [];
+      for (var s = 0; s + 1 < routed[i].points.length; s += 1) routed[i].hops.push(null);
+    }
+    var found = crossingsOf(routed);
     if (crossingsAreCommon(found.length, routed)) return;
     for (i = 0; i < found.length; i += 1) {
       var c = found[i];
@@ -8669,6 +8691,49 @@
       var second = (first === c.H) ? c.V : c.H;
       if (!placeHop(first, c.x, c.y, ctx)) placeHop(second, c.x, c.y, ctx);
     }
+  }
+
+  // Where each crossing's bump could stand, for the label placer to keep its plates off.
+  //
+  // The labels are placed before `bridgeCrossings` runs and `placeHop` refuses a bump with a
+  // mask inside its air, so a plate can strand a crossing that had all the room it needed. The
+  // eighth reader-facing review found exactly one such crossing: in 14 (the RL mesh), as the app
+  // paints it, `w4 -.-> e2`'s "failover" plate sits ON its own run with its end at x=700, 8px from
+  // where the thick `e3 ==> q` drops across at 708,168 -- clean by every term `labelPenalty` scores,
+  // since the drop stands on the edge of the plate's gap rather than in it -- and a bump there
+  // needs 12 on either connector. So it was drawn plain while the same drop's other crossing, 44pt lower, was bridged,
+  // and an unmarked crossing beside a marked one reads as a join. Over SWEEP and the 18 review
+  // sources, in the drawings that mark crossings at all, it was the only one of 4 left plain.
+  //
+  // Each entry is the air of every bump the crossing could have, ignoring labels and the other
+  // crossings' bumps: a plate that overlaps ALL of one entry leaves that crossing no bump. A
+  // plate that blocks one side only is not charged, because `bridgeCrossings` takes the other.
+  // A drawing whose crossings are common draws no bumps (`crossingsAreCommon`), so it has none
+  // to keep clear, and its labels are placed exactly as before.
+  //
+  // Rejected: moving the crossing, as `roomForBridges` does off an elbow or a face. It slides
+  // before the labels exist, and nothing about the routes was short of room: `placeHop` refused
+  // this crossing's bump on both connectors for the plate alone, after both had passed the
+  // straight-run and box tests. With the plate charged here it takes the same place on the far
+  // side of the drop that the lower "failover" already had, and both bumps ride the drop. Also rejected: letting the bump run up to the
+  // plate. The grid step of air is the one `placeHop` keeps from a box for the reason given
+  // there, and a crest touching a plate reads as the plate's border just as it does a node's.
+  function bumpRooms(routed, ctx) {
+    var found = crossingsOf(routed);
+    if (crossingsAreCommon(found.length, routed)) return [];
+    var rooms = [];
+    for (var i = 0; i < found.length; i += 1) {
+      var c = found[i];
+      var airs = [];
+      for (var k = 0; k < 2; k += 1) {
+        var hop = hopAt(k === 0 ? c.H : c.V, c.x, c.y, []);
+        if (!hop) continue;
+        var air = hopAir(hop);
+        if (clearOfBoxes(air, ctx)) airs.push(air);
+      }
+      if (airs.length > 0) rooms.push(airs);
+    }
+    return rooms;
   }
 
   // A bump is a signal -- "these two pass, they do not meet" -- and a signal is read against the
@@ -8911,6 +8976,16 @@
     for (i = 0; i < ctx.labelRects.length; i += 1) {
       if (rectsOverlap(rect, ctx.labelRects[i])) penalty += 200;
       else if (rectsOverlap(near, ctx.labelRects[i])) penalty += 50;
+    }
+    // A mask that leaves a crossing no bump (see `bumpRooms`). 10, a foreign stroke within the
+    // gap, because that is what it is at one remove: the crossing stroke stands just outside the
+    // gap, and what the mask stands in is the bump that stroke's crossing would have drawn.
+    for (i = 0; i < ctx.bumpRooms.length; i += 1) {
+      var blocks = true;
+      for (var b = 0; b < ctx.bumpRooms[i].length; b += 1) {
+        if (!rectsOverlap(rect, ctx.bumpRooms[i][b])) { blocks = false; break; }
+      }
+      if (blocks) penalty += 10;
     }
     // A zone's rect is painted before the labels, so a mask INSIDE one covers nothing (rule 6 says
     // so in as many words) and a mask outside one is not its business. A mask that overlaps the
@@ -9685,6 +9760,7 @@
       boxById: boxById,
       drawn: [],
       labelRects: [],
+      bumpRooms: [],
       width: drawing.width,
       height: drawing.height
     };
@@ -9800,6 +9876,7 @@
     // 33 -> 30 of 44 and 16 -> 8 of 40. The two review drawings still mixing are 12 and 16, each one
     // BESIDE among ON labels, whose ON would cost 30 and 10.
     var titleRects = ctx.labelRects.slice();
+    ctx.bumpRooms = bumpRooms(routed, ctx);
     function placeLabels(besideOnly) {
       ctx.labelRects = titleRects.slice();
       for (i = 0; i < routed.length; i += 1) {

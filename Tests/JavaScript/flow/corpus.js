@@ -92,6 +92,23 @@ const FAMILIES = {
     `flowchart ${dir}`, '  subgraph left[Left]', '    L1[Writer] --> L2[Queue]', '  end',
     '  subgraph right[Right]', '    R1[Reader] --> R2[Sink]', '  end', '  L2 --- R1', '  L1 === R2',
   ].join('\n'),
+  // Long edges: one that spans three ranks or more beside other boxes, so its corridor has to
+  // thread between them. 'back edge' above spans three ranks too, but down a single column, where
+  // the corridor is straight whatever the layout does; nothing generated passed a long edge beside
+  // a box until the held-out review counted 21 links with 6 or more corners on unseen sources. All
+  // three drew one of their edges with 6 or 8 corners before `one lane for a long edge`.
+  'long back edge': (dir) => [
+    `flowchart ${dir}`, '  A[Start] --> B{Check}', '  B -->|left| C[Wide left step]', '  B -->|right| D[Right]',
+    '  C --> E[Merge]', '  D --> E', '  E --> F[Finish]', '  F -->|retry| B',
+  ].join('\n'),
+  'long back edge past a fork': (dir) => [
+    `flowchart ${dir}`, '  A[Start] --> B[Load]', '  B --> C[Parse]', '  B --> X[Side]', '  C --> D[Check]',
+    '  X --> D', '  D --> E[Save]', '  E -.->|again| A', '  A --> E',
+  ].join('\n'),
+  'long forward edge': (dir) => [
+    `flowchart ${dir}`, '  A[Start] --> B[One] --> C[Two] --> D[Three] --> E[End]',
+    '  A --> P[Wide parallel step] --> Q[Another one] --> E', '  A -->|skip| E',
+  ].join('\n'),
 };
 
 /**
@@ -218,8 +235,9 @@ export const TIGHT_MASKS = [];
 /**
  * Pairs of boxes that share a centre line with nothing between them and are nonetheless drawn with
  * a step. The property is "an aligned, unobstructed pair is one segment", and it is measured over
- * 202 pairs in the generated space, against 23 in the twelve literals it replaced. It was 188 until
- * the three link-form families went in; their 14 pairs are all one segment.
+ * 212 pairs in the generated space, against 23 in the twelve literals it replaced. It was 188 until
+ * the three link-form families went in; their 14 pairs are all one segment, and 202 until the three
+ * long-edge families added 10 more, which were one segment before their fix as well as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -230,7 +248,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 202;
+export const ALIGNED_PAIRS = 212;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

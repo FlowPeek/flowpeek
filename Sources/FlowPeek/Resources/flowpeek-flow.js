@@ -5177,6 +5177,59 @@
       }
     }
 
+    // --- one lane for a long edge -----------------------------------------
+    // The passes above settle a dummy at the mean of its two neighbours, which for a chain of them
+    // is a straight line from one end of the edge to the other -- and an orthogonal router draws
+    // that line as a staircase, a jog in every gap the edge passes. The held-out review counted 21
+    // links with 6 or more bends over its twenty unseen sources, reset -> boot at 12 and
+    // breaker -> fastfail at 10, stepping five times down one side of the page where Pele draws a
+    // single run. So an edge that spans three ranks or more is given ONE corridor: every dummy on
+    // it is moved to the same O, the median of where the passes left them, clamped to the range
+    // every rank's neighbours allow. What is left is a jog off the source onto the corridor, one
+    // run, and a jog off it into the target.
+    //
+    // Only the dummies move, and only between their neighbours in the rank, so the order the
+    // crossing count settled and every real box stay exactly where they were. Where the ranks do
+    // not leave one O common to all of them the chain is left as it was rather than split into
+    // partial runs: a split keeps a jog in the middle, which is the staircase again with fewer
+    // steps. Rejected: running the corridor outside the whole level, Pele's outer lane. It needs
+    // the dummy to be first or last in every rank it passes, which a back edge into the middle of
+    // a fan is not, and moving it there reorders the ranks the crossing count settled.
+    //
+    // In rounds, until one moves nothing. A chain that is blocked can be freed by one settled after
+    // it: on h13 the retry edge budget -> send cannot straighten past the dummy of the half-open
+    // return beside it until that return has moved onto its own corridor. A chain once straight is
+    // not visited again -- every neighbour that moves afterwards keeps its separation from it -- so
+    // each round straightens at least one more chain or ends the loop, and the cap is only a guard.
+    var straightened = new Set();
+    for (var round1 = 0; round1 <= proper.length; round1 += 1) {
+      var moved1 = false;
+      for (i = 0; i < proper.length; i += 1) {
+        var lchain = proper[i].chain;
+        if (lchain.length < 4 || straightened.has(i)) continue;
+        var lane1 = [];
+        var lo1 = -Infinity;
+        var hi1 = Infinity;
+        for (j = 1; j + 1 < lchain.length; j += 1) {
+          var d1 = lchain[j];
+          var row1 = coLayers[items[d1].rank];
+          var at1 = row1.indexOf(d1);
+          if (at1 < 0) { lo1 = Infinity; break; }
+          if (at1 > 0) lo1 = Math.max(lo1, centreOf(row1[at1 - 1]) + centreSep(row1[at1 - 1], d1));
+          if (at1 + 1 < row1.length) hi1 = Math.min(hi1, centreOf(row1[at1 + 1]) - centreSep(d1, row1[at1 + 1]));
+          lane1.push(centreOf(d1));
+        }
+        if (lo1 > hi1) continue;
+        lane1.sort(function (p1, q1) { return p1 - q1; });
+        var aim1 = Math.round(Math.min(hi1, Math.max(lo1, lane1[(lane1.length - 1) >> 1])));
+        if (aim1 < lo1 || aim1 > hi1) continue;
+        for (j = 1; j + 1 < lchain.length; j += 1) oPos[lchain[j]] = aim1 - items[lchain[j]].oSize / 2;
+        straightened.add(i);
+        moved1 = true;
+      }
+      if (!moved1) break;
+    }
+
     // The label of the LAST run along a rank has no neighbour to take its room from, so the level
     // itself has to be that wide -- otherwise the corridor `centreSep` reserved for every other
     // label runs off the end of the viewBox for this one. `labelled chain TD` is the whole story in

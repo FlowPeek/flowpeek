@@ -263,3 +263,22 @@ describe('[Straight] over a corpus', () => {
       .toBe(`${ALIGNED_PAIRS} aligned, stepped ${[...STEPPED_PAIRS].sort().join(',') || 'none'}`);
   });
 });
+
+// A long edge is a jog onto its corridor, one run, and a jog off it: four corners at most. The
+// coordinate passes used to leave each dummy at the mean of its neighbours, a diagonal the router
+// drew as a staircase -- the held-out review's reset -> boot had 12 corners and breaker -> fastfail
+// 10, and 18 links over this sweep had 6 or more. The 'long ...' families in corpus.js are the
+// ones that put a long edge beside other boxes.
+describe('[Straight] a long edge travels one corridor', () => {
+  it('draws no link over the sweep with more than four corners', () => {
+    const over = [];
+    for (const { name, source } of SWEEP) {
+      const { svg } = drawn(source);
+      for (const m of svg.matchAll(/data-id="([^"]+)" d="([^"]+)"/g)) {
+        const corners = (m[2].match(/Q/g) || []).length;
+        if (corners > 4) over.push(`${name} ${m[1]} ${corners}`);
+      }
+    }
+    expect(over).toEqual([]);
+  });
+});

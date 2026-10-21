@@ -292,6 +292,32 @@ function selfCrossingPairs(source) {
   return found;
 }
 
+// Legs of a route outside a two-way pair laid parallel to a leg of the pair, overlapping it and
+// closer across it than two grid steps.
+function besidePair(source) {
+  const all = routes(source);
+  const key = (id) => id.replace(/^L_/, '').replace(/_\d+$/, '');
+  const paired = (k) => all.some((o) => key(o.id) !== k && key(o.id) === k.split('_').reverse().join('_'));
+  const found = [];
+  for (const a of all) {
+    if (!paired(key(a.id))) continue;
+    for (const b of all) {
+      if (paired(key(b.id))) continue;
+      for (const p of a.legs) {
+        for (const q of b.legs) {
+          if (p.horizontal !== q.horizontal) continue;
+          const gap = p.horizontal ? Math.abs(p.p.y - q.p.y) : Math.abs(p.p.x - q.p.x);
+          const k = p.horizontal ? 'x' : 'y';
+          const lo = Math.max(Math.min(p.p[k], p.q[k]), Math.min(q.p[k], q.q[k]));
+          const hi = Math.min(Math.max(p.p[k], p.q[k]), Math.max(q.p[k], q.q[k]));
+          if (gap > 0 && gap < 8 && hi > lo) found.push(`${b.id} beside ${a.id} (${gap}px for ${hi - lo}px)`);
+        }
+      }
+    }
+  }
+  return found;
+}
+
 describe('[Braid] two links between one pair of nodes do not cross each other', () => {
   it('holds on every SWEEP source, the two-way family in every direction among them', () => {
     expect(SWEEP.filter(({ name }) => /^two-way pairs in a state machine /.test(name)).length).toBe(4);
@@ -302,6 +328,16 @@ describe('[Braid] two links between one pair of nodes do not cross each other', 
   // Every trade `uncrossPairs` offers this pair moves a run onto a lane another route holds, so the
   // trade only holds with one of the pair's runs slid to a lane nobody does. At 14a73f8 Recovering
   // <-> Checking crosses itself twice LR and RL.
+  // The slide that untwists a pair can leave a route that is not in it running beside it, which
+  // reads as one line branching. At 65806b2 N3 --> N0 runs 4px beside N2 --> N0 for 64px, TD and
+  // BT; LR and RL never draw it.
+  it('leaves no third route beside the pair it slid apart, TD and BT', () => {
+    const family = SWEEP.filter(({ name }) => /^third route beside a two-way pair (TD|BT)$/.test(name));
+    expect(family.length).toBe(2);
+    const found = family.flatMap(({ name, source }) => besidePair(source).map((b) => `${name}: ${b}`));
+    expect(found).toEqual([]);
+  });
+
   it('holds where the trade needs a run slid past a held lane, LR and RL', () => {
     const family = SWEEP.filter(({ name }) => /^two-way pair past a held lane /.test(name));
     expect(family.length).toBe(2);

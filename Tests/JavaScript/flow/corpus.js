@@ -274,6 +274,18 @@ const FAMILIES = {
     `flowchart ${dir}`, '  A --> B', '  A --> C', '  C --> D', '  B --> E', '  E --> F', '  D --> G', '  A --> H',
     '  C --> I', '  D --> E', '  A --> E', '  B --> G', '  C --> E', '  C --> H',
   ].join('\n'),
+  // A two-way pair slid apart beside a route of its own corridor. `two-way pair past a held lane`
+  // asks that the pair stop crossing; nothing asked where the slide leaves a THIRD route: the
+  // held-out set's b11, once 643afb8 slid Resume's riser past Esc's, ran Resume 4px under Quit to
+  // title for 16px. Found by rendering random graphs of five to twelve nodes with a labelled
+  // two-way pair and keeping those where the slide left a route not in the pair beside it; this
+  // is one with no warning in any direction.
+  // At 65806b2 N3 --> N0 runs 4px beside N2 --> N0 TD and BT.
+  'third route beside a two-way pair': (dir) => [
+    `flowchart ${dir}`, '  N0 -->|pause| N1', '  N0 -->|resume| N2', '  N2 --> N3', '  N2 --> N4',
+    '  N1 -->|next| N5', '  N0 --> N6', '  N5 --> N7', '  N6 --> N8', '  N5 --> N6', '  N3 --> N0',
+    '  N4 --> N0', '  N7 --> N2', '  N3 --> N4', '  N2 -->|ok| N0',
+  ].join('\n'),
 };
 
 // Families drawn only in LR and RL, where a plate is shorter across its run than along it and so
@@ -474,7 +486,8 @@ export const TIGHT_MASKS = [];
  * lane` added 4, one segment before the slide `uncrossPairs` offers as after, and 442 until
  * `labelled exits that step into heads` added 2, one segment before a seated straight was sized as
  * after, and 444 until `nesting past a third route` added 4, one segment before a nest was offered
- * a free lane as after.
+ * a free lane as after, and 448 until `third route beside a two-way pair` added 8, one segment
+ * before a third route was eased off a slid pair as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -485,7 +498,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 448;
+export const ALIGNED_PAIRS = 456;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

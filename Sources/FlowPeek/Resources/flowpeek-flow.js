@@ -8531,6 +8531,7 @@
           if (!slid) continue;
           P.points = slid[0];
           Q.points = slid[1];
+          easeAround(P, Q);
           moved = true;
         }
       }
@@ -8547,6 +8548,75 @@
       if (foreignPassages(next[0], ctx, P.edge) > foreignPassages(P.points, ctx, P.edge)) return false;
       if (foreignPassages(next[1], ctx, Q.edge) > foreignPassages(Q.points, ctx, Q.edge)) return false;
       return true;
+    }
+    // A third route the slide left within PASS_CLEAR_PX of the pair's runs, offered a slide of one of
+    // its own runs, a grid step at a time up to SLIDE_STEPS each way: kept, cheapest first, when it
+    // lays fewer runs near a parallel stroke (`nearRuns`), no more beside one, crosses no more, and
+    // passes a trade's clearances.
+    //
+    // `slideApart` holds the PAIR to no more near runs than it had, and that is a count: in b11 it
+    // traded Esc's and Resume's ports at Paused and stood Resume's riser at x 596, past Esc's, which
+    // took Esc's two near runs against Quit to title -- the two risers on x 580 meeting end to end,
+    // and Esc's run ending where Quit's began -- down to one, Resume's run on y 160 under Quit's on
+    // y 156, 4px apart for 16px. No slide of the pair parts them: Resume's riser has to stand past
+    // Esc's at x 580 to nest, and Quit's run starts at x 580. Quit's jog moved to x 608, 12px past
+    // Resume's riser, does.
+    // Rejected: asking `slideApart` for no near run at all. No slide qualifies in b11, Esc and
+    // Resume cross each other again and the drawing has 4 crossings where it has 3.
+    function easeAround(P, Q) {
+      for (var t = 0; t < live.length; t += 1) {
+        var R = live[t];
+        if (R === P || R === Q || R.transit || nearRuns(R.points, [P, Q]) === 0) continue;
+        var rest = live.filter(function (o) { return o !== R; });
+        var was = R.points;
+        var near0 = nearRuns(was, rest), beside0 = besideCount(was, rest), seated0 = inSeats(was, rest);
+        var crossed0 = againstOthers(was, R, R, null).n;
+        var best = null;
+        for (var k = 1; k + 2 < was.length; k += 1) {
+          var axis = was[k].y === was[k + 1].y ? "y" : "x";
+          for (var d = 1; d <= 2 * SLIDE_STEPS; d += 1) {
+            var cost = Math.ceil(d / 2);
+            if (best && best.cost < cost) break;
+            var next = shiftRun(was, k, was[k][axis] + (d % 2 ? -1 : 1) * cost * GRID, R.edge);
+            if (!next) continue;
+            var near = nearRuns(next, rest);
+            if (near >= near0 || (best && best.near <= near)) continue;
+            if (besideCount(next, rest) > beside0 || againstOthers(next, R, R, null).n > crossed0) continue;
+            if (inSeats(next, rest) > seated0) continue;
+            if (!stubsAndBodyClear(next, ctx, R.edge) || !clearWith(next, R.edge, R, null, [])) continue;
+            if (foreignPassages(next, ctx, R.edge) > foreignPassages(was, ctx, R.edge)) continue;
+            best = { next: next, near: near, cost: cost };
+          }
+        }
+        if (best) R.points = best.next;
+      }
+    }
+    // Runs of `points` laid along a labelled route's parallel run, overlapping it, closer across it
+    // than its plate's extent across plus LABEL_GAP: the room the label pass, which runs after this
+    // one, will want for that plate. Asked of `easeAround` because a run eased off the pair can be
+    // eased into that room: in 30,000 random graphs with a two-way pair it was, three times, and each
+    // drawing then warned label-crowded where it had not. With this two do not and the
+    // third still does; over the same graphs warnings go from 34 to 35 where they went to 37.
+    function inSeats(points, others) {
+      var n = 0;
+      for (var o = 0; o < others.length; o += 1) {
+        var edge = others[o].edge, q = others[o].points;
+        if (!(edge.labelWidth > 0) || !(edge.labelHeight > 0)) continue;
+        for (var i = 0; i + 1 < points.length; i += 1) {
+          var a = points[i], b = points[i + 1];
+          var h = a.y === b.y;
+          var seat = (h ? edge.labelHeight : edge.labelWidth) + LABEL_GAP_PX;
+          for (var j = 0; j + 1 < q.length; j += 1) {
+            var c = q[j], d = q[j + 1];
+            if (h !== (c.y === d.y)) continue;
+            var gap = h ? Math.abs(a.y - c.y) : Math.abs(a.x - c.x);
+            var lo = h ? Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x)) : Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
+            var hi = h ? Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x)) : Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+            if (gap < seat && hi > lo) n += 1;
+          }
+        }
+      }
+      return n;
     }
     // A two-way pair every trade left crossing: each trade again, or none, with one run of either
     // route slid to a lane nobody holds, nearest first.

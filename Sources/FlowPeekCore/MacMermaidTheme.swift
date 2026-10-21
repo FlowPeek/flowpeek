@@ -508,7 +508,16 @@ public struct MacMermaidTheme: Equatable, Sendable {
                 nodeSpacing: 32,
                 rankSpacing: 40,
                 padding: 16,
-                diagramPadding: 24,
+                // The bottom of the ramp. The margin is drawn inside the picture that is then scaled
+                // to fit, so it buys no room on screen and only makes every label smaller. The preview
+                // frames the SVG twice already -- the glue's `fit()` keeps `vp.pad` 24px each side,
+                // inside `DiagramStage`'s 8 or 14pt inset -- while `DiagramExporter` adds nothing,
+                // so this is an export's only frame and the case the number has to serve. Over
+                // differential.mjs's 175 drawings the total area is 12,291,296 px² at 24 and
+                // 11,544,256 at 20, against Pele's 9,969,933 at its own 8. Lower values were measured
+                // and not taken: the ramp is the source style's and not this file's to extend. Wider
+                // than the flow renderer: mermaid draws state and class diagrams with this margin too.
+                diagramPadding: 20,
                 // What every family that reads mermaid's one curve setting gets, unchanged.
                 curve: "rounded",
                 // And what a true flowchart gets instead: orthogonal routing, which is the half of

@@ -26,7 +26,9 @@ const peleSource = readFileSync(join(root, 'Sources/FlowPeek/Resources/pele.glob
 const pele = vm.runInNewContext(`${peleSource}\n;pele`, { console });
 
 // Copied from Tests/JavaScript/flow/render.spec.js. This is the payload used by the editorial theme,
-// including the deterministic host text measurer below.
+// including the deterministic host text measurer below. Except `diagramPadding`, which follows what
+// MacMermaidTheme.swift ships (20) rather than the spec's fixed test payload (24): the outer margin is
+// part of the drawing area this harness compares.
 const EDITORIAL = {
   dark: false,
   fontFamily: "'Geist', sans-serif",
@@ -34,7 +36,7 @@ const EDITORIAL = {
   themeVariables: { fontSize: '12px', lineColor: '#4f5d75', nodeBorder: '#2d3142', mainBkg: '#f5f5f5' },
   themeCSS: '.fp-ladder { --fp-ladder: on; }\n.node rect.basic:not([rx]) { rx: 6px; ry: 6px; }',
   arrangement: {
-    nodeSpacing: 32, rankSpacing: 40, padding: 16, diagramPadding: 24,
+    nodeSpacing: 32, rankSpacing: 40, padding: 16, diagramPadding: 20,
     curve: 'rounded', flowchartCurve: 'step', wrappingWidth: 160,
   },
 };

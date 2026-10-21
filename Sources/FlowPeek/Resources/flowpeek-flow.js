@@ -4584,13 +4584,15 @@
     // dropped before a coordinate is given out. With no outside ends the extra rank is empty and
     // every step below does what it did without it.
     //
-    // Rejected: keeping those dummies as real items, so that the zone reserves the edge a corridor
-    // the way it does a long edge. On 02 it took iOS -> API Gateway off CDN and drew no crossing,
-    // but the corridors for iOS and Android sat below CDN, both edges climbed to the gateway's
-    // left tip at the last turn allowed before it, and the two shared 8px of one vertical -- there
-    // is room between CDN's clearance and that turn for one climb, not two. Letting the corridor
-    // pull its child as well bent `subgraph s[Tier] W --> R end / K --> R` (straight.spec.js) and
-    // made 14's two thick edges into the queue cross twice (braid.spec.js).
+    // Rejected: keeping every one of those dummies as a real item, so that the zone reserves each
+    // edge a corridor the way it does a long edge. On 02 it took iOS -> API Gateway off CDN and drew
+    // no crossing, but the corridors for iOS and Android sat below CDN, both edges climbed to the
+    // gateway's left tip at the last turn allowed before it, and the two shared 8px of one vertical
+    // -- there is room between CDN's clearance and that turn for one climb, not two. Letting every
+    // corridor pull its child as well bent `subgraph s[Tier] W --> R end / K --> R` (straight.spec.js)
+    // and made 14's two thick edges into the queue cross twice (braid.spec.js). What survives of the
+    // idea is narrower, and is `coLayers` below: one corridor per child, and only where it is the
+    // child's median.
     var M = m;
     var farAt = new Map();
     var ordUp = [];
@@ -4779,6 +4781,75 @@
     for (i = 1; i < best.length; i += 1) {
       layers.push(best[i].filter(function (id) { return id < m; }));
     }
+    // --- the one outside corridor a member sits on ------------------------
+    // With the dummies above dropped, the coordinates below line a member up with its neighbours
+    // INSIDE the zone and nothing else. On 02 that put API Gateway level with CDN, its one inside
+    // neighbour, so CDN stood where iOS -> API Gateway has to pass; the edge climbed over CDN and took
+    // a bridge over Web -> CDN and another over CDN -> Gateway. Pele draws that side with none.
+    //
+    // So a member whose median neighbour in the rank before it is an OUTSIDE end keeps that one
+    // corridor for its coordinates: a ghost item in each rank the edge passes, two units wide like a
+    // long edge's dummy, which the coordinate passes pin to the member's centre (`pinned` below)
+    // and pack the real items around. API Gateway's neighbours, in order, are CDN, iOS and Android;
+    // iOS is the median, so the gateway sits on iOS's line and CDN steps aside by one node gap.
+    // Android's corridor is not kept: two corridors into one face are the 8px-shared climb the
+    // rejection above describes, and it is the median alone that a straight run is owed.
+    //
+    // The median, not the mean, and an even count with an inside neighbour in the middle pair goes
+    // to the inside one -- which is what keeps `W --> R / K --> R` straight, the case the rejected
+    // pull bent. Two edges to one far end are one neighbour: 14's Worker West A has Router West
+    // inside and the replicate pair outside, and counting the pair twice made it the median, moved
+    // East Region 4px and put the two failover lines one lane apart for most of their length.
+    var bestPos = positionsOf(best);
+    var kept = new Set();
+    var anchoredTo = new Map();
+    for (i = 2; i < best.length; i += 1) {
+      for (j = 0; j < best[i].length; j += 1) {
+        var child2 = best[i][j];
+        if (child2 >= m) continue;
+        var ups2 = ordUp[child2];
+        if (!ups2.some(function (u) { return u >= m; })) continue;
+        var seenFar = new Set();
+        ups2 = ups2.filter(function (u) {
+          if (u < m) return true;
+          var top2 = u;
+          while (!farAt.has(top2)) top2 = ordUp[top2][0];
+          if (seenFar.has(top2)) return false;
+          seenFar.add(top2);
+          return true;
+        });
+        ups2.sort(function (p2, q2) { return bestPos[p2] - bestPos[q2]; });
+        var h3 = ups2.length >> 1;
+        var pick2 = -1;
+        if (ups2.length % 2) pick2 = ups2[h3];
+        else if ((ups2[h3 - 1] >= m) !== (ups2[h3] >= m)) pick2 = ups2[h3 - 1] >= m ? ups2[h3] : ups2[h3 - 1];
+        if (pick2 < m) continue;
+        anchoredTo.set(child2, pick2);
+        for (var walk = pick2; walk >= m && !farAt.has(walk); walk = ordUp[walk][0]) kept.add(walk);
+      }
+    }
+    var ghostOf = new Map();
+    var coLayers = [];
+    for (i = 1; i < best.length; i += 1) {
+      var row = [];
+      for (j = 0; j < best[i].length; j += 1) {
+        var id2 = best[i][j];
+        if (id2 < m) { row.push(id2); continue; }
+        if (!kept.has(id2)) continue;
+        ghostOf.set(id2, items.length);
+        row.push(items.length);
+        items.push({ ref: null, dummy: true, ghost: true, oSize: 2, rSize: 0, rank: i - 1 });
+        nbrUp.push([]); nbrDown.push([]);
+      }
+      coLayers.push(row);
+    }
+    // A ghost has no neighbour before it (its far end is not in this level) and one after it, the
+    // next ghost or the member, which is all the upward pass needs to pin it.
+    ghostOf.forEach(function (gi, id) {
+      var nx = ordDown[id][0];
+      nbrDown[gi].push(nx < m ? nx : ghostOf.get(nx));
+    });
+    anchoredTo.forEach(function (g, child) { items[child].anchor = ghostOf.get(g); });
 
     for (i = 0; i < layers.length; i += 1) {
       for (j = 0; j < layers[i].length; j += 1) items[layers[i][j]].order = j;
@@ -4896,6 +4967,8 @@
     // rejected on the number -- 18.5% of drawing area against 13.8%, for a corridor the placer only
     // reaches when the first one is taken, and it took one label off a stroke to do it.
     var labelAfter = vertical;
+    // Ghosts carry no label, so they claim the plain gap and nothing more.
+    for (i = m; i < items.length; i += 1) { labelRoom.push(0); labelRoomBack.push(0); leavingRoom.push(0); }
     // The minimum distance between two neighbours' centres: what they need to not touch, or what the
     // label between them needs, whichever is larger. `a` is the earlier of the two along the rank.
     // One label between two neighbours needs a gap from its stroke and a gap from the neighbour, so
@@ -4914,22 +4987,59 @@
 
     // --- coordinates along the rank (the O axis) --------------------------
     var oPos = [];
-    for (i = 0; i < m; i += 1) oPos.push(0);
-    for (i = 0; i < layers.length; i += 1) {
+    for (i = 0; i < items.length; i += 1) oPos.push(0);
+    for (i = 0; i < coLayers.length; i += 1) {
       var cursor = 0;
-      for (j = 0; j < layers[i].length; j += 1) {
-        var it = items[layers[i][j]];
+      for (j = 0; j < coLayers[i].length; j += 1) {
+        var it = items[coLayers[i][j]];
         if (j > 0) {
-          var prevIdx = layers[i][j - 1];
+          var prevIdx = coLayers[i][j - 1];
           cursor = oPos[prevIdx] + items[prevIdx].oSize / 2
-            + centreSep(prevIdx, layers[i][j]) - it.oSize / 2;
+            + centreSep(prevIdx, coLayers[i][j]) - it.oSize / 2;
         }
-        oPos[layers[i][j]] = cursor;
+        oPos[coLayers[i][j]] = cursor;
       }
     }
 
     function centreOf(idx) {
       return oPos[idx] + items[idx].oSize / 2;
+    }
+
+    var segUp = [];
+    var segDown = [];
+    for (i = 0; i < m; i += 1) { segUp.push([]); segDown.push([]); }
+    for (i = 0; i < segments.length; i += 1) {
+      segDown[segments[i].u].push(segments[i]);
+      segUp[segments[i].v].push(segments[i]);
+    }
+    // Where along this level's O axis an edge goes into a zone, measured from the zone's middle.
+    // A zone is aligned by its middle, which is right while its members are centred in it and wrong
+    // once a kept corridor has stepped one aside: on 02 the Edge zone's middle is 12px above API
+    // Gateway, so iOS, level with the middle, jogged 12px down into the gateway and Gateway -> Order
+    // Service jogged back up. Only a zone whose own layout pinned a corridor (`offCentre`) answers
+    // with anything but 0, so every other level is aligned exactly as before. Applying it to every
+    // zone was measured: it straightened 02 and 12's Storage -> Serving runs, but on cand it moved
+    // Original onto Nego-H1's column and stacked three labels on its parallel lines, and on 14 it
+    // doubled the failover pair.
+    function attachO(seg, idx) {
+      var zone = items[idx].ref;
+      if (!zone || zone.kind !== "cluster" || !zone.offCentre) return 0;
+      var e3 = seg.edge;
+      var end3 = null;
+      var ends3 = [e3.fromChild, e3.toChild];
+      for (var k3 = 0; k3 < 2 && !end3; k3 += 1) {
+        var cur3 = ends3[k3];
+        var o3 = 0;
+        for (var g3 = 0; g3 < 256 && cur3 && cur3 !== zone; g3 += 1) {
+          o3 += vertical ? cur3.lx + (cur3 === ends3[k3] ? cur3.w / 2 : 0) : cur3.ly + (cur3 === ends3[k3] ? cur3.h / 2 : 0);
+          var up3 = cur3.parent ? env.clusters.get(cur3.parent) : null;
+          if (up3) o3 += vertical ? up3.contentDX : up3.contentDY;
+          cur3 = up3;
+        }
+        if (cur3 === zone) end3 = o3;
+      }
+      if (end3 === null) return 0;
+      return Math.round(end3 - (vertical ? zone.w : zone.h) / 2);
     }
 
     // Four alternating passes of: ask each node where its neighbours in the rank above (or below)
@@ -4940,30 +5050,82 @@
     for (var pass = 0; pass < 4; pass += 1) {
       var downward = (pass % 2) === 0;
       var order = [];
-      for (i = 0; i < layers.length; i += 1) order.push(downward ? i : layers.length - 1 - i);
+      for (i = 0; i < coLayers.length; i += 1) order.push(downward ? i : coLayers.length - 1 - i);
       for (var oi = 0; oi < order.length; oi += 1) {
         var lr = order[oi];
-        var layer2 = layers[lr];
+        var layer2 = coLayers[lr];
         if (!layer2.length) continue;
         var want = [];
+        var pinned = [];
         for (i = 0; i < layer2.length; i += 1) {
           var idx = layer2[i];
+          pinned.push(false);
           var fixed2 = downward ? nbrUp[idx] : nbrDown[idx];
+          if (downward && items[idx].anchor !== undefined) {
+            want.push(Math.round(centreOf(items[idx].anchor) - items[idx].oSize / 2));
+            continue;
+          }
           if (!fixed2.length) { want.push(oPos[idx]); continue; }
+          if (items[idx].ghost) {
+            want.push(Math.round(centreOf(fixed2[0]) - items[idx].oSize / 2));
+            pinned[i] = true;
+            continue;
+          }
+
+          // Against an off-centre zone, the median of where each edge would have this item stand: an
+          // edge per entry, so the three edges into API Gateway outvote CDN's one, and Edge lines
+          // up with Clients at iOS.
+          var segs2 = downward ? segUp[idx] : segDown[idx];
+          var offs = [];
+          var through = false;
+          for (j = 0; j < segs2.length; j += 1) {
+            var far2 = downward ? segs2[j].u : segs2[j].v;
+            var d2 = attachO(segs2[j], far2) - attachO(segs2[j], idx);
+            if (d2 !== 0) through = true;
+            offs.push(centreOf(far2) + d2);
+          }
+          if (through) {
+            offs.sort(function (p2, q2) { return p2 - q2; });
+            var h2 = offs.length >> 1;
+            var mid2 = (offs.length % 2) ? offs[h2] : (offs[h2 - 1] + offs[h2]) / 2;
+            want.push(Math.round(mid2 - items[idx].oSize / 2));
+            continue;
+          }
           var acc = 0;
           for (j = 0; j < fixed2.length; j += 1) acc += centreOf(fixed2[j]);
           want.push(Math.round(acc / fixed2.length - items[idx].oSize / 2));
         }
+        // A pinned ghost stays where its member wants it; the real items before it are packed back
+        // from it rather than pushing it forward, and nothing drifts the rank off it afterwards.
+        var stepOf = function (k) {
+          return items[layer2[k - 1]].oSize / 2 + centreSep(layer2[k - 1], layer2[k]) - items[layer2[k]].oSize / 2;
+        };
+        var ceil = [];
+        var anyPin = false;
+        for (i = layer2.length - 1; i >= 0; i -= 1) {
+          var c2 = Infinity;
+          if (i + 1 < layer2.length) {
+            c2 = ceil[i + 1] - stepOf(i + 1);
+            if (pinned[i + 1]) c2 = Math.min(c2, want[i + 1] - stepOf(i + 1));
+          }
+          ceil[i] = c2;
+          if (pinned[i]) anyPin = true;
+        }
         var put = [];
         for (i = 0; i < layer2.length; i += 1) {
-          var lowest = (i === 0) ? want[i]
-            : put[i - 1] + items[layer2[i - 1]].oSize / 2
-              + centreSep(layer2[i - 1], layer2[i]) - items[layer2[i]].oSize / 2;
-          put.push(Math.max(want[i], lowest));
+          var lowest = (i === 0) ? -Infinity : put[i - 1] + stepOf(i);
+          var aim = pinned[i] ? want[i] : Math.min(want[i], ceil[i]);
+          put.push(Math.max(aim, lowest));
         }
         var drift = 0;
-        for (i = 0; i < layer2.length; i += 1) drift += want[i] - put[i];
-        drift = Math.round(drift / layer2.length);
+        var drifting = 0;
+        for (i = 0; i < layer2.length; i += 1) {
+          if (items[layer2[i]].ghost) continue;
+          drift += want[i] - put[i];
+          drifting += 1;
+        }
+        drift = (drifting && !anyPin) ? Math.round(drift / drifting) : 0;
+        if (anyPin) level.offCentre = true;
         for (i = 0; i < layer2.length; i += 1) oPos[layer2[i]] = put[i] + drift;
       }
     }
@@ -6859,6 +7021,7 @@
     var metrics = makeMetrics(opts.measureText, theme);
     var arrangement = theme.arrangement;
     var env = {
+      clusters: null,
       spaceU: arrangement.nodeSpacing / GRID,
       rankU: arrangement.rankSpacing / GRID
     };
@@ -6868,6 +7031,7 @@
 
     var rootDir = normaliseDirection(opts.direction || db.getDirection(), "TB");
     var model = buildModel(db, rootDir);
+    env.clusters = model.clusterById;
     var warnings = model.warnings;
     var i;
 
@@ -6984,6 +7148,7 @@
       var bandU = cluster.label ? Math.max(inner.contentW, cluster.label.w) : inner.contentW;
       cluster.contentDX = padU + Math.floor((bandU - inner.contentW) / 2);
       cluster.contentDY = padU + header;
+      cluster.offCentre = !!inner.offCentre;
       cluster.w = even(bandU + 2 * padU);
       cluster.h = even(inner.contentH + 2 * padU + header);
     }

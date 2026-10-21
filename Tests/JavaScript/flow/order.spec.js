@@ -145,19 +145,25 @@ describe('[Order] the order within a rank costs no crossing it can avoid', () =>
   it('orders a zone by where its edges come from: Redis above S3 above Postgres', () => {
     // Data has no edge inside it. Ordered by its own edges alone it kept declaration order, and
     // Auth -> Redis crossed Order -> Postgres and Billing -> Postgres. Those three are gone.
-    //
-    // The two left are iOS -> API Gateway climbing over CDN, kept as an exact set so that losing
-    // either, or gaining one, fails. They are not the order's: CDN is iOS's height because it is
-    // lined up with API Gateway, and the cure that was measured -- dummies for an edge entering a
-    // zone, so the zone keeps it a corridor -- drew no crossing here but sent iOS and Android up to
-    // the gateway's left tip on one vertical, sharing 8px, because between CDN's clearance and the
-    // last turn before the tip there is room for one climb and not two. A run two connectors share
-    // reads as a join, which costs a reader more than two bridges do.
     const drawing = laidOut(ARCHITECTURE);
     const y = (id) => drawing.nodes.find((n) => n.id === id).y;
     expect(y('redis')).toBeLessThan(y('s3'));
     expect(y('s3')).toBeLessThan(y('pg'));
-    expect(crossingPairs(ARCHITECTURE)).toEqual(['L_web_cdn_0 x L_ios_gw_0', 'L_cdn_gw_0 x L_ios_gw_0']);
+    expect(crossingPairs(ARCHITECTURE)).toEqual([]);
+  });
+
+  it('keeps the corridor of a zone member\'s median outside edge clear: iOS goes straight in', () => {
+    // CDN used to stand level with API Gateway, its one inside neighbour, which is where iOS ->
+    // API Gateway has to pass; the edge climbed over CDN with two bridges. API Gateway's median
+    // neighbour is iOS, so iOS's corridor is kept and CDN steps aside, and the Edge zone is aligned
+    // by where its edges go in rather than by its middle, so neither iOS nor Gateway -> Order Service
+    // jogs. Android's corridor is not kept: two climbs to the gateway's tip shared 8px of one vertical
+    // when every outside edge had one.
+    const svg = draw(ARCHITECTURE).svg;
+    const path = (id) => svg.match(new RegExp(`data-id="${id}" d="([^"]*)"`))[1];
+    expect(path('L_ios_gw_0')).toMatch(/^M[\d.]+,([\d.]+) L[\d.]+,\1$/);
+    expect(path('L_gw_orders_0')).toMatch(/^M[\d.]+,([\d.]+) L[\d.]+,\1$/);
+    expect(svg).not.toMatch(/ A8,8 /);
   });
 
   it('draws the state machine with no crossing', () => {

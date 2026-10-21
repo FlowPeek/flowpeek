@@ -169,7 +169,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
 
         // --- the ladder ------------------------------------------------------
         //
-        // Five node surfaces, one hue, no legend. The fills are the source's `ink @ 0.0x`
+        // Four node surfaces, one hue, no legend. The fills are the source's `ink @ 0.0x`
         // expressions composited over `paper` and written as opaque hex -- not cosmetic: `parseRGB`
         // in flowpeek-glue.js drops alpha, so an rgba ink wash is measured by the label-contrast
         // pass as solid ink, the ink label above it computes at roughly 1:1, and the pass would
@@ -183,7 +183,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         // Increase Contrast reaches all of it -- it is the one accessibility control a reader has,
         // and the first cut of this ladder routed around it. The washes deepen by 1.6, the quiet
         // stroke goes from 3.2:1 to 4.5:1 (and stays below `muted`, so the ramp keeps its order),
-        // every outline widens to 1.25px. Five rungs either way, each one
+        // every outline widens to 1.25px. Four rungs either way, each one
         // further from its neighbours.
         let wash = increaseContrast ? 1.6 : 1.0
         let inkWash = { (alpha: Double) in Self.blend(ink, alpha * wash, over: paper) }
@@ -193,7 +193,8 @@ public struct MacMermaidTheme: Equatable, Sendable {
         let storeFill = inkWash(0.10)
         let entryFill = Self.blend(muted, 0.16 * wash, over: paper)
         let terminalFill = inkWash(0.04)
-        let optionalFill = inkWash(0.02)
+        // Not a rung: the faintest wash, which state composites and gantt sections still take.
+        let faintFill = inkWash(0.02)
         // 0.10 in both appearances. style-guide.md says 0.10 and the shipped dark assets use 0.08;
         // on a screen at preview size the difference is one RGB level, so one number is stated here
         // rather than two that have to be kept in step.
@@ -219,7 +220,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         // light: 1.04:1 from each level to the next, 1.15:1 from paper to the fourth; dark: 1.06:1
         // and 1.27:1. `muted` eyebrow text stays at 5.29:1 or better on every rung in both.
         //
-        // What it costs, measured rather than hidden: `quietStroke`, the terminal and optional
+        // What it costs, measured rather than hidden: `quietStroke`, the terminal
         // outline, is 3.19:1 on light paper and falls to 2.98, 2.87 and 2.77:1 on the second to
         // fourth rungs, so a terminal node nested two deep or more is under 3:1 at the default
         // contrast. Holding it would mean a darker quiet stroke, which would pass `soft` and break
@@ -236,7 +237,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         // composited over paper only because an rgba fill cannot be shipped (see the ladder note),
         // and once zones were filled that shortcut stopped meaning what the source means. The
         // fixed hexes landed on the zone ladder's own values: terminal (0.04) IS the depth-1 wash
-        // and optional (0.02) the depth-0 wash, so a sink one zone deep measured 1.000:1 against
+        // and the optional rung there was then (0.02) the depth-0 wash, so a sink one zone deep measured 1.000:1 against
         // its ground in light and dark -- the second review's ghosted NAT Gateway -- and one rung
         // further down the sign flipped and the "marked" node was lighter than its zone. Dark's
         // backend has the same problem from the other side: paper-2 is 1.020:1 on the depth-2 wash
@@ -275,10 +276,10 @@ public struct MacMermaidTheme: Equatable, Sendable {
             // in the source's own flowchart take this, including the start oval.
             Rung(token: "terminal", fill: terminalFill, onZones: onZones { Self.blend(ink, 0.04 * wash, over: $0) },
                  stroke: quietStroke, width: strokeWidth, dash: nil),
-            // Reached only by `-.->`: the author saying "conditional". Same stroke as terminal, so
-            // the dash is what tells them apart, and it survives greyscale.
-            Rung(token: "optional", fill: optionalFill, onZones: onZones { Self.blend(ink, 0.02 * wash, over: $0) },
-                 stroke: quietStroke, width: strokeWidth, dash: "4,3"),
+            // No optional rung. It was given to a node whose every edge was `-.->` and drew it with a
+            // dashed border, which put what the source said about a link onto the box at its end; the
+            // held-out review read it as a claim on six nodes in three sources. A dashed line here is
+            // now only ever a link. flowpeek-flow.js `tagLadder` has the rest.
             // No focal rung. The source spends its one coral on the node its author chose; a
             // flowchart names none, and the renderers picked one by degree instead -- measured, 8
             // of 172 sweep drawings and 6 of the review's 16 sources, five of which a reader took
@@ -383,7 +384,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
             // real colour anyway so that if mermaid starts emitting it, it is not the 12% ghost it
             // used to be. State diagrams get no accent: there is no element to put it on.
             "innerEndBackground": muted,
-            "compositeBackground": optionalFill,
+            "compositeBackground": faintFill,
             "compositeTitleBackground": paper2,
             "altBackground": storeFill,
             "transitionColor": muted,
@@ -400,7 +401,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
             // red critical task and a literal `red` today-line. The today-line is the one thing a
             // reader looks at first and there is exactly one of it, so it is the accent; everything
             // else is the ladder, and the critical task is told apart by an ink border.
-            "sectionBkgColor": optionalFill,
+            "sectionBkgColor": faintFill,
             "altSectionBkgColor": paper,
             "sectionBkgColor2": storeFill,
             "excludeBkgColor": paper2,
@@ -431,7 +432,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         variables.merge(sections) { current, _ in current }
 
         // What the variables cannot say. Every colour here is a token above; the structural class
-        // tokens (`fp-backend` … `fp-optional`, `fp-cross`) are written by
+        // tokens (`fp-backend` … `fp-terminal`, `fp-cross`) are written by
         // flowpeek-glue.js from the graph's own shape, and every decision about what they look like
         // is here. Specificity is (0,2,1) against mermaid's own (0,1,1), so no `!important` is
         // needed -- and an author's `classDef`, which mermaid emits after this stylesheet with
@@ -690,7 +691,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
     /// `--pele-surface-alt` follows to `ink @ 0.16` so the two do not merge: paper to surface is
     /// 1.15:1 and surface to surface-alt 1.16:1 in light, 1.27:1 and 1.27:1 in dark -- an even
     /// three-rung ladder, and each step is the rung step of editorial's own node ladder
-    /// (`optionalFill` at ink @ 0.02 against `storeFill` at ink @ 0.10: 1.16:1 light, 1.28:1 dark)
+    /// (`faintFill` at ink @ 0.02 against `storeFill` at ink @ 0.10: 1.16:1 light, 1.28:1 dark)
     /// rather than a number invented here. Ink still clears everything that sits on them: 8.05:1 at
     /// worst on surface, 5.48:1 at worst on surface-alt, both in dark + contrast.
     ///

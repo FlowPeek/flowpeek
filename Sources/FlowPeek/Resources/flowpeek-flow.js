@@ -4181,7 +4181,6 @@
         inDeg: 0,
         outDeg: 0,
         edges: 0,
-        dotted: 0,
         incoming: [],
         rung: null
       };
@@ -4334,8 +4333,8 @@
       // Degree is counted over leaves only. An edge that names a subgraph attaches to the container
       // and says nothing about any one node inside it, so letting it raise a member's degree would
       // hand `fp-entry` to whichever node happened to be listed first.
-      if (fromNode) { fromNode.outDeg += 1; fromNode.edges += 1; if (edge.pattern === "dotted") fromNode.dotted += 1; }
-      if (toNode) { toNode.inDeg += 1; toNode.edges += 1; if (edge.pattern === "dotted") toNode.dotted += 1; }
+      if (fromNode) { fromNode.outDeg += 1; fromNode.edges += 1; }
+      if (toNode) { toNode.inDeg += 1; toNode.edges += 1; }
       if (toNode) toNode.incoming.push(edge);
       edge.countsForRung = !!(fromNode && toNode);
 
@@ -5835,7 +5834,7 @@
   // ===========================================================================
 
   function tagLadder(model) {
-    var counts = { backend: 0, store: 0, entry: 0, terminal: 0, optional: 0, cross: 0 };
+    var counts = { backend: 0, store: 0, entry: 0, terminal: 0, cross: 0 };
     var nodes = model.nodes;
     var edges = [];
     var i;
@@ -5850,8 +5849,16 @@
         : (n.inDeg === 0 && n.outDeg > 0) ? "entry"
         : (n.outDeg === 0 && n.inDeg > 0) ? "terminal"
         : "backend";
-      // Author intent outranks computed role: a node reached only by `-.->` is conditional.
-      if (n.edges > 0 && n.dotted === n.edges) rung = "optional";
+      // No `optional` rung. A node every one of whose edges was `-.->` used to become `fp-optional`,
+      // drawn with a dashed border, on the reading that the author had called it conditional. The
+      // author had said that of the LINK. The held-out review found the border on six nodes in three
+      // of twenty unseen sources and read it as a claim each time: Prometheus in a deployment
+      // topology is not optional, its one edge is dotted; a saga's compensating steps are
+      // conditional, not optional. None of the twenty wrote a `classDef` or `style` that asked for
+      // it. The precedent is the zone-crossing dash below, which yields to an authored `-.->` rather
+      // than putting a second meaning on dashed lines, and the accent this sweep stopped inventing.
+      // Keeping the rung and dropping only its dash was rejected: its fill (ink @ 0.02) is 1.036:1
+      // from terminal's in light and 1.061:1 in dark, so without the dash no reader could see it.
       n.rung = rung;
       counts[rung] += 1;
     }

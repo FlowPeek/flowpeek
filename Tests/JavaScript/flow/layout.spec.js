@@ -735,9 +735,15 @@ describe('[Layout] the ladder', () => {
     expect(out.counts.rungs.store).toBe(1);
   });
 
-  it('marks a node reached only by a dotted link as optional', () => {
+  it('leaves a node reached only by dotted links the rung its structure gives it', () => {
+    // This used to assert `optional`, which the theme drew as a dashed border. A dotted link is the
+    // author saying something about the LINK; the node at its end is not thereby optional. The
+    // held-out review read the dashed border as a claim on six nodes in three sources -- Prometheus,
+    // whose one edge happens to be dotted, called optional -- and no source asked for it.
     const out = draw('flowchart TD\n  A --> B\n  B -.-> C\n  C -.-> D');
-    expect(byId(out, 'C').rung).toBe('optional');
+    expect(byId(out, 'C').rung).toBe('backend');
+    expect(byId(out, 'D').rung).toBe('terminal');
+    expect(out.counts.rungs).not.toHaveProperty('optional');
   });
 
   it('promotes no node to an accent, not even the one every line reaches', () => {

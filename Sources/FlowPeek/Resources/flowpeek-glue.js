@@ -431,7 +431,7 @@
   // A theme can say what a node type looks like; it cannot say what a node IS, because mermaid
   // emits no node type, no shape name and no degree. This pass reads the graph's own shape out of
   // the markup -- in-degree, out-degree, declared cylinders, subgraph membership -- and writes
-  // class tokens: `fp-backend` / `fp-store` / `fp-entry` / `fp-terminal` / `fp-optional` on
+  // class tokens: `fp-backend` / `fp-store` / `fp-entry` / `fp-terminal` on
   // nodes, `fp-cross` on edges and their labels. Not one colour
   // value appears in this file; the theme's stylesheet decides what each token looks like.
   //
@@ -622,7 +622,7 @@
       // "_", so take everything up to the trailing counter.
       var m = /^(.+)-(\d+)$/.exec(id.slice(prefix.length));
       if (!m) return;
-      var rec = { el: g, id: m[1], inDeg: 0, outDeg: 0, edges: 0, dotted: 0, incoming: [] };
+      var rec = { el: g, id: m[1], inDeg: 0, outDeg: 0, edges: 0, incoming: [] };
       byId[m[1]] = rec;
       nodes.push(rec);
     });
@@ -662,7 +662,6 @@
       };
       pair[0].outDeg++; pair[1].inDeg++;
       pair[0].edges++; pair[1].edges++;
-      if (dotted) { pair[0].dotted++; pair[1].dotted++; }
       pair[1].incoming.push(edge);
       edges.push(edge);
     });
@@ -704,15 +703,15 @@
     }
 
     var counts = {
-      backend: 0, store: 0, entry: 0, terminal: 0, optional: 0, cross: 0
+      backend: 0, store: 0, entry: 0, terminal: 0, cross: 0
     };
     nodes.forEach(function (n) {
       var rung = isCylinder(n) ? "store"
         : (n.inDeg === 0 && n.outDeg > 0) ? "entry"
         : (n.outDeg === 0 && n.inDeg > 0) ? "terminal"
         : "backend";
-      // Author intent outranks computed role: a node reached only by `-.->` is conditional.
-      if (n.edges > 0 && n.dotted === n.edges) rung = "optional";
+      // No `optional` rung, for the reason flowpeek-flow.js `tagLadder` gives: a dotted link says
+      // something about the link, not about the node at its end.
       n.rung = rung;
       n.el.classList.add("fp-" + rung);
       // The ground the theme composites this rung over. Every zone mermaid draws takes the first

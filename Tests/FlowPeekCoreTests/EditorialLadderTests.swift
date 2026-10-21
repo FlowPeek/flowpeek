@@ -15,7 +15,7 @@ final class EditorialLadderTests: XCTestCase {
         )
     }
 
-    private static let rungs = ["backend", "store", "entry", "terminal", "optional"]
+    private static let rungs = ["backend", "store", "entry", "terminal"]
 
     // MARK: - The bug that shipped
 
@@ -125,6 +125,25 @@ final class EditorialLadderTests: XCTestCase {
         }
     }
 
+    /// A node border is never dashed. The dash belonged to an `optional` rung given to any node whose
+    /// every edge was `-.->`, which turned what the source said about a link into a claim about the
+    /// box at its end: the held-out review found it on six nodes in three sources, Prometheus among
+    /// them, called optional only because its one edge was dotted. A dashed line on this page is the
+    /// author's, and only ever a link.
+    func testNoNodeBorderIsDashed() {
+        for appearance in [MacMermaidTheme.Appearance.light, .dark] {
+            for contrast in [false, true] {
+                let css = theme(appearance, contrast: contrast).css
+                XCTAssertNil(rung("optional", css), "\(appearance) contrast=\(contrast): the optional rung is back")
+                for token in Self.rungs {
+                    XCTAssertEqual(
+                        rung(token, css)?.dash, "", "\(appearance) contrast=\(contrast): the \(token) border is dashed"
+                    )
+                }
+            }
+        }
+    }
+
     /// WCAG 1.4.11: a graphical object needed to understand the content owes 3:1 against what is
     /// next to it. An outline is what makes a box a box, so every rung's outline has to clear it
     /// against the page -- the source's own `ink @ 0.30` measures 1.78:1 and gets away with it only
@@ -153,7 +172,7 @@ final class EditorialLadderTests: XCTestCase {
             let strong = theme(appearance, contrast: true).css
             XCTAssertNotEqual(resting, strong, "\(appearance): Increase Contrast changes nothing about the ladder")
             let paper = theme(appearance).variables["background"]!
-            for token in ["store", "entry", "terminal", "optional"] {
+            for token in ["store", "entry", "terminal"] {
                 let a = rung(token, resting)!, b = rung(token, strong)!
                 XCTAssertGreaterThan(
                     Self.contrast(b.fill, paper), Self.contrast(a.fill, paper),

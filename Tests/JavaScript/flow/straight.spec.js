@@ -23,6 +23,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ALIGNED_PAIRS, STEPPED_PAIRS, SWEEP } from './corpus.js';
 import { measureText } from './measure.js';
 
 const require = createRequire(import.meta.url);
@@ -234,25 +235,6 @@ describe('[Straight] the fan separates only what collides', () => {
 });
 
 describe('[Straight] over a corpus', () => {
-  const CORPUS = [
-    'flowchart TD\n  A[Start] --> B{Is it ready?}\n  B -->|yes| C[(Store)]\n  B -->|no| D((Retry))',
-    'flowchart LR\n  A --> B --> C --> D --> E',
-    'flowchart TD\n  subgraph edge["Edge tier"]\n    CDN[CDN] --> LB[Load balancer]\n  end\n  LB --> API[API] --> DB[(Postgres)]',
-    'flowchart BT\n  A[one] --> B[two]\n  A --> C[three]\n  B --> D[four]\n  C --> D',
-    'flowchart RL\n  A>note] --- B[/skew/] -.-> C[\\other\\]',
-    'graph TD\n  A --- B\n  A ---- C\n  B ==> C\n  C --> A',
-    'flowchart LR\n  subgraph a\n   subgraph b\n    X --> Y\n   end\n  end\n  Y --> Z\n  Z --> X',
-    ['flowchart TD',
-      '  subgraph a[Frontend]', '   A1 --> A2 --> A3', '  end',
-      '  subgraph b[Backend]', '   B1 --> B2 --> B3', '  end',
-      '  A3 --> B1', '  B3 --> A1'].join('\n'),
-    ['flowchart TD',
-      '  subgraph edge["Edge tier"]', '    CDN[CDN] --> LB[Load balancer]', '  end',
-      '  subgraph core["Core"]', '    API[API] --> Store[(Store)]', '  end',
-      '  LB --> API', '  Store -.-> LB'].join('\n'),
-    'flowchart TD\n  A --> H[Hub]\n  B --> H\n  C --> H\n  H --> X\n  H --> Y\n  H --> Z',
-  ];
-
   it('draws every aligned, unobstructed pair as one segment', () => {
     // Measured over this corpus before the change: 23 pairs of boxes sharing a centre line with
     // nothing between them, 7 of them drawn with a step in the line. The one exception below is not
@@ -261,15 +243,18 @@ describe('[Straight] over a corpus', () => {
     // of its face and the step is the corridor's, not the fan's.
     let aligned = 0;
     const stepped = [];
-    for (const source of CORPUS) {
+    for (const { name, source } of SWEEP) {
       const drawing = laidOut(source);
       const drawnPaths = paths(source);
       expect(drawnPaths).toHaveLength(drawing.edges.length);
       for (const pair of alignedAndClear(drawing)) {
         aligned += 1;
-        if (!STRAIGHT.test(drawnPaths[pair.index])) stepped.push(`${pair.from}->${pair.to}`);
+        // Named by drawing as well as by pair: `A->D` occurs in a dozen of the generated sources
+        // and a bare pair name cannot be traced back to one.
+        if (!STRAIGHT.test(drawnPaths[pair.index])) stepped.push(`${name}: ${pair.from}->${pair.to}`);
       }
     }
-    expect(`${aligned} aligned, stepped ${stepped.join(',') || 'none'}`).toBe('23 aligned, stepped C->A');
+    expect(`${aligned} aligned, stepped ${stepped.sort().join(',') || 'none'}`)
+      .toBe(`${ALIGNED_PAIRS} aligned, stepped ${[...STEPPED_PAIRS].sort().join(',')}`);
   });
 });

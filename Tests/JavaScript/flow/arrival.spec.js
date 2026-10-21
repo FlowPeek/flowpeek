@@ -32,6 +32,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { generate } from './corpus.js';
 import { measureText } from './measure.js';
 
 const require = createRequire(import.meta.url);
@@ -132,57 +133,16 @@ function approach(d) {
 }
 
 /**
- * Sources covering every family the measurement found, and the ones it found nothing in -- the
- * geometries whose ports sink to an outline bought their approach run by accident, from the inset,
- * and a change to the arrival constant is exactly the kind of change that could take it away again.
+ * The shared generated space -- see Tests/JavaScript/flow/corpus.js. It was built here first, for
+ * this file's measurement, and hoisted once the other specs needed the same coverage; the hoist was
+ * checked by rebuilding both and diffing the sources, which matched 160 for 160.
+ *
+ * What it has to keep covering for THIS file: every node geometry, including the ones the original
+ * measurement found nothing in -- the geometries whose ports sink to an outline bought their
+ * approach run by accident, from the inset, and a change to the arrival constant is exactly the
+ * kind of change that could take it away again.
  */
-const SHAPES = [
-  'X[rect]', 'X(round)', 'X([stadium])', 'X[[subroutine]]', 'X[(cylinder)]', 'X((circle))',
-  'X>odd]', 'X{rhombus}', 'X{{hexagon}}', 'X[/lean right/]', 'X[\\lean left\\]',
-  'X[/trapezoid\\]', 'X[\\inv trapezoid/]', 'X(((double circle)))',
-];
-
-function corpus() {
-  const out = [];
-  const add = (name, source) => out.push({ name, source });
-  for (const dir of ['TD', 'LR', 'BT', 'RL']) {
-    SHAPES.forEach((shape) => {
-      add(`shape ${shape} ${dir}`, `flowchart ${dir}\n  A[Source] --> ${shape}\n`);
-      // and again with a second edge on the same face, so the port is fanned off centre
-      add(`shape fan ${shape} ${dir}`,
-        `flowchart ${dir}\n  A[Source] --> ${shape}\n  B[Other] --> X\n  C[Third] --> X\n`);
-    });
-    add(`return across subgraphs ${dir}`, [
-      `flowchart ${dir}`, '  subgraph front[Frontend]', '    web[Web app] --> router[Router]', '  end',
-      '  subgraph back[Backend]', '    handler[Handler] --> worker[Worker]', '  end',
-      '  router --> handler', '  worker --> web',
-    ].join('\n'));
-    add(`back edge ${dir}`, `flowchart ${dir}\n  A --> B --> C --> D\n  D --> A\n`);
-    add(`two back edges ${dir}`,
-      `flowchart ${dir}\n  A[Alpha] --> B[Beta] --> C[Gamma] --> D[Delta] --> E[Epsilon]\n  E --> A\n  D --> B\n`);
-    add(`rank skip ${dir}`, `flowchart ${dir}\n  A --> B --> C --> D\n  A --> D\n  B --> D\n`);
-    add(`fan in ${dir}`, `flowchart ${dir}\n  N0 --> Z[Sink]\n  N1 --> Z\n  N2 --> Z\n  N3 --> Z\n  N4 --> Z\n`);
-    add(`fan out ${dir}`, `flowchart ${dir}\n  H{Hub} --> A\n  H --> B\n  H --> C\n  H --> D\n`);
-    add(`self loop ${dir}`, `flowchart ${dir}\n  A --> B\n  B --> B\n  B --> C\n`);
-    add(`crossing ${dir}`,
-      `flowchart ${dir}\n  A1 --> B1\n  A2 --> B2\n  A1 --> B2\n  A2 --> B1\n  B1 --> C\n  B2 --> C\n`);
-    add(`nested subgraphs ${dir}`,
-      `flowchart ${dir}\n  subgraph a\n   subgraph b\n    X --> Y\n   end\n  end\n  Y --> Z\n  Z --> X\n`);
-    add(`labelled fork ${dir}`, [
-      `flowchart ${dir}`, '  A[Start] -->|first| B{Is it ready?}', '  B -->|yes| C[(Store)]',
-      '  B -->|no| D((Retry))', '  D --> A',
-    ].join('\n'));
-    add(`wide and narrow ${dir}`,
-      `flowchart ${dir}\n  A[A very wide starting box indeed] --> B[b]\n  B --> C[Another extremely wide terminal box]\n`);
-    add(`ladder ${dir}`, [
-      `flowchart ${dir}`, '  R[Request] --> V{Valid?}', '  V -->|no| E[Reject]', '  V -->|yes| P[Process]',
-      '  P --> S[(Store)]', '  S --> N[Notify]', '  N --> R', '  E --> R',
-    ].join('\n'));
-  }
-  return out;
-}
-
-const CORPUS = corpus();
+const CORPUS = generate();
 
 describe('the approach run an arrowhead arrives on', () => {
   it('leaves a head-length of shaft behind the head, on every arrival in every family', () => {

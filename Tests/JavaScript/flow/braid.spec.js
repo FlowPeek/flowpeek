@@ -256,3 +256,36 @@ describe('[Braid] a fork arm lands on the near side of a corridor into the same 
     expect(found).toEqual([]);
   });
 });
+
+// Two links between one pair of nodes do not cross each other at all.
+//
+// A two-way pair is the one pair a reader most wants to see as a matched there-and-back, and two
+// orthogonal routes between the same two boxes can always be drawn nested: their ends stand on
+// the same faces, so trading which route takes which port, or which lane, undoes any crossing
+// between them. `uncrossPairs` offered neither for a pair that crossed only once, never traded
+// ports, and refused every trade whose route ended on a round outline. The third held-out set's
+// b11 had Esc and Resume crossing twice; `two-way pairs in a state machine` crosses a pair once in
+// every direction at 019e21e.
+function selfCrossingPairs(source) {
+  const all = routes(source);
+  const found = [];
+  const ends = (id) => id.replace(/^L_/, '').replace(/_\d+$/, '');
+  for (let i = 0; i < all.length; i += 1) {
+    for (let j = i + 1; j < all.length; j += 1) {
+      const a = ends(all[i].id), b = ends(all[j].id);
+      if (a !== b && a !== b.split('_').reverse().join('_')) continue;
+      let n = 0;
+      for (const p of all[i].legs) for (const q of all[j].legs) if (crosses(p, q)) n += 1;
+      if (n > 0) found.push(`${all[i].id} x ${all[j].id} (${n})`);
+    }
+  }
+  return found;
+}
+
+describe('[Braid] two links between one pair of nodes do not cross each other', () => {
+  it('holds on every SWEEP source, the two-way family in every direction among them', () => {
+    expect(SWEEP.filter(({ name }) => /^two-way pairs in a state machine /.test(name)).length).toBe(4);
+    const found = SWEEP.flatMap(({ name, source }) => selfCrossingPairs(source).map((b) => `${name}: ${b}`));
+    expect(found).toEqual([]);
+  });
+});

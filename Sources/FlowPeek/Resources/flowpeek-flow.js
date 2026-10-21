@@ -8184,6 +8184,36 @@
   // kept only when the two routes together cross strictly fewer strokes than before, are still
   // clear at the same strictness `straightenDetours` asks for, and enter no foreign zone they did
   // not already. Self-loops are not offered: the loop is the detour.
+  //
+  // The rule it keeps is about any two links, and was narrower than that: no two links cross more
+  // than once, and two links between ONE pair of nodes never cross at all -- a two-way pair is the
+  // pair a reader most wants to read as a matched there-and-back. The third held-out set showed how
+  // far short the pass fell. Over the review sources and two held-out sets 9 pairs crossed twice, one
+  // of them a two-way pair crossing itself twice (b11, Esc and Resume); every one was offered and
+  // refused, for the first two reasons below, and the third shape was never offered at all:
+  //  - A swap could only move interior runs. b11's pair stood in swapped order on BOTH faces, and
+  //    the one interior swap took its two crossings away and put two back on other routes (4 before,
+  //    4 after). What undoes it is trading which route takes which port, so where two routes end on
+  //    one flat face of one box their end runs are offered too: the face keeps the same ports at the
+  //    same pitch, only their owners trade. Moving the crossing onto two other routes is then worth
+  //    taking when it removes a knot and adds none -- kept when no count rises and one falls, among
+  //    all crossings, knots, and crossings between routes that share a node.
+  //  - The clearance test refused every swap whose route ended on a circle or a cylinder: it asked
+  //    `routeIsClear` of the whole route, and a port sunk into a round outline starts inside its own
+  //    box's rectangle. That was wrong, not strict -- `stubsAndBodyClear` already excuses that box on
+  //    that leg -- so the stubs are now asked only to keep off other strokes. Both of b12's pairs,
+  //    under ThemeContext and under the store, were refused this way.
+  //  - A two-way pair crossing once was never offered: the pass started at two crossings.
+  // Over those 56 drawings that leaves 3 pairs crossing more than once and no two-way pair crossing
+  // itself. What is left is three routes in one gap, where every trade of two moves the second
+  // crossing onto a third route or lays a run along one -- 11-hard-dense's A -> M against L's two
+  // exits, and b09's two exits from CS360 -- and a gap with too few lanes: a hub fanning to three,
+  // with a two-way pair to a node past the middle child, trades its pair's crossing for one with the
+  // hub's last child, because that child's jog cannot drop below the pair's turn and keep its
+  // arrival. Both need a run moved to a lane nobody holds, which is a slide, not a trade.
+  //
+  // Rejected: a second pass beside this one for two-way pairs. The moves and every check on them
+  // are this pass's, and b11's pair crossed twice, so it was this pass's to undo already.
   function crossesAt(p, q, r, s) {
     if (p.y === q.y && r.x === s.x) {
       return r.x > Math.min(p.x, q.x) && r.x < Math.max(p.x, q.x) && p.y > Math.min(r.y, s.y) && p.y < Math.max(r.y, s.y);
@@ -8223,19 +8253,102 @@
     return out;
   }
 
+  // Whether two routes join the same two nodes, either way round: a two-way pair, or two links
+  // written between one pair. Self-loops never reach here.
+  function sameEnds(a, b) {
+    return (a.from === b.from && a.to === b.to) || (a.from === b.to && a.to === b.from);
+  }
+
+  function shareNode(a, b) {
+    return a.from === b.from || a.from === b.to || a.to === b.from || a.to === b.to;
+  }
+
+  // What the pass counts as a knot: every crossing between two routes past their first, and every
+  // crossing at all between two that join the same two nodes. A single crossing between unrelated
+  // routes is the drawing's business; a second is the braid, and a two-way pair crossing itself is
+  // the one pair a reader most wants to see as a matched there-and-back.
+  function knotsOf(n, a, b) {
+    return sameEnds(a, b) ? n : Math.max(0, n - 1);
+  }
+
+  // The runs of two routes that can trade places across their shared normal: every pair of parallel
+  // interior runs, and the two END runs where both routes have an end on one flat face of one box.
+  // Trading two end runs trades the two ports, which leaves the face holding the same ports at the
+  // same pitch and corner clearance the layout gave it -- only which route takes which changes.
+  // Only on a rectangle with both ports unsunk, as `portSlides` asks: on an outline the port would
+  // have to be re-sunk at its new offset.
+  function exchanges(P, Q, ctx) {
+    var out = [];
+    var np = P.points.length, nq = Q.points.length;
+    for (var j = 1; j + 2 < np; j += 1) {
+      for (var k = 1; k + 2 < nq; k += 1) out.push([j, k]);
+    }
+    if (np < 3 || nq < 3) return out;
+    function flatEnd(r, end) {
+      var id = end === 0 ? r.edge.from : r.edge.to;
+      var tip = end === 0 ? r.edge.start : r.edge.end;
+      var box = ctx.boxById.get(id);
+      return box && box.geometry === "rect" && tip.inset === 0 ? { id: id, side: tip.side } : null;
+    }
+    var ends = [0, 1];
+    for (var a = 0; a < 2; a += 1) {
+      for (var b = 0; b < 2; b += 1) {
+        var fp = flatEnd(P, ends[a]), fq = flatEnd(Q, ends[b]);
+        if (!fp || !fq || fp.id !== fq.id || fp.side !== fq.side) continue;
+        out.push([ends[a] === 0 ? 0 : np - 2, ends[b] === 0 ? 0 : nq - 2]);
+      }
+    }
+    return out;
+  }
+
+  // The two routes with each exchange in `moves` applied, or null where `shiftRun` refuses one.
+  function exchanged(P, Q, moves) {
+    var p = P.points, q = Q.points;
+    for (var m = 0; m < moves.length; m += 1) {
+      var j = moves[m][0], k = moves[m][1];
+      var pH = p[j].y === p[j + 1].y;
+      if (pH !== (q[k].y === q[k + 1].y)) return null;
+      var pc = pH ? p[j].y : p[j].x;
+      var qc = pH ? q[k].y : q[k].x;
+      if (pc === qc) return null;
+      var p2 = shiftRun(p, j, qc, P.edge);
+      var q2 = shiftRun(q, k, pc, Q.edge);
+      if (!p2 || !q2) return null;
+      p = p2;
+      q = q2;
+    }
+    return [p, q];
+  }
+
   function uncrossPairs(routed, ctx) {
     var live = [];
     for (var i = 0; i < routed.length; i += 1) {
       if (routed[i] && !routed[i].edge.selfLoop) live.push(routed[i]);
     }
-    function othersCrossing(points, skipA, skipB) {
-      var n = 0;
+    // Crossings and knots between `points` (standing for `self`) and every route but the two moved.
+    function againstOthers(points, self, skipA, skipB) {
+      var n = 0, knots = 0, kin = 0;
       for (var o = 0; o < live.length; o += 1) {
         if (live[o] === skipA || live[o] === skipB) continue;
-        n += crossingsBetween(points, live[o].points);
+        var c = crossingsBetween(points, live[o].points);
+        n += c;
+        knots += knotsOf(c, self.edge, live[o].edge);
+        if (shareNode(self.edge, live[o].edge)) kin += c;
       }
-      return n;
+      return { n: n, knots: knots, kin: kin };
     }
+    function tally(p, q, P, Q) {
+      var mutual = crossingsBetween(p, q);
+      var a = againstOthers(p, P, P, Q), b = againstOthers(q, Q, P, Q);
+      var kin = (shareNode(P.edge, Q.edge) ? mutual : 0) + a.kin + b.kin;
+      return { n: mutual + a.n + b.n, knots: knotsOf(mutual, P.edge, Q.edge) + a.knots + b.knots, kin: kin };
+    }
+    // The legs between the two stubs against boxes and strokes at `straightenDetours`' strictness,
+    // and the stubs against strokes alone. A stub is excused its own box by `stubsAndBodyClear`, and
+    // has to be here too: a port sunk into a round outline starts inside its own box's rectangle,
+    // so the whole route asked of `routeIsClear` was refused for every swap whose end sat on a
+    // circle or a cylinder -- held-out b12's two knots, under ThemeContext and under the store,
+    // were both refused so, by both routes, with nothing near either of them.
     function clearWith(points, edge, skipA, skipB, partner) {
       var drawn = [];
       for (var o = 0; o < live.length; o += 1) {
@@ -8243,14 +8356,21 @@
         for (var s = 0; s + 1 < live[o].points.length; s += 1) drawn.push([live[o].points[s], live[o].points[s + 1]]);
       }
       for (var t = 0; t + 1 < partner.length; t += 1) drawn.push([partner[t], partner[t + 1]]);
+      var last = points.length - 1;
+      var stubs = [[points[0], points[1]], [points[last - 1], points[last]]];
+      for (var e = 0; e < 2; e += 1) {
+        for (var d = 0; d < drawn.length; d += 1) {
+          if (runsAlong(stubs[e][0], stubs[e][1], drawn[d][0], drawn[d][1])) return false;
+        }
+      }
       var saved = ctx.drawn;
       ctx.drawn = drawn;
-      var ok = routeIsClear(points, ctx, 2, edge);
+      var ok = points.length < 4 || routeIsClear(points.slice(1, last), ctx, 2, edge);
       ctx.drawn = saved;
       return ok;
     }
-    // Bounded, because each accepted swap strictly lowers a finite count and a few rounds is all the
-    // review sources ever use; the bound is there so a pathological source costs time linearly.
+    // Bounded, because each accepted exchange strictly lowers a finite sum and a few rounds is all
+    // any measured source uses; the bound is there so a pathological source costs time linearly.
     for (var round = 0; round < 4; round += 1) {
       var moved = false;
       for (var a = 0; a < live.length; a += 1) {
@@ -8258,32 +8378,32 @@
           var P = live[a], Q = live[b];
           if (P.transit || Q.transit) continue;
           var mutual = crossingsBetween(P.points, Q.points);
-          if (mutual < 2) continue;
-          var before = mutual + othersCrossing(P.points, P, Q) + othersCrossing(Q.points, P, Q);
-          var done = false;
-          for (var j = 1; j + 2 < P.points.length && !done; j += 1) {
-            var pH = P.points[j].y === P.points[j + 1].y;
-            for (var k = 1; k + 2 < Q.points.length && !done; k += 1) {
-              var qH = Q.points[k].y === Q.points[k + 1].y;
-              if (pH !== qH) continue;
-              var pc = pH ? P.points[j].y : P.points[j].x;
-              var qc = qH ? Q.points[k].y : Q.points[k].x;
-              if (pc === qc) continue;
-              var P2 = shiftRun(P.points, j, qc, P.edge);
-              if (!P2) continue;
-              var Q2 = shiftRun(Q.points, k, pc, Q.edge);
-              if (!Q2) continue;
-              var after = crossingsBetween(P2, Q2) + othersCrossing(P2, P, Q) + othersCrossing(Q2, P, Q);
-              if (after >= before) continue;
-              if (!stubsAndBodyClear(P2, ctx, P.edge) || !stubsAndBodyClear(Q2, ctx, Q.edge)) continue;
-              if (!clearWith(P2, P.edge, P, Q, Q2) || !clearWith(Q2, Q.edge, P, Q, P2)) continue;
-              if (foreignPassages(P2, ctx, P.edge) > foreignPassages(P.points, ctx, P.edge)) continue;
-              if (foreignPassages(Q2, ctx, Q.edge) > foreignPassages(Q.points, ctx, Q.edge)) continue;
-              P.points = P2;
-              Q.points = Q2;
-              done = true;
-              moved = true;
+          if (knotsOf(mutual, P.edge, Q.edge) === 0 && !(mutual > 0 && shareNode(P.edge, Q.edge))) continue;
+          var before = tally(P.points, Q.points, P, Q);
+          var single = exchanges(P, Q, ctx);
+          // One exchange, then two at once: a two-way pair whose ports stand swapped on BOTH faces
+          // crosses itself once per face, and trading either pair of ports alone can cost a crossing
+          // elsewhere that trading both does not.
+          var offers = single.map(function (x) { return [x]; });
+          for (var u = 0; u < single.length; u += 1) {
+            for (var v = u + 1; v < single.length; v += 1) {
+              if (single[u][0] !== single[v][0] && single[u][1] !== single[v][1]) offers.push([single[u], single[v]]);
             }
+          }
+          for (var f = 0; f < offers.length; f += 1) {
+            var next = exchanged(P, Q, offers[f]);
+            if (!next) continue;
+            var after = tally(next[0], next[1], P, Q);
+            if (after.n > before.n || after.knots > before.knots || after.kin > before.kin) continue;
+            if (after.n === before.n && after.knots === before.knots && after.kin === before.kin) continue;
+            if (!stubsAndBodyClear(next[0], ctx, P.edge) || !stubsAndBodyClear(next[1], ctx, Q.edge)) continue;
+            if (!clearWith(next[0], P.edge, P, Q, next[1]) || !clearWith(next[1], Q.edge, P, Q, next[0])) continue;
+            if (foreignPassages(next[0], ctx, P.edge) > foreignPassages(P.points, ctx, P.edge)) continue;
+            if (foreignPassages(next[1], ctx, Q.edge) > foreignPassages(Q.points, ctx, Q.edge)) continue;
+            P.points = next[0];
+            Q.points = next[1];
+            moved = true;
+            break;
           }
         }
       }

@@ -204,6 +204,20 @@ const FAMILIES = {
     `flowchart ${dir}`, '  G[Gate] --> H[Hub] --> M[Mixer] --> S{Split}', '  G --> L[Left sink]', '  H --> L',
     '  G --> R[Right sink]', '  H --> R', '  S --> L', '  S --> C[Centre]', '  S --> R',
   ].join('\n'),
+  // Three two-way pairs in one state machine, one of them across a skipped rank. Every cycle above
+  // closes through a third node, so no drawing in the space had two links between ONE pair of
+  // nodes, and nothing asked that such a pair not cross itself -- the third held-out set's b11 did,
+  // Esc and Resume crossing each other twice. Found by rendering 3,000 random graphs of five to
+  // seven nodes with a two-way pair, TD and LR: 85 drew that pair crossing itself at 019e21e, and 4
+  // of those do so in all four directions and draw no knot of any kind once `uncrossPairs` trades
+  // ports. This is one of the four; the smallest also turns 12px out of its source LR and RL, a
+  // departure defect already there at 019e21e and not the pair's. The labels are the ids because a
+  // word per box moves the layout: with state names B <-> D no longer crosses at 019e21e TD or BT.
+  // At 019e21e B <-> D crosses itself once TD and BT, and A <-> G once LR and RL.
+  'two-way pairs in a state machine': (dir) => [
+    `flowchart ${dir}`, '  A[A] --> B[B]', '  B --> C[C]', '  A --> D[D]', '  D --> E[E]', '  C --> F[F]',
+    '  A --> G[G]', '  C --> B', '  G --> A', '  B --> D', '  D --> B',
+  ].join('\n'),
 };
 
 /**
@@ -351,7 +365,8 @@ export const TIGHT_MASKS = [];
  * return-past families added 8, and 270 until the styled-shape family added 112 -- two per drawing, all
  * one segment, as they must be: an author's colour changes no geometry -- and 382 until the two
  * opposed-answer families added 16, one segment before `facesSibling` as well as after, and 398
- * until `fork beside corridors` added 10, one segment before the corridor-aware mirror as after.
+ * until `fork beside corridors` added 10, one segment before the corridor-aware mirror as after, and
+ * 408 until `two-way pairs in a state machine` added 8, one segment before the port trade as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -362,7 +377,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 408;
+export const ALIGNED_PAIRS = 416;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

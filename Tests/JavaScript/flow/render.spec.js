@@ -491,7 +491,14 @@ describe('[Render] bridges at crossings', () => {
       }
     }
     expect(bridged).toBeGreaterThan(0);
-    expect(plain).toBeGreaterThan(0);
+    // The plain crossings this used to count came from `nested subgraphs` LR and RL and the 8-line
+    // LR specimen, where Z's two ports stood inverted. Once an end heading past a box took the side
+    // of it its route takes (`headingOf`), those three stopped crossing at all, and nothing here is
+    // left plain. No source was added back to keep a count above zero: of the candidates tried --
+    // K2,3 to K3,4 and the dense review source, in all four directions -- every crossing drawn plain
+    // has 12px or more of run on one leg, which is the miss the loop above exists to catch rather
+    // than a specimen of a crossing with no room.
+    expect(plain).toBe(0);
   });
 
   it('keeps a grid step of air between every bump and every node', () => {
@@ -671,6 +678,44 @@ describe('[Render] fanning a face', () => {
       }
       expect(crossed, `${name} edges sharing a node that cross`).toEqual([]);
     }
+  });
+
+  it('slots an end that must pass a box on the side of that box it passes', () => {
+    // The review's mesh source, the one drawing all four reviews gave to Pele. Worker West A's right
+    // face carries three ends: Router West's edge in, and the two `replicate` edges to and from
+    // Worker East A. None can reach its far end straight, so all three asked for the face's middle
+    // and the tie went to the far box's centre -- Router West's, which stands nearer the top than
+    // Worker East A's -- so the router edge took the top port. But the replicate routes cannot head
+    // for Worker East A's centre: Router West stands in the way, and they go over it. So both
+    // replicate lines crossed the router edge a few px from the face (two bumps beside three line
+    // ends), and the one leaving had to step past the one arriving onto a lane 4px from it, which
+    // the reader saw as one doubled line across the whole gap between the regions.
+    const source = ['flowchart RL', '    subgraph east[East Region]', '        e1[Ingress East] --> e2[Router East]',
+      '        e2 --> e3[Worker East A]', '        e2 --> e4[Worker East B]', '    end', '    subgraph west[West Region]',
+      '        w1[Ingress West] --> w2[Router West]', '        w2 --> w3[Worker West A]', '        w2 --> w4[Worker West B]',
+      '    end', '    e3 -->|replicate| w3', '    w3 -->|replicate| e3', '    e4 -.->|failover| w2',
+      '    w4 -.->|failover| e2', '    e3 ==> q[(Global Queue)]', '    w3 ==> q', '    e4 ==> q', '    w4 ==> q'].join('\n');
+    const paths = edgePaths(drawn(source).svg);
+    const at = (id) => paths.find((p) => p.id === id).d;
+    const intoWestA = ['L_w2_w3_0', 'L_e3_w3_0', 'L_w3_e3_0', 'L_w3_q_0'];
+    const crossed = [];
+    for (let i = 0; i < intoWestA.length; i += 1) {
+      for (let j = i + 1; j < intoWestA.length; j += 1) {
+        if (crossings(at(intoWestA[i]), at(intoWestA[j])).length > 0) crossed.push(`${intoWestA[i]} x ${intoWestA[j]}`);
+      }
+    }
+    expect(crossed, 'edges at Worker West A that cross').toEqual([]);
+    // And the pair reads as a pair: wherever the two replicate lines run side by side, they are a
+    // port pitch apart (rule 4's 12px), not one lane's width.
+    const runs = (d) => segmentsOf(polyline(d)).filter(([p, q]) => p.y === q.y && p.x !== q.x);
+    let nearest = Infinity;
+    for (const [p, q] of runs(at('L_e3_w3_0'))) {
+      for (const [r, s] of runs(at('L_w3_e3_0'))) {
+        const shared = Math.min(Math.max(p.x, q.x), Math.max(r.x, s.x)) - Math.max(Math.min(p.x, q.x), Math.min(r.x, s.x));
+        if (shared > 0) nearest = Math.min(nearest, Math.abs(p.y - r.y));
+      }
+    }
+    expect(nearest).toBeGreaterThanOrEqual(12);
   });
 
   it('keeps SKILL.md rule 4\'s 12px between adjacent attach points', () => {
@@ -1986,13 +2031,15 @@ describe('[Render] which connector a label belongs to', () => {
     // the reader's three drawings, which reach 8px at a target of 8, 12px at 12 and at 16, and
     // fall back to 4px at 24 and 32 where the target stops being reachable.
     //
-    // 165 of the 167 masks here reach it. The two that do not are both margin 4 and the same shape: a plate
-    // lying over two long parallel runs of the drawing that are 4px apart, where the only thing
-    // separating its own stroke from the other is 4px more of it being covered. Placement cannot
-    // separate two lines 4px apart -- rule 3 asks for 12 between lanes and these are legs of two
-    // routes that meet outside any gap, so nothing reserved a pitch for them.
+    // Every mask here reaches it. The last two that did not were margin 4 and one shape, in the LR
+    // and RL two-zone sources: a plate lying over two long runs 4px apart under the drawing,
+    // A2 --> B2 arriving at Delta and B2 -.-> A1 leaving it. Placement cannot separate two lines 4px
+    // apart; port order can. Delta's face slotted them by their far boxes' centres while Gamma stood
+    // across that line, and once each end headed for the side of Gamma its route takes
+    // (`headingOf`), A2 --> B2 went over the top, the runs came apart and both masks reached 12px.
+    // The drawing pays one bump for it: two crossings, both bridged, where it had one.
     //
-    // They could be bought. Running the ownership weight up until all 147 reach 12 was measured:
+    // A shortfall could also be bought. Running the ownership weight up until all 147 reach 12 was measured:
     // it puts 2 masks INSIDE a node, where the node's fill is painted over them and the author's
     // word is gone, and 4 astride a zone border. A label you cannot attribute is worse than one
     // that stands close to a box and better than one that is not there, which is where the weight
@@ -2001,10 +2048,7 @@ describe('[Render] which connector a label belongs to', () => {
     // There were four. `L_B2_A1_0` in both drawings went from 4px to 12px when `renderOrDecline`
     // started growing the canvas to hold a plate the first pass had put past the content box: on the
     // grown canvas the placer has a position off the two parallel runs that the old edge excluded.
-    const SHORT = [
-      '"flowchart LR" (11 lines) / L_A2_B2_0',
-      '"flowchart RL" (11 lines) / L_A2_B2_0',
-    ];
+    const SHORT = [];
     const MARGIN = 12;
     const short = [];
     for (const source of ALL) {

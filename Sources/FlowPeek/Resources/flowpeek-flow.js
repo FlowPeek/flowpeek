@@ -6153,6 +6153,19 @@
   // -- both far boxes are centred on one x -- and the edge index put S3's port on the right, so
   // its route left round the left of the Database Tier from the right-hand port and shared 8px
   // with the edge to Primary under the box. Heading for the zone's near side is what it does.
+  //
+  // A NODE standing in the gap across the far box's line is passed the same way, and for the same
+  // reason. In the review's mesh source Worker West A's right face carries Router West's edge in and
+  // the two `replicate` edges to and from Worker East A; all three tie on the face's middle, and by
+  // far centres Router West (31 units) sorts ahead of Worker East A (33), so the router edge took
+  // the top port. But Router West stands between the face and Worker East A, across that line, and
+  // both replicate routes go over it -- so both crossed the router edge beside the face (two bumps
+  // within 30px of three line ends), and the one leaving stepped past the one arriving onto a lane
+  // 4px from it for 522px, which read as one doubled line. Heading for Router West's near side
+  // slots the replicate ends above the router edge: no bump at the face, and the pair 12px apart,
+  // a port pitch. Over differential.mjs's drawings it also took the three crossings left in
+  // `nested subgraphs` LR and RL and the 8-line LR specimen to 0 -- Z's two ports there were the
+  // inverted pair the elbow-slide comment names -- and bends 576 -> 570.
   function headingOf(face, att, model) {
     var via = att.edge.via || [];
     var level = model.levels.get(att.edge.level);
@@ -6173,6 +6186,16 @@
       var aHi = face.alongX ? zone.x + zone.w : zone.y + zone.h;
       if (zLo < lo || zHi > hi || far <= aLo || far >= aHi) continue;
       if (nearest === null || Math.abs(zLo - lo) < Math.abs(nearest.lo - lo)) nearest = { lo: zLo, aLo: aLo, aHi: aHi };
+    }
+    for (var n = 0; n < model.nodes.length; n += 1) {
+      var node = model.nodes[n];
+      if (node === box || node === other) continue;
+      var nLo = face.alongX ? node.y : node.x;
+      var nHi = face.alongX ? node.y + node.h : node.x + node.w;
+      var bLo = face.alongX ? node.x : node.y;
+      var bHi = face.alongX ? node.x + node.w : node.y + node.h;
+      if (nLo < lo || nHi > hi || far <= bLo || far >= bHi) continue;
+      if (nearest === null || Math.abs(nLo - lo) < Math.abs(nearest.lo - lo)) nearest = { lo: nLo, aLo: bLo, aHi: bHi };
     }
     if (nearest === null) return far;
     var centre = face.base + faceCentre(face);
@@ -7623,8 +7646,9 @@
   // copies of `crossing` (TD, LR, BT, RL), where 52px between the two ranks' ports leaves the
   // crossed run 4px of straight between two elbows whichever way it slides; three of `nested
   // subgraphs`, where Z's two ports stand in the inverted order and the crossing sits inside
-  // `Y --> Z`'s arrival leg -- removed only by swapping them, which is port order, not a slide; and
-  // one in the dense review source, two elbows 4px apart.
+  // `Y --> Z`'s arrival leg -- removed only by swapping them, which is port order, not a slide, and
+  // which `headingOf` now does (X stands across Z's line to Y, so the end to X heads round it);
+  // and one in the dense review source, two elbows 4px apart.
   //
   // Relaxing the bump's own guard was the alternative, and the evidence is against it: the 07
   // crossing has 4px of straight on its horizontal and none on its vertical, so a bump there would

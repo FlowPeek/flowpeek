@@ -1,0 +1,186 @@
+// A connector does not run through a zone it does not belong to.
+//
+// The defect this file exists for: a zone is a painted panel that says "these boxes go together",
+// and a stroke drawn across its interior reads as one more member of that group. Two review sources
+// showed it. In the nested AWS drawing `app2 --> s3` dropped straight down through the Database
+// Tier for its whole height, though neither App Server 2 nor the S3 bucket is in that tier; in the
+// crowded-subgraphs drawing `dlq --> p1` (replay) climbed through the Processing panel to reach a
+// Parser that lives in Ingestion. Once zones were given fills the stroke crossing a tinted panel
+// became the most obviously wrong thing in either picture.
+//
+// The router's zone rule was about BORDERS only -- `passesTooClose` keeps a leg off a zone's
+// hairline -- so a leg well inside a foreign zone was clear by every test it was given. What is
+// asserted here is the interior: no segment of a connector may cross the inside of a zone that
+// contains neither of its ends, on these two drawings and on every SWEEP source with a subgraph.
+//
+// It is a preference, not a wall: the router asks for it on a pass above all the others and gives
+// it up first, so a zone an edge cannot get around is still crossed by an ordinary connector. No
+// source reaching the router through `render` was found that leaves no way round -- the layout
+// reserves a lane beside every zone -- so that branch is held by construction (the four older
+// passes are unchanged below it) rather than by a drawing here.
+
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { SWEEP } from './corpus.js';
+import { measureText } from './measure.js';
+
+const require = createRequire(import.meta.url);
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const flow = require(join(root, 'Sources/FlowPeek/Resources/flowpeek-flow.js'));
+
+const EDITORIAL = {
+  dark: false,
+  fontFamily: "'Geist', sans-serif",
+  monoFontFamily: "'Geist', sans-serif",
+  themeVariables: { fontSize: '12px', lineColor: '#4f5d75', nodeBorder: '#2d3142', mainBkg: '#f5f5f5' },
+  themeCSS: '.fp-ladder { --fp-ladder: on; }',
+  arrangement: {
+    nodeSpacing: 32, rankSpacing: 40, padding: 16, diagramPadding: 24,
+    curve: 'rounded', flowchartCurve: 'step', wrappingWidth: 160,
+  },
+};
+
+const NESTED = [
+  'flowchart TD',
+  '    subgraph Cloud[AWS Account]',
+  '        subgraph VPC[Production VPC]',
+  '            subgraph Public[Public Subnet]',
+  '                alb[Load Balancer]',
+  '                nat[NAT Gateway]',
+  '            end',
+  '            subgraph Private[Private Subnet]',
+  '                app1[App Server 1]',
+  '                app2[App Server 2]',
+  '                subgraph DB[Database Tier]',
+  '                    primary[(Primary)]',
+  '                    replica[(Replica)]',
+  '                end',
+  '            end',
+  '        end',
+  '        s3[(S3 Bucket)]',
+  '    end',
+  '    user[User] --> alb',
+  '    alb --> app1',
+  '    alb --> app2',
+  '    app1 --> primary',
+  '    app2 --> primary',
+  '    primary --> replica',
+  '    app1 --> nat',
+  '    app2 --> s3',
+].join('\n');
+
+const CROWDED = [
+  'flowchart LR',
+  '    subgraph ingest[Ingestion]',
+  '        k1[Kafka topic orders] --> p1[Parser]',
+  '        k2[Kafka topic payments] --> p1',
+  '        k3[Kafka topic refunds] --> p2[Parser B]',
+  '    end',
+  '    subgraph process[Processing]',
+  '        p1 --> v[Validator] --> en[Enricher]',
+  '        p2 --> v',
+  '        en --> dd[Deduplicator]',
+  '    end',
+  '    subgraph store[Storage]',
+  '        dd --> wh[(Warehouse)]',
+  '        dd --> lake[(Data Lake)]',
+  '        dd --> cache[(Hot Cache)]',
+  '    end',
+  '    subgraph serve[Serving]',
+  '        wh --> bi[BI Dashboards]',
+  '        lake --> ml[ML Training]',
+  '        cache --> api[Public API]',
+  '        ml -->|model| api',
+  '    end',
+  '    v -->|invalid| dlq[(Dead letter queue)]',
+  '    dlq -->|replay| p1',
+].join('\n');
+
+function laidOut(source) {
+  const db = new flow.FlowDB();
+  db.clear();
+  flow.parse(source, db);
+  return flow.layout(db, { measureText, theme: flow.buildFlowTheme(EDITORIAL) });
+}
+
+/** The corner skeleton of an emitted path: a rounded corner's control point is the corner. */
+function skeleton(d) {
+  const tokens = d.match(/[A-Za-z]|-?\d+(?:\.\d+)?/g) ?? [];
+  const points = [];
+  let command = null;
+  for (let i = 0; i < tokens.length;) {
+    if (/^[A-Za-z]$/.test(tokens[i])) command = tokens[i++];
+    const take = (n) => tokens.slice(i, (i += n)).map(Number);
+    if (command === 'M' || command === 'L') { const [x, y] = take(2); points.push({ x, y }); }
+    else if (command === 'Q') { const [cx, cy, x, y] = take(4); points.push({ x: cx, y: cy }, { x, y }); }
+    else if (command === 'A') { const v = take(7); points.push({ x: v[5], y: v[6] }); }
+    else throw new Error(`unexpected path command ${command} in ${d}`);
+  }
+  return points;
+}
+
+/** Strictly inside, so a stroke that enters a zone at a right angle to reach a member is not here. */
+function crossesInterior(p, q, box) {
+  return Math.max(p.x, q.x) > box.x && Math.min(p.x, q.x) < box.x + box.width
+    && Math.max(p.y, q.y) > box.y && Math.min(p.y, q.y) < box.y + box.height;
+}
+
+/** Every segment, by edge, that crosses the inside of a zone containing neither end. */
+function foreignPassages(source) {
+  const drawing = laidOut(source);
+  const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText });
+  expect(out.reason || 'ok').toBe('ok');
+  const parentOf = new Map();
+  for (const n of drawing.nodes) parentOf.set(n.id, n.parent);
+  for (const c of drawing.clusters) parentOf.set(c.id, c.parent);
+  const ancestry = (id) => {
+    const chain = new Set();
+    for (let cur = id; cur !== null && cur !== undefined; cur = parentOf.get(cur)) chain.add(cur);
+    return chain;
+  };
+  const re = /<path class="[^"]*flowchart-link[^"]*" data-id="[^"]*" d="([^"]*)"/g;
+  const ds = [...out.svg.matchAll(re)].map((m) => m[1]);
+  const visible = drawing.edges.filter((e) => e.pattern !== 'invisible');
+  expect(ds).toHaveLength(visible.length);
+  const found = [];
+  visible.forEach((edge, index) => {
+    const own = new Set([...ancestry(edge.from), ...ancestry(edge.to)]);
+    const points = skeleton(ds[index]);
+    for (let i = 0; i + 1 < points.length; i += 1) {
+      for (const zone of drawing.clusters) {
+        if (own.has(zone.id)) continue;
+        if (crossesInterior(points[i], points[i + 1], zone)) found.push(`${edge.from}->${edge.to} through ${zone.id}`);
+      }
+    }
+  });
+  return found;
+}
+
+describe('[Zones] a connector stays out of a zone it does not belong to', () => {
+  it('App Server 2 reaches S3 without running down the Database Tier', () => {
+    expect(foreignPassages(NESTED)).toEqual([]);
+  });
+
+  it('replay reaches the Parser without climbing through Processing', () => {
+    expect(foreignPassages(CROWDED)).toEqual([]);
+  });
+
+  it('holds on every SWEEP source that has a zone', () => {
+    const withZones = SWEEP.filter(({ source }) => /\bsubgraph\b/.test(source));
+    expect(withZones.length).toBeGreaterThan(0);
+    const found = withZones.flatMap(({ name, source }) => foreignPassages(source).map((f) => `${name}: ${f}`));
+    expect(found).toEqual([]);
+  });
+
+  it('goes round without demoting any route to a weaker pass', () => {
+    // The zone rule sits on top of the others as a pass of its own, so keeping it must not cost a
+    // route its daylight or its separation from other strokes: neither drawing may come out
+    // crowded or as the hidden-behind-a-box exception.
+    for (const source of [NESTED, CROWDED]) {
+      const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText });
+      expect(out.warnings).not.toContain('edge-crowded');
+      expect(out.warnings).not.toContain('edge-transit');
+    }
+  });
+});

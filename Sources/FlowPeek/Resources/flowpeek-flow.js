@@ -6783,15 +6783,78 @@
     return false;
   }
 
-  // `strict` counts down the demands rather than switching them: 3 wants daylight from every border
-  // this edge is not attached to -- 12px from a node's, a stub from a zone's hairline -- AND no
-  // shared run with a stroke already drawn; 2 drops the daylight; 1 keeps only "not behind a box";
-  // 0 accepts whatever the first candidate was.
+  // The zones a connector has no business inside: every zone that contains neither of its ends.
+  // A zone is a painted panel that says "these go together", so a stroke across its interior reads
+  // as one more member. Its own ancestors are excluded because reaching a node in a nested zone
+  // means crossing every zone around it, which is the one passage a reader expects.
+  //
+  // Kept per edge on the context: `legIsClear` asks for it once per candidate leg, and the answer
+  // depends only on the edge.
+  function foreignZones(edge, ctx) {
+    if (!edge || !ctx.rails || ctx.rails.length === 0) return [];
+    var cached = ctx.foreign.get(edge);
+    if (cached) return cached;
+    var own = new Map();
+    var ends = [edge.from, edge.to];
+    for (var e = 0; e < ends.length; e += 1) {
+      // A subgraph cannot contain its own ancestor, so the walk ends; the bound is the same guard
+      // `ancestry` keeps against a malformed model.
+      var cur = ends[e];
+      for (var guard = 0; guard < 256 && cur !== undefined && cur !== null; guard += 1) {
+        own.set(cur, true);
+        cur = ctx.parentOf.get(cur);
+      }
+    }
+    var out = [];
+    for (var i = 0; i < ctx.rails.length; i += 1) {
+      if (!own.has(ctx.rails[i].id)) out.push(ctx.rails[i]);
+    }
+    ctx.foreign.set(edge, out);
+    return out;
+  }
+
+  // How many legs of a route cross the inside of a foreign zone. The post-routing passes compare
+  // this before and after, so that a shortcut cannot buy a straight line by cutting back through a
+  // zone the router had just gone round.
+  function foreignPassages(points, ctx, edge) {
+    var zones = foreignZones(edge, ctx);
+    var n = 0;
+    for (var i = 0; i + 1 < points.length; i += 1) {
+      for (var z = 0; z < zones.length; z += 1) {
+        if (hitsBox(points[i], points[i + 1], zones[z])) n += 1;
+      }
+    }
+    return n;
+  }
+
+  // `strict` counts down the demands rather than switching them: 4 wants everything 3 does and also
+  // keeps out of the interior of every zone the edge does not belong to; 3 wants daylight from
+  // every border this edge is not attached to -- 12px from a node's, a stub from a zone's hairline
+  // -- AND no shared run with a stroke already drawn; 2 drops the daylight; 1 keeps only "not
+  // behind a box"; 0 accepts whatever the first candidate was.
+  //
+  // The zone interior is a pass of its own on top rather than a clause folded into 3, because it
+  // is a preference with a fallback: where no route goes round, the edge has to come out of 3
+  // exactly as it did before, not be pushed down to 2 and lose its daylight from every border to
+  // keep a rule it cannot keep anyway. Folding it into 2 as well was the other shape considered and
+  // is worse the same way -- an unavoidable zone would then cost the stroke rule and raise
+  // `edge-crowded` on a drawing whose only fault is a zone in the way.
+  //
+  // Before this, the zone rule was `passesTooClose` alone, which is about running ALONG a border,
+  // so a leg deep inside a foreign zone was clear by every test it was given. That is how
+  // `app2 --> s3` came to run the full height of the Database Tier in the nested review source and
+  // `dlq --> p1` (replay) to climb through Processing in the crowded one.
   function legIsClear(p, q, ctx, strict, edge) {
     var i;
     var box;
     for (i = 0; i < ctx.boxes.length; i += 1) {
       if (hitsBox(p, q, ctx.boxes[i])) return false;
+    }
+    if (strict >= 4) {
+      var zones = foreignZones(edge, ctx);
+      for (i = 0; i < zones.length; i += 1) {
+        if (hitsBox(p, q, zones[i])) return false;
+      }
     }
     if (strict >= 3) {
       for (i = 0; i < ctx.boxes.length; i += 1) {
@@ -6904,6 +6967,7 @@
           if (candidate.length >= current.length) continue;
           if (!legsAreDrawable(candidate)) continue;
           if (!routeIsClear(candidate, ctx, 2, edge)) continue;
+          if (foreignPassages(candidate, ctx, edge) > foreignPassages(current, ctx, edge)) continue;
           current = candidate;
           moved = true;
         }
@@ -6951,6 +7015,7 @@
             if (candidate.length < 2) continue;
             if (!legsAreDrawable(candidate)) continue;
             if (!routeIsClear(candidate, ctx, 2, edge)) continue;
+            if (foreignPassages(candidate, ctx, edge) > foreignPassages(current, ctx, edge)) continue;
             current = candidate;
             moved = true;
           }
@@ -7130,9 +7195,10 @@
     stations.push(B);
     var travel = (dS.x === 0) ? "y" : "x";
 
-    var body = joinStations(stations, travel, edge, ctx, 3);
+    var body = joinStations(stations, travel, edge, ctx, 4);
     var crowded = false;
     var transit = false;
+    if (body === null) body = joinStations(stations, travel, edge, ctx, 3);
     if (body === null) body = joinStations(stations, travel, edge, ctx, 2);
     if (body === null) { body = joinStations(stations, travel, edge, ctx, 1); crowded = true; }
     if (body === null) { body = joinStations(stations, travel, edge, ctx, 0); crowded = false; transit = true; }
@@ -8297,12 +8363,21 @@
     var i;
 
     var boxById = new Map();
-    for (i = 0; i < drawing.nodes.length; i += 1) boxById.set(drawing.nodes[i].id, drawing.nodes[i]);
+    var parentOf = new Map();
+    for (i = 0; i < drawing.nodes.length; i += 1) {
+      boxById.set(drawing.nodes[i].id, drawing.nodes[i]);
+      parentOf.set(drawing.nodes[i].id, drawing.nodes[i].parent);
+    }
+    for (i = 0; i < drawing.clusters.length; i += 1) parentOf.set(drawing.clusters[i].id, drawing.clusters[i].parent);
 
     var ctx = {
       boxes: drawing.nodes,
       // Borders a stroke has to stay clear of without being kept out of what they enclose.
       rails: drawing.clusters,
+      // Every node's and zone's containing zone, so a route can tell the zones it belongs in from
+      // the ones it is only passing (`foreignZones`).
+      parentOf: parentOf,
+      foreign: new Map(),
       // The same objects, by the id an edge names its ends with, so the route check can tell the
       // box a port is attached to from the ones it has to stay off. An end that names a subgraph
       // finds nothing here, which is correct: a zone rect is not among the boxes either.

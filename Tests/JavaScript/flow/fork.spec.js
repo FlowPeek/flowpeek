@@ -163,14 +163,15 @@ describe('[Fork] the branches of one decision', () => {
     // of the apex while the 부족함 branch stepped 44px right and turned 12px lower. Now both step
     // 44px and both turn at the same height.
     //
-    // That height is 304 and was 272: the gap under the decision now reserves room for 충분함 and
-    // 부족함 to sit beside their own cross-lines rather than on top of them, so the lane the two
-    // arms turn on sits 32px further down. The mirror is the property under test and it is
+    // That height is 272. It was 304 while the gap under the decision reserved room for 충분함 and
+    // 부족함 between the rhombus and the lane, which left the two arms running side by side down to
+    // it; a decision's lane now sits at the source face's reserve and the labels ride the arms'
+    // own drops, so the pair turns where it leaves. The mirror is the property under test and it is
     // untouched -- what moved is where the mirrored pair sits, not that it is one.
     const out = laid(DECISION('결제 진행', '입고 대기 알림'));
     const fork = expectMirror(out, 'C', 'reported');
     expect(fork.map((a) => a.step)).toEqual([-44, 44]);
-    expect(fork.map((a) => a.turn)).toEqual([304, 304]);
+    expect(fork.map((a) => a.turn)).toEqual([272, 272]);
 
     // And as drawn, not just as placed: the two paths are reflections of each other in the line
     // through the apex. A reflection has to be read off the emitted `d` because that is the only
@@ -332,6 +333,52 @@ describe('[Fork] the branches of one decision', () => {
             expect(`${dir} ${id} radius ${radius}`).toBe(`${dir} ${id} radius 8`);
           }
         }
+      }
+    }
+  });
+});
+
+describe('[Fork] a decision branches where it is left', () => {
+  // The second visual review, weakness 9: a decision's two answers left the rhombus 16px apart and
+  // ran side by side before either turned -- 44px of straight under each diamond of 01 and 09
+  // (52 under 09's 결제 성공?) and 104px off 04's right vertex, read as one doubled line at the place
+  // a reader most needs to see a branch. Pele's diverge at the vertex. Measured here is the shared
+  // stretch: the shorter of the two arms' straight first legs, from the outline to where its first
+  // corner begins. A leg has to clear its stub floor before it can round a corner, so the stretch
+  // cannot be zero; it is 12px under 01's diamonds and 09's first, 20 under 결제 성공? and 28 off
+  // 04. The lane is at the same 16px reserve in all of them; what differs is how far inside the
+  // band a port 8px off the vertex sits, which is the slope of the rhombus's face.
+  const SOURCES = {
+    '01 decision': 'flowchart TD\n    start([Start]) --> input[/Read order/]\n    input --> valid{Valid?}\n    valid -->|Yes| stock{In stock?}\n    valid -->|No| reject[Reject order]\n    stock -->|Yes| ship[Ship]\n    stock -->|No| backorder[Backorder]\n    backorder --> notify[Notify customer]\n    ship --> done([End])\n    reject --> done\n    notify --> done',
+    '04 long wrap': 'flowchart LR\n    a[The customer submits a refund request through the self-service portal with the original receipt attached] --> b{Is the purchase within the thirty day return window and the item unopened?}\n    b -->|Yes, within policy| c[Automatically approve the refund and issue store credit or the original payment method]\n    b -->|No, outside the policy window| d[Escalate to a human support agent who reviews the case history and decides]\n    d --> e[Send the customer a personalised email explaining the decision and any next steps]\n    c --> e',
+    '09 korean': 'flowchart TD\n    시작([주문 접수]) --> 확인{재고가 충분한가?}\n    확인 -->|예| 결제[결제 진행]\n    확인 -->|아니오| 대기[입고 대기 목록에 추가]\n    결제 --> 성공{결제 성공?}\n    성공 -->|예| 배송[배송 준비 및 출고]\n    성공 -->|아니오| 취소[주문 취소 및 고객 안내]\n    대기 --> 알림[고객에게 예상 입고일 문자 발송]\n    배송 --> 완료([처리 완료])\n    취소 --> 완료\n    알림 --> 완료',
+  };
+  const corners = (d) => {
+    const pts = [];
+    for (const c of d.match(/[MLQA][^MLQA]*/g)) {
+      const n = c.slice(1).match(/-?\d+(?:\.\d+)?/g).map(Number);
+      if (c[0] === 'Q') pts.push({ x: n[0], y: n[1] });
+      else if (c[0] === 'A') pts.push({ x: n[5], y: n[6] });
+      else pts.push({ x: n[0], y: n[1] });
+    }
+    return pts;
+  };
+  const firstLeg = (d) => {
+    const [a, b] = corners(d);
+    return Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+  };
+
+  it('turns both answers of every decision within 28px of leaving it', () => {
+    for (const [label, source] of Object.entries(SOURCES)) {
+      const svg = drawn(source).svg;
+      const decisions = [...source.matchAll(/([^\s[{(>|-]+)\{[^}]*\}/gu)].map((m) => m[1]);
+      expect(decisions.length, label).toBeGreaterThan(0);
+      for (const node of decisions) {
+        const legs = [...svg.matchAll(/data-id="L_([^"]*)_\d+" d="([^"]*)"/g)]
+          .filter((m) => m[1].startsWith(`${node}_`))
+          .map((m) => firstLeg(m[2]));
+        expect(legs.length, `${label} ${node}`).toBe(2);
+        expect(Math.min(...legs), `${label} ${node} shared stretch`).toBeLessThanOrEqual(28);
       }
     }
   });

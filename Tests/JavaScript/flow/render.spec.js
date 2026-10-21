@@ -793,12 +793,12 @@ describe('[Render] the six connector rules', () => {
     // parameters are not two coordinates -- and a cylinder is what proved it.
     const boxes = nodeOutlines(out.svg).map((shape) => shape.box);
     const labels = [];
-    const re = /<g class="label[^"]*" data-id="[^"]*" transform="translate\((-?\d+),(-?\d+)\)"><rect class="background" x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/g;
+    const re = /<g class="label[^"]*" data-id="([^"]*)" transform="translate\((-?\d+),(-?\d+)\)"><rect class="background" x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/g;
     let m;
     while ((m = re.exec(out.svg)) !== null) {
       labels.push({
-        x: Number(m[1]) + Number(m[3]), y: Number(m[2]) + Number(m[4]),
-        width: Number(m[5]), height: Number(m[6]),
+        id: m[1], x: Number(m[2]) + Number(m[4]), y: Number(m[3]) + Number(m[5]),
+        width: Number(m[6]), height: Number(m[7]),
       });
     }
     expect(labels.length).toBe(2);
@@ -808,12 +808,15 @@ describe('[Render] the six connector rules', () => {
           && label.y < box.y + box.height && box.y < label.y + label.height;
         expect(`${label.x},${label.y} in a node: ${hits}`).toBe(`${label.x},${label.y} in a node: false`);
       }
-      // The mask must clear every stroke, its own included, by the 6-10px rule 2 asks for.
+      // The mask must clear every stroke but its own, which it now rides: the two answers drop to
+      // their targets apart, and each plate sits on its own drop. Before, the lane sat below the
+      // labels' room and both plates hung beside a pair of strokes still running together.
       for (const path of edgePaths(out.svg)) {
+        if (path.id === label.id) continue;
         for (const [p, q] of segmentsOf(polyline(path.d))) {
           const hits = Math.max(p.x, q.x) > label.x && Math.min(p.x, q.x) < label.x + label.width
             && Math.max(p.y, q.y) > label.y && Math.min(p.y, q.y) < label.y + label.height;
-          expect(`mask over a stroke: ${hits}`).toBe('mask over a stroke: false');
+          expect(`mask over a foreign stroke: ${hits}`).toBe('mask over a foreign stroke: false');
         }
       }
     }
@@ -2088,16 +2091,18 @@ describe('[Render] which connector a label belongs to', () => {
     // review's sixteen, 110 touched no stroke at all before this, and Pele, which sits every label
     // on its line, has 0.
     //
-    // 48 of 168 here sat on their own line before; 103 do now. The rest are where ON would harm
-    // something -- a run too short for the plate, a sibling exit 16px away under it, a node --
-    // and the plain drawing below is one of them: both branches leave the rhombus 16px apart and
-    // turn within 44px, so a plate on either first leg covers the other and the last legs are too
-    // short to carry it.
+    // 48 of 168 here sat on their own line before; 118 do now. The rest are where ON would harm
+    // something -- a run too short for the plate, a sibling exit 16px away under it, a node.
+    // The plain drawing below was one of them while both branches left the rhombus 16px apart and
+    // ran 44px together before turning: a plate on either first leg covered the other and the
+    // last legs were too short to carry it. A decision's arms now turn where they leave and drop
+    // to their targets apart, and each plate rides its own drop.
     //
     // It was 111 and a bound of 0.65 until a drawing at least half BESIDE was made all BESIDE
     // where that is free (flowpeek-flow.js, the label loop): one convention per picture. That
     // took 8 plates off their lines in four drawings here -- the 8-line TD, the RL labelled fork
-    // and the two reported nego/cand drawings -- and none of them gained a harm.
+    // and the two reported nego/cand drawings -- and none of them gained a harm. Diamond forks
+    // turning at the source face then took it from 103 to 118.
     let on = 0;
     let total = 0;
     for (const source of ALL) {
@@ -2118,11 +2123,13 @@ describe('[Render] which connector a label belongs to', () => {
     for (const mask of masks(plain.svg)) {
       const own = plainPaths.find((p) => p.id === mask.id);
       const onLine = sitsOn(mask, own.d);
-      expect(`${mask.id} on its line: ${onLine}`).toBe(`${mask.id} on its line: false`);
-      // And rule 2's gap where it is beside, measured against its own stroke.
-      for (const leg of segmentsOf(polyline(own.d))) {
-        expect(`${mask.id} vs its own stroke: ${crosses(leg, grow(mask, GAP - 1))}`)
-          .toBe(`${mask.id} vs its own stroke: false`);
+      expect(`${mask.id} on its line: ${onLine}`).toBe(`${mask.id} on its line: true`);
+      // And on no other: the sibling's drop is clear of the plate by rule 2's gap.
+      for (const other of plainPaths.filter((p) => p.id !== mask.id)) {
+        for (const leg of segmentsOf(polyline(other.d))) {
+          expect(`${mask.id} vs ${other.id}: ${crosses(leg, grow(mask, GAP - 1))}`)
+            .toBe(`${mask.id} vs ${other.id}: false`);
+        }
       }
     }
   });

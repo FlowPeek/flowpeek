@@ -5113,6 +5113,83 @@
       if (family) family.floor = got + 1;
     }
 
+    // --- a decision's answers branch where they leave it --------------------
+    // A rhombus hands its arms ports clustered at its vertex, 16px apart, and the gap then put the
+    // lane they turn on wherever the gap's slack and labels left it: in the middle of the band, and
+    // below the room reserved for the answers' labels on the source side. So the two answers left
+    // the diamond as a pair and ran 52px side by side in 01, 09 and 13, and 112px in 04, before
+    // either turned -- read by both reviews as one doubled line, at the one place in a flowchart
+    // where a reader most needs to see a branch. Pele's diverge at the vertex.
+    //
+    // So a forward fork off a diamond that holds the gap's first lane has that lane at the source
+    // face's own reserve, and the room its labels would claim on that face is claimed on the far
+    // face instead -- a label then rides the arm's own drop to its target, which is apart from the
+    // other arm's, rather than the shared stretch where both strokes still run together. Only a
+    // diamond: a rectangle spreads its arms over its whole face, and moving every fork's lane
+    // re-shapes drawings no reader complained of.
+    //
+    // And only where the drops stand far enough apart for each label to ride its own: half of each
+    // plate and a label gap between them. In 13 the HMAC diamond's two drops land 72px apart and its
+    // `no, the signature does not match...` plate is 224px wide, and with the lane hugged that plate
+    // sat across BOTH drops -- the label placer's zero-harm count over the review sources fell from
+    // 43/44 to 41/44. Such a fork keeps its labels on the source side and its lane where it was.
+    //
+    // Where a drop lands is the port pass's answer, later, so it is estimated here the way that pass
+    // answers it: `mirrorForks` steps both arms out from the fork's axis by one amount, the least
+    // that every target's landing can take -- a rectangle's face from two units inside its near
+    // corner, a rhombus only at its vertex. Taking the targets' centres instead put 13's drops 60
+    // units apart, past both plates, where they were drawn 18 apart; this puts them 18 apart, and
+    // 01's at 42 and 12 where they are drawn at 42 and 12.
+    var hugGap = [];
+    var hugArms = new Map();
+    for (i = 0; i < maxRank; i += 1) hugGap.push(false);
+    for (i = 0; i < segments.length; i += 1) {
+      var hs = segments[i];
+      // Every arm, the straight one too: `H{Hub}`'s middle route drops straight between the other
+      // two, and its plate stands between theirs.
+      if (hs.gap >= maxRank || hs.forkAt < 0 || hs.forkBack) continue;
+      var hRef = items[hs.forkAt].ref;
+      if (!hRef || hRef.kind !== "node" || geometryOf(hRef.shape) !== "diamond") continue;
+      var hKey = hs.gap + "|" + hs.forkAt;
+      if (!hugArms.has(hKey)) hugArms.set(hKey, []);
+      hugArms.get(hKey).push(hs);
+    }
+    hugArms.forEach(function (arms) {
+      if (!arms.some(function (a) { return a.lane === 0 && a.lo !== a.hi; })) return;
+      var axis = centreOf(arms[0].forkAt);
+      var farOf = function (a) { return a.forkAt === a.u ? a.v : a.u; };
+      var reachOf = function (a) {
+        var t = farOf(a), lo = oPos[t], hi = oPos[t] + items[t].oSize;
+        var ref = items[t].ref;
+        if (ref && ref.kind === "node" && geometryOf(ref.shape) !== "rect") {
+          var c = Math.abs(centreOf(t) - axis);
+          return { lo: c, hi: c };
+        }
+        if (lo <= axis && axis <= hi) return { lo: 0, hi: Math.max(hi - axis, axis - lo) - 2 };
+        return lo > axis ? { lo: lo - axis + 2, hi: hi - axis - 2 } : { lo: axis - hi + 2, hi: axis - lo - 2 };
+      };
+      var common = { lo: 0, hi: Infinity };
+      for (var h1 = 0; h1 < arms.length; h1 += 1) {
+        if (arms[h1].lo === arms[h1].hi) continue;
+        var rr = reachOf(arms[h1]);
+        common = { lo: Math.max(common.lo, rr.lo), hi: Math.min(common.hi, rr.hi) };
+      }
+      var dropOf = function (a) {
+        if (a.lo === a.hi) return axis;
+        var step = common.lo <= common.hi ? common.lo : reachOf(a).lo;
+        return centreOf(farOf(a)) < axis ? axis - step : axis + step;
+      };
+      var halfOf = function (a) {
+        var box = onCorridor(a.edge) ? null : a.edge.labelBox;
+        return box ? (vertical ? box.w : box.h) / 2 : 0;
+      };
+      arms.sort(function (p, q) { return dropOf(p) - dropOf(q); });
+      for (var h2 = 0; h2 + 1 < arms.length; h2 += 1) {
+        if (dropOf(arms[h2 + 1]) - dropOf(arms[h2]) < halfOf(arms[h2]) + halfOf(arms[h2 + 1]) + LABEL_GAP) return;
+      }
+      hugGap[arms[0].gap] = true;
+    });
+
     // --- how far apart the lanes sit -------------------------------------
     // A cross-line's label sits beside the cross-line, so the space between two lanes is where one
     // of them has to go. At the flat LANE_GAP that space is 12px and a one-line label is 24px, which
@@ -5182,7 +5259,7 @@
       // this is a label's demand on top of an arrowhead's, not instead of it.
       var edgeLane = laneLabelLo ? 0 : gapLanes[i] - 1;
       var edgeRoom = gapLanes[i] > 0 ? laneRoom(i, edgeLane) : 0;
-      if (laneLabelLo) {
+      if (laneLabelLo && !hugGap[i]) {
         if (edgeRoom > gapLoNeed[i]) gapLoNeed[i] = edgeRoom;
       } else if (edgeRoom > gapHiNeed[i]) {
         gapHiNeed[i] = edgeRoom;
@@ -5243,7 +5320,7 @@
       var band = gapSize[i];
       var used = gapLanes[i] > 0 ? laneOff[i][gapLanes[i] - 1] : 0;
       var slack = band - gapLoNeed[i] - used - gapHiNeed[i];
-      laneAt.push(bandStart + gapLoNeed[i] + Math.floor(slack / 2));
+      laneAt.push(bandStart + gapLoNeed[i] + (hugGap[i] ? 0 : Math.floor(slack / 2)));
     }
 
     // --- one switch, four directions --------------------------------------

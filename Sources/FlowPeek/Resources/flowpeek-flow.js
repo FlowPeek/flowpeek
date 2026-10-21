@@ -7890,14 +7890,39 @@
   // the complaint itself.
   var SLIDE_STEPS = 8;
 
-  function bumpRoom(points, k, at, ctx, clear) {
+  // A crossing hard against a box. The fifth visual review read two in 11 as "face-pressed hop
+  // clusters": under L, A -> M ran 16px below L's face across L's two leaving stubs, one bump on
+  // A -> M and the other on L -> M's stub, both crests 8px from the face; under D, C -> E did the
+  // same 12px below D, crests 4px off. Every one of them was bridged -- `placeHop` asks a grid step
+  // of air -- so `roomForBridges` never looked at them. The cure is the one it already applies to a
+  // crossing on an elbow: move the CROSSING, not the bump. A crossing is `pressed` when no bump
+  // fits with three grid steps of air from every box, a bump's radius and one step more, so the
+  // crest stands further from the face than the bump is tall. Squeezing the bump instead was
+  // tried by an earlier pass and either stranded it or moved L's port 4px without changing the
+  // picture, because the run it sits on IS the lane nearest the face.
+  //
+  // One run alone cannot do it at either face -- the crossed stub is a port's first leg, which
+  // only a port slide moves -- so a pressed crossing is offered a slide of ONE run of each of its
+  // two connectors together, cheapest first, kept on the same terms as a single slide plus: no more
+  // crossings drawn plain, strictly fewer pressed, and neither connector gaining a tight leg, a
+  // stroke beside it or a foreign zone. Under L it slides L -> N's port 4px left and A -> M 4px
+  // down, and both bumps then ride A -> M, 16px apart and 12px clear of L. Under D nothing
+  // qualifies: D -> G must keep a 24px arrival into G, so its elbow can sink no lower than 208,
+  // D -> H's elbow has to stay a lane above that, and with C -> E low enough to clear D the
+  // crossing sits on D -> H's corner arc and is drawn with no bump at all. Only a deeper gap holds
+  // it, and that is the layout, not this pass. K's one pressed hop, on K -> N's stub where I -> M
+  // passes 12px below K, is offered the same and no pair qualifies either.
+  var FACE_AIR = 3 * GRID;
+
+  function bumpRoom(points, k, at, ctx, clear, air) {
     var run = bumpRun(points, k, straightRuns(points));
     var horizontal = points[k].y === points[k + 1].y;
     var centre = horizontal ? at.x : at.y;
     if (centre - clear < run.lo || centre + clear > run.hi) return false;
+    var g = air || GRID;
     var near = horizontal
-      ? { x: at.x - HOP_R - GRID, y: at.y - HOP_R - GRID, width: 2 * HOP_R + 2 * GRID, height: HOP_R + 2 * GRID }
-      : { x: at.x - HOP_R - GRID, y: at.y - HOP_R - GRID, width: HOP_R + 2 * GRID, height: 2 * HOP_R + 2 * GRID };
+      ? { x: at.x - HOP_R - g, y: at.y - HOP_R - g, width: 2 * HOP_R + 2 * g, height: HOP_R + 2 * g }
+      : { x: at.x - HOP_R - g, y: at.y - HOP_R - g, width: HOP_R + 2 * g, height: 2 * HOP_R + 2 * g };
     for (var i = 0; i < ctx.boxes.length; i += 1) {
       if (rectsOverlap(near, ctx.boxes[i])) return false;
     }
@@ -7915,7 +7940,11 @@
 
   function crossingTally(points, others, ctx) {
     // `stranded`: no bump fits at all; `cramped`: none fits with ROOMY_CLEAR, a superset.
-    var tally = { all: 0, stranded: 0, cramped: 0 };
+    // `pressed`: one fits, but none with FACE_AIR from every box; `plain`: what
+    // `bridgeCrossings` will draw with no bump, which is not `stranded` -- that pass asks no
+    // straight run of the crossed connector, and refuses a crossing on a corner arc outright.
+    var tally = { all: 0, stranded: 0, cramped: 0, pressed: 0, plain: 0 };
+    var ownRuns = straightRuns(points);
     for (var o = 0; o < others.length; o += 1) {
       var q = others[o].points;
       for (var i = 0; i + 1 < points.length; i += 1) {
@@ -7930,6 +7959,14 @@
           var roomyQ = bumpRoom(points, i, at, ctx, ROOMY_CLEAR) && straightThrough(q, j, at, HOP_R + GRID);
           var roomyP = bumpRoom(q, j, at, ctx, ROOMY_CLEAR) && straightThrough(points, i, at, HOP_R + GRID);
           if (!roomyQ && !roomyP) tally.cramped += 1;
+          var airQ = bumpRoom(points, i, at, ctx, HOP_CLEAR, FACE_AIR) && straightThrough(q, j, at, HOP_R);
+          var airP = bumpRoom(q, j, at, ctx, HOP_CLEAR, FACE_AIR) && straightThrough(points, i, at, HOP_R);
+          if ((overQ || overP) && !airQ && !airP) tally.pressed += 1;
+          var hz = points[i].y === points[i + 1].y;
+          var qRun = straightRuns(q)[j];
+          var inOwn = (hz ? at.x : at.y) > ownRuns[i].lo && (hz ? at.x : at.y) < ownRuns[i].hi;
+          var inQ = (hz ? at.y : at.x) > qRun.lo && (hz ? at.y : at.x) < qRun.hi;
+          if (!inOwn || !inQ || (!bumpRoom(points, i, at, ctx, HOP_CLEAR) && !bumpRoom(q, j, at, ctx, HOP_CLEAR))) tally.plain += 1;
         }
       }
     }
@@ -8068,6 +8105,77 @@
       }
       return false;
     }
+    function movable(r) {
+      return { lo: portSlides(r, 0) ? 0 : 1, hi: portSlides(r, r.points.length - 1) ? r.points.length - 2 : r.points.length - 3 };
+    }
+    function sum(a, b) {
+      var out = {};
+      for (var key in a) out[key] = a[key] + b[key];
+      return out;
+    }
+    function swapIn(list, from, to) {
+      return list.map(function (o) { return o === from ? to : o; });
+    }
+    // See FACE_AIR. One run of P and one of its pressed partner Q, each next to a crossing between
+    // them, every pair of non-zero steps up to SLIDE_STEPS, cheapest total first.
+    function tryPairSlide(P, othersP) {
+      for (var qi = 0; qi < othersP.length; qi += 1) {
+        var Q = othersP[qi];
+        if (Q.transit || crossingTally(P.points, [Q], ctx).pressed === 0) continue;
+        var othersQ = othersOf(Q);
+        var before = sum(crossingTally(P.points, othersP, ctx), crossingTally(Q.points, othersQ, ctx));
+        var near = function (r, other) {
+          var at = [];
+          var span = movable(r);
+          for (var i = 0; i + 1 < r.points.length; i += 1) {
+            for (var j = 0; j + 1 < other.points.length; j += 1) {
+              if (!crossesAt(r.points[i], r.points[i + 1], other.points[j], other.points[j + 1])) continue;
+              for (var k = i - 1; k <= i + 1; k += 1) if (k >= span.lo && k <= span.hi && at.indexOf(k) < 0) at.push(k);
+            }
+          }
+          return at;
+        };
+        var pRuns = near(P, Q), qRuns = near(Q, P);
+        var options = [];
+        for (var a = 0; a < pRuns.length; a += 1) {
+          for (var b = 0; b < qRuns.length; b += 1) {
+            for (var d = -SLIDE_STEPS; d <= SLIDE_STEPS; d += 1) {
+              for (var e = -SLIDE_STEPS; e <= SLIDE_STEPS; e += 1) {
+                if (d === 0 || e === 0) continue;
+                options.push({ cost: Math.abs(d) + Math.abs(e), p: [pRuns[a], d], q: [qRuns[b], e] });
+              }
+            }
+          }
+        }
+        options.sort(function (x, y) { return x.cost - y.cost; });
+        var sideP = { tight: tightLegs(P.points, P.edge, othersP), beside: besideCount(P.points, othersP), passes: foreignPassages(P.points, ctx, P.edge) };
+        var sideQ = { tight: tightLegs(Q.points, Q.edge, othersQ), beside: besideCount(Q.points, othersQ), passes: foreignPassages(Q.points, ctx, Q.edge) };
+        for (var o = 0; o < options.length; o += 1) {
+          var opt = options[o];
+          var axisP = P.points[opt.p[0]].y === P.points[opt.p[0] + 1].y ? "y" : "x";
+          var axisQ = Q.points[opt.q[0]].y === Q.points[opt.q[0] + 1].y ? "y" : "x";
+          var P2 = shiftRun(P.points, opt.p[0], P.points[opt.p[0]][axisP] + opt.p[1] * GRID, P.edge);
+          if (!P2) continue;
+          var Q2 = shiftRun(Q.points, opt.q[0], Q.points[opt.q[0]][axisQ] + opt.q[1] * GRID, Q.edge);
+          if (!Q2) continue;
+          var movedP = { points: P2, edge: P.edge }, movedQ = { points: Q2, edge: Q.edge };
+          var othersP2 = swapIn(othersP, Q, movedQ), othersQ2 = swapIn(othersQ, P, movedP);
+          if (!portsHold(P, P2, othersP2) || !portsHold(Q, Q2, othersQ2)) continue;
+          var after = sum(crossingTally(P2, othersP2, ctx), crossingTally(Q2, othersQ2, ctx));
+          if (after.all > before.all || after.stranded > before.stranded || after.plain > before.plain) continue;
+          if (after.pressed >= before.pressed || after.cramped > before.cramped) continue;
+          if (!stubsAndBodyClear(P2, ctx, P.edge) || !stubsAndBodyClear(Q2, ctx, Q.edge)) continue;
+          if (tightLegs(P2, P.edge, othersP2) > sideP.tight || tightLegs(Q2, Q.edge, othersQ2) > sideQ.tight) continue;
+          if (besideCount(P2, othersP2) > sideP.beside || besideCount(Q2, othersQ2) > sideQ.beside) continue;
+          if (foreignPassages(P2, ctx, P.edge) > sideP.passes || foreignPassages(Q2, ctx, Q.edge) > sideQ.passes) continue;
+          P.points = P2;
+          Q.points = Q2;
+          return true;
+        }
+      }
+      return false;
+    }
+
     // Bounded for the same reason as `uncrossPairs`: each accepted slide strictly lowers a finite
     // count.
     for (var round = 0; round < 4; round += 1) {
@@ -8077,8 +8185,8 @@
         if (P.transit) continue;
         var others = othersOf(P);
         var before = crossingTally(P.points, others, ctx);
-        if (before.stranded === 0) continue;
-        if (trySlide(P, others, before)) progressed = true;
+        if (before.stranded > 0 && trySlide(P, others, before)) progressed = true;
+        else if (before.pressed > 0 && tryPairSlide(P, others)) progressed = true;
       }
       if (!progressed) break;
     }

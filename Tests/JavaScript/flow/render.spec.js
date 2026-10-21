@@ -617,6 +617,39 @@ describe('[Render] bridges at crossings', () => {
       expect(plain, label).toEqual([]);
     }
   });
+
+  it('moves a crossing off a box face so that its bump has air', () => {
+    // The fifth visual review read two "face-pressed hop clusters" in the dense source: a connector
+    // run in the lane nearest a box's face across that box's own leaving stubs, the bumps' crests
+    // 8px from L's face and 4px from D's. Every one was bridged, so the elbow pass never saw them.
+    // A pressed crossing now offers one run of each of its two connectors a slide together; under
+    // L that leaves both bumps on A -> M, 12px clear of the face. Under D and K no slide exists in
+    // the gap the layout gave (see FACE_AIR), and those three are kept as an exact set, so that
+    // losing one, or gaining one anywhere, fails.
+    const dense = [
+      'flowchart TD',
+      '    A --> B & C & D', '    B --> E & F', '    C --> E & G', '    D --> F & G & H',
+      '    E --> I & J', '    F --> I & K', '    G --> J & K & L', '    H --> L',
+      '    I --> M', '    J --> M & N', '    K --> N', '    L --> N & M',
+      '    A --> M', '    B --> N', '    D --> I', '    C --> L',
+    ].join('\n');
+    const { svg } = drawn(dense);
+    const boxes = [...svg.matchAll(/<g class="node[^"]*" id="fp-0-flowchart-([A-Z])-\d+" transform="translate\(([-\d.]+),([-\d.]+)\)"><rect[^>]* x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/g)]
+      .map((m) => ({ id: m[1], x: +m[2] + +m[4], y: +m[3] + +m[5], w: +m[6], h: +m[7] }));
+    expect(boxes).toHaveLength(14);
+    const pressed = [];
+    for (const [, id, d] of svg.matchAll(/data-id="([^"]+)" d="([^"]*)"/g)) {
+      for (const h of d.matchAll(/L([-\d.]+),([-\d.]+) A8,8 0 0 [01] ([-\d.]+),([-\d.]+)/g)) {
+        const [x1, y1, x2, y2] = h.slice(1).map(Number);
+        // The bump's own box: up off a horizontal run, left off a vertical one (`placeHop`).
+        const bump = y1 === y2 ? { x: Math.min(x1, x2), y: y1 - 8, w: 16, h: 8 } : { x: x1 - 8, y: Math.min(y1, y2), w: 8, h: 16 };
+        const near = boxes.find((r) => Math.max(r.x - (bump.x + bump.w), bump.x - (r.x + r.w)) < 12
+          && Math.max(r.y - (bump.y + bump.h), bump.y - (r.y + r.h)) < 12);
+        if (near) pressed.push(`${id} at ${near.id}`);
+      }
+    }
+    expect(pressed.sort()).toEqual(['L_C_E_0 at D', 'L_D_G_0 at D', 'L_K_N_0 at K']);
+  });
 });
 
 describe('[Render] fanning a face', () => {

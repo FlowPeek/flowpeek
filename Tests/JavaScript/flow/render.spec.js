@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CROWDED_LABELS, EXAMPLES, SQUARE_CORNERS, SWEEP, TIGHT_MASKS } from './corpus.js';
+import { CROWDED_LABELS, EXAMPLES, SQUARE_CORNERS, SWEEP, TIGHT_MASKS, describeSource } from './corpus.js';
 import { measureText } from './measure.js';
 import { nodeOutlines, segmentEntersShape } from './outline.js';
 
@@ -430,7 +430,29 @@ describe('[Render] bridges at crossings', () => {
     // order the fan into Z stopped crossing at all; this one cannot stop.
     'flowchart TD\n  A1 --> B1 & B2 & B3\n  A2 --> B1 & B2 & B3\n  A3 --> B1 & B2 & B3',
   ];
-  const ALL = [...SWEEP_SOURCES, ...CROSSING];
+  // Two reader-reviewed sources whose few crossings are bridged. K3,3 above was the only source
+  // here that drew a bump until a drawing that dense stopped drawing them (see the last test in
+  // this block), so these are what the run, side and weight assertions now have to examine.
+  const CROWDED_SUBGRAPHS = [
+    'flowchart LR', '    subgraph ingest[Ingestion]', '        k1[Kafka topic orders] --> p1[Parser]',
+    '        k2[Kafka topic payments] --> p1', '        k3[Kafka topic refunds] --> p2[Parser B]',
+    '    end', '    subgraph process[Processing]', '        p1 --> v[Validator] --> en[Enricher]',
+    '        p2 --> v', '        en --> dd[Deduplicator]', '    end', '    subgraph store[Storage]',
+    '        dd --> wh[(Warehouse)]', '        dd --> lake[(Data Lake)]',
+    '        dd --> cache[(Hot Cache)]', '    end', '    subgraph serve[Serving]',
+    '        wh --> bi[BI Dashboards]', '        lake --> ml[ML Training]',
+    '        cache --> api[Public API]', '        ml -->|model| api', '    end',
+    '    v -->|invalid| dlq[(Dead letter queue)]', '    dlq -->|replay| p1',
+  ].join('\n');
+  const RL_MESH = [
+    'flowchart RL', '    subgraph east[East Region]', '        e1[Ingress East] --> e2[Router East]',
+    '        e2 --> e3[Worker East A]', '        e2 --> e4[Worker East B]', '    end',
+    '    subgraph west[West Region]', '        w1[Ingress West] --> w2[Router West]',
+    '        w2 --> w3[Worker West A]', '        w2 --> w4[Worker West B]', '    end',
+    '    e3 -->|replicate| w3', '    w3 -->|replicate| e3', '    e4 -.->|failover| w2',
+    '    w4 -.->|failover| e2', '    e3 ==> q[(Global Queue)]', '    w3 ==> q', '    e4 ==> q', '    w4 ==> q',
+  ].join('\n');
+  const ALL = [...SWEEP_SOURCES, ...CROSSING, CROWDED_SUBGRAPHS, RL_MESH];
 
   it('draws a bridge only where two connectors really cross', () => {
     for (const source of ALL) {
@@ -465,11 +487,21 @@ describe('[Render] bridges at crossings', () => {
     // 8px of bump each side plus a grid step of straight, measured against the stretch that is
     // DRAWN rather than corner to corner. The second half is the one that matters: a crossing with
     // no bump has to be one where neither connector had the room, or the pass is just skipping
-    // work.
+    // work. A drawing with more crossings than half its connectors is the exception the last
+    // test in this block pins: it marks none, so every crossing in it is plain with or without
+    // room, and what is asserted there is that no bump slipped through.
     let bridged = 0;
     let plain = 0;
     for (const source of ALL) {
       const paths = edgePaths(drawn(source).svg);
+      let drawnCrossings = 0;
+      for (let i = 0; i < paths.length; i += 1) {
+        for (let j = i + 1; j < paths.length; j += 1) drawnCrossings += spanCrossings(paths[i].d, paths[j].d).length;
+      }
+      if (2 * drawnCrossings > paths.length) {
+        expect(paths.flatMap((p) => bridges(p.d)), describeSource(source)).toEqual([]);
+        continue;
+      }
       for (let i = 0; i < paths.length; i += 1) {
         for (const hop of bridges(paths[i].d)) {
           const span = straightSpans(paths[i].d).find(([a, b]) => (a.y === b.y
@@ -531,23 +563,23 @@ describe('[Render] bridges at crossings', () => {
     // write-back), or the one with lighter stroke weight (dashed, muted)". One crossing, held
     // fixed, with the weight of one of its two edges changed underneath it.
     //
-    // The three-by-three braid, K3,3, where `A1 --> B2`'s cross-line and `A3 --> B1`'s stub cross
-    // in the gap above the Bs. What makes the choice between them a choice at all is that BOTH have
-    // the room a bump needs -- 8px of straight either side of the crossing, which is a 16px bump's
-    // own width -- and most crossings can only be bridged one way round, which asserts nothing
-    // about importance however their edges are weighted. This was a four-way fan-in until the ports
-    // of a face took the order their far ends stand in: that fan stopped crossing, which is the fix,
-    // and a braid is the shape that has to cross whatever its ports do.
+    // K2,2 with a parent added above A2, where `A1 --> B2` and `A2 --> B1` cross once at 152,188. What makes the choice
+    // between them a choice at all is that BOTH have the room a bump needs -- 8px of straight
+    // either side of the crossing, which is a 16px bump's own width -- and most crossings can only
+    // be bridged one way round, which asserts nothing about importance however their edges are
+    // weighted. This was a four-way fan-in until the ports of a face took the order their far ends
+    // stand in: that fan stopped crossing, which is the fix. It was then the braid K3,3, until a
+    // drawing with more crossings than half its connectors stopped drawing bumps at all (11 on 9
+    // there); this one has 1 on 5, and it was found by trying K3,3's sub-braids with tails added
+    // until one crossing flipped with the weights.
     //
-    // The crossing is one point, so which edge carries the bump there is the whole assertion. The
-    // braid crosses elsewhere too, and those bumps are not what is under test.
-    const E = [['A1', 'B1'], ['A1', 'B2'], ['A1', 'B3'], ['A2', 'B1'], ['A2', 'B2'], ['A2', 'B3'],
-      ['A3', 'B1'], ['A3', 'B2'], ['A3', 'B3']];
+    // The crossing is one point, so which edge carries the bump there is the whole assertion.
+    const E = [['A1', 'B1'], ['A1', 'B2'], ['A2', 'B1'], ['A2', 'B2'], ['X', 'A2']];
     const FIRST = 1;
-    const SECOND = 6;
+    const SECOND = 2;
     const body = (first, second) => ['flowchart TD', ...E.map(([a, b], k) =>
       `  ${a} ${k === FIRST ? first : k === SECOND ? second : '-->'} ${b}`)].join('\n');
-    const AT = '144,136';
+    const AT = '152,188';
     const bridgedAt = (source, index) => bridges(edgePaths(drawn(source).svg)[index].d)
       .some((h) => `${h.at.x},${h.at.y}` === AT);
     const which = (source) => [bridgedAt(source, FIRST), bridgedAt(source, SECOND)];
@@ -625,8 +657,12 @@ describe('[Render] bridges at crossings', () => {
     // A pressed crossing now offers one run of each of its two connectors a slide together; under
     // L that leaves both bumps on A -> M, 12px clear of the face. Under D no slide existed in the
     // gap the layout gave (see FACE_AIR); the layout now stands a first lane that passes under a box
-    // two bumps' radii from the next (flowpeek-flow.js, `crossesStubs`), and D's two are gone. K's
-    // one is left, and kept as an exact set, so that losing it, or gaining one anywhere, fails.
+    // two bumps' radii from the next (flowpeek-flow.js, `crossesStubs`), and D's two are gone.
+    //
+    // This pinned K's one as an exact set, ['L_K_N_0 at K'], the hop no slide could clear. It is
+    // gone because the dense source draws no bumps at all now -- more crossings than half its
+    // connectors (`crossingsAreCommon`) -- not because it found air, so the property is checked
+    // on the two reviewed sources that still bump as well, where nothing presses a face.
     const dense = [
       'flowchart TD',
       '    A --> B & C & D', '    B --> E & F', '    C --> E & G', '    D --> F & G & H',
@@ -634,22 +670,49 @@ describe('[Render] bridges at crossings', () => {
       '    I --> M', '    J --> M & N', '    K --> N', '    L --> N & M',
       '    A --> M', '    B --> N', '    D --> I', '    C --> L',
     ].join('\n');
-    const { svg } = drawn(dense);
-    const boxes = [...svg.matchAll(/<g class="node[^"]*" id="fp-0-flowchart-([A-Z])-\d+" transform="translate\(([-\d.]+),([-\d.]+)\)"><rect[^>]* x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/g)]
-      .map((m) => ({ id: m[1], x: +m[2] + +m[4], y: +m[3] + +m[5], w: +m[6], h: +m[7] }));
-    expect(boxes).toHaveLength(14);
     const pressed = [];
-    for (const [, id, d] of svg.matchAll(/data-id="([^"]+)" d="([^"]*)"/g)) {
-      for (const h of d.matchAll(/L([-\d.]+),([-\d.]+) A8,8 0 0 [01] ([-\d.]+),([-\d.]+)/g)) {
-        const [x1, y1, x2, y2] = h.slice(1).map(Number);
-        // The bump's own box: up off a horizontal run, left off a vertical one (`placeHop`).
-        const bump = y1 === y2 ? { x: Math.min(x1, x2), y: y1 - 8, w: 16, h: 8 } : { x: x1 - 8, y: Math.min(y1, y2), w: 8, h: 16 };
-        const near = boxes.find((r) => Math.max(r.x - (bump.x + bump.w), bump.x - (r.x + r.w)) < 12
-          && Math.max(r.y - (bump.y + bump.h), bump.y - (r.y + r.h)) < 12);
-        if (near) pressed.push(`${id} at ${near.id}`);
+    let bumps = 0;
+    for (const source of [dense, CROWDED_SUBGRAPHS, RL_MESH]) {
+      const { svg } = drawn(source);
+      const boxes = [...svg.matchAll(/<g class="node[^"]*" id="fp-0-flowchart-([^"]+?)-\d+" transform="translate\(([-\d.]+),([-\d.]+)\)"><rect[^>]* x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/g)]
+        .map((m) => ({ id: m[1], x: +m[2] + +m[4], y: +m[3] + +m[5], w: +m[6], h: +m[7] }));
+      expect(boxes.length).toBeGreaterThan(0);
+      for (const [, id, d] of svg.matchAll(/data-id="([^"]+)" d="([^"]*)"/g)) {
+        for (const h of d.matchAll(/([-\d.]+),([-\d.]+) A8,8 0 0 [01] ([-\d.]+),([-\d.]+)/g)) {
+          bumps += 1;
+          const [x1, y1, x2, y2] = h.slice(1).map(Number);
+          // The bump's own box: up off a horizontal run, left off a vertical one (`placeHop`).
+          const bump = y1 === y2 ? { x: Math.min(x1, x2), y: y1 - 8, w: 16, h: 8 } : { x: x1 - 8, y: Math.min(y1, y2), w: 8, h: 16 };
+          const near = boxes.find((r) => Math.max(r.x - (bump.x + bump.w), bump.x - (r.x + r.w)) < 12
+            && Math.max(r.y - (bump.y + bump.h), bump.y - (r.y + r.h)) < 12);
+          if (near) pressed.push(`${id} at ${near.id}`);
+        }
       }
     }
-    expect(pressed.sort()).toEqual(['L_K_N_0 at K']);
+    expect(bumps).toBe(4);
+    expect(pressed.sort()).toEqual([]);
+  });
+
+  it('marks a crossing with a bump only where crossings are rare', () => {
+    // Every reader-facing review praised the hop with the same rider -- "where crossings are rare"
+    // -- and read the dense source, 15 bumps on 11 of its 28 connectors, as a circuit board. A bump
+    // says "this one is different"; once crossings outnumber half the connectors it is on so many
+    // lines that it says nothing, so such a drawing marks none and every crossing is the plain
+    // right-angled cross the rest of it already uses for the ones no bump fitted. The sparse
+    // review sources keep theirs: 12's one bump and 14's three.
+    const bumps = (source) => edgePaths(drawn(source).svg).reduce((n, p) => n + bridges(p.d).length, 0);
+    const dense = [
+      'flowchart TD',
+      '    A --> B & C & D', '    B --> E & F', '    C --> E & G', '    D --> F & G & H',
+      '    E --> I & J', '    F --> I & K', '    G --> J & K & L', '    H --> L',
+      '    I --> M', '    J --> M & N', '    K --> N', '    L --> N & M',
+      '    A --> M', '    B --> N', '    D --> I', '    C --> L',
+    ].join('\n');
+    const braid = 'flowchart TD\n  A1 --> B1 & B2 & B3\n  A2 --> B1 & B2 & B3\n  A3 --> B1 & B2 & B3';
+    expect(bumps(dense)).toBe(0);
+    expect(bumps(braid)).toBe(0);
+    expect(bumps(CROWDED_SUBGRAPHS)).toBe(1);
+    expect(bumps(RL_MESH)).toBe(3);
   });
 });
 

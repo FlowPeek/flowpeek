@@ -8645,6 +8645,7 @@
         });
       }
     }
+    var found = [];
     for (var a = 0; a < segs.length; a += 1) {
       for (var b = a + 1; b < segs.length; b += 1) {
         var A = segs[a], B = segs[b];
@@ -8657,12 +8658,48 @@
         // that ends on another one's line shares a point with it and has nothing to hop over.
         if (!(x > H.run.lo && x < H.run.hi)) continue;
         if (!(y > V.run.lo && y < V.run.hi)) continue;
-        var wH = hopWeight(H.owner.edge), wV = hopWeight(V.owner.edge);
-        var first = (wH !== wV) ? (wH < wV ? H : V) : (H.order > V.order ? H : V);
-        var second = (first === H) ? V : H;
-        if (!placeHop(first, x, y, ctx)) placeHop(second, x, y, ctx);
+        found.push({ H: H, V: V, x: x, y: y });
       }
     }
+    if (crossingsAreCommon(found.length, routed)) return;
+    for (i = 0; i < found.length; i += 1) {
+      var c = found[i];
+      var wH = hopWeight(c.H.owner.edge), wV = hopWeight(c.V.owner.edge);
+      var first = (wH !== wV) ? (wH < wV ? c.H : c.V) : (c.H.order > c.V.order ? c.H : c.V);
+      var second = (first === c.H) ? c.V : c.H;
+      if (!placeHop(first, c.x, c.y, ctx)) placeHop(second, c.x, c.y, ctx);
+    }
+  }
+
+  // A bump is a signal -- "these two pass, they do not meet" -- and a signal is read against the
+  // lines that do not carry one. Every reader-facing review that praised the hop praised it with
+  // the same rider, "where crossings are rare", and read the dense review source, 15 bumps on 11 of
+  // its 28 connectors, as "a circuit board" with "rows of bumps"; that source was the last one a
+  // reader still gave to Pele, which marks none of its crossings there.
+  //
+  // So a drawing whose crossings outnumber half its connectors marks none, and every crossing in
+  // it is the plain right angle: two straight strokes through one point, each running on past it.
+  // That is already how this renderer draws a crossing no bump fits, it is how the dense source
+  // drew 2 of its 17 crossings before this rule, and on an orthogonal grid it cannot be read as a
+  // join -- a join here is a T or an elbow, never four arms. The slides in `roomForBridges` still
+  // run, and still keep these crossings off elbows and faces, which is what lets the cross read.
+  //
+  // The density is crossings per connector because that is what the reader's complaint counted:
+  // how many of the lines carry a mark. Over SWEEP, the 18 review sources and render.spec.js's
+  // crossing sources, bumps were drawn in four drawings, and the ratio parts them with a wide
+  // margin: 12 (1 crossing on 16 connectors), 14 (3 on 14), the dense source (17 on 28) and K3,3
+  // (11 on 9). Any cut-off from 0.22 to 0.6 sorts them the same way; a half is the plain-words
+  // reading of "rare". A single crossing is never suppressed while there are two connectors.
+  //
+  // Rejected: dropping only the bumps that crowd one another -- a run with two, a row along one
+  // lane. In the dense source that leaves bumps on some crossings and not on others, and "one
+  // crossing marked, its neighbour not" is the reviews' weakness 10, still open in 14.
+  // One convention per drawing is the rule both regimes keep. A count per drawing was rejected
+  // too: it would strip a large sparse drawing of bumps a small dense one keeps.
+  function crossingsAreCommon(crossings, routed) {
+    var connectors = 0;
+    for (var i = 0; i < routed.length; i += 1) if (routed[i]) connectors += 1;
+    return 2 * crossings > connectors;
   }
 
   // Absolute M, L, Q and A, integers only. Not cosmetic: EditorialElbowTests.straightRuns parses

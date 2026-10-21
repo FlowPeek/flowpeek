@@ -215,21 +215,12 @@ export const ALIGNED_PAIRS = 188;
 // 2:5:9, 1:6:9 and finally OURS 7 : PELE 1 : TIE 10 across all eighteen, counting the two a reader
 // had actually sent in as broken.
 //
-// The one drawing still given to Pele is the dense DAG below, and the seventh review graded what
-// is left of it a defensible style difference rather than a defect. Both items here are therefore
-// recorded rather than open: they are written beside the corpus so the next person finds them from
-// the tests rather than from `git log`, and neither is a reason to change the renderer again
-// without a reader asking for it.
-//
-// FACE-PRESSED HOPS IN A DENSE DAG. A crossing that lands hard against a box face has nowhere for
-// its bump to sit: a hop needs 16px of straight run on each side and may not lie under a node.
-// `1e55424` moves such a crossing off an elbow, `8b0420d` slides it off a face where two
-// connectors can both move, and the layout now stands a first lane that passes under a box two
-// bumps' radii from the second where that box's stubs turn (`crossesStubs`), which together took
-// the dense review drawing from five face-pressed hops to one. The one left is under K: K -> N
-// drops straight, I -> M runs 12px below K across it, and a deeper floor cleared it only at two
-// isolated settings of six, each adding a hop. The reviewer graded the drawing's remaining width a
-// defensible difference, not a defect: do not chase it.
+// The one drawing the seventh review still gave to Pele was the dense DAG, for its 15 hops rather
+// than for a defect; it has since stopped marking its crossings (`crossingsAreCommon` in
+// flowpeek-flow.js), which also took away the one face-pressed hop recorded here, and no review has
+// been run since. The items below are recorded rather than open: they are written beside the corpus
+// so the next person finds them from the tests rather than from `git log`, and none is a reason to
+// change the renderer again without a reader asking for it.
 //
 // ONE PLATE ON ITS OWN ELBOW. The reported drawing that mixed ON and BESIDE is now all BESIDE: the
 // layout keeps a margin between two labelled columns side by side (`facingColumns`). One plate in

@@ -10014,6 +10014,7 @@
   // grammar rather than escaped: escaping would keep `expression(...)` intact and merely spell it
   // safely. A declaration that does not match is dropped whole and the node keeps its rung.
   var STYLE_SHAPE_PROPS = "fill stroke stroke-width stroke-dasharray".split(" ");
+  var STYLE_OUTLINE_PROPS = "stroke stroke-width stroke-dasharray".split(" ");
   // `fill` is deliberately absent. A `linkStyle` carrying one would fill the area an open path
   // encloses -- mermaid's flowchart edges are `fill: none` for exactly that reason -- and inline
   // beats the stylesheet, so honouring it would paint a solid wedge under an elbow.
@@ -10202,7 +10203,16 @@
   // whose children are painted separately (MacMermaidTheme.swift, rungCSS). An ellipse is drawn as
   // a path for that reason alone -- `ellipse` appears in no rung selector, so an <ellipse> element
   // would be the one shape the ladder could not colour.
-  function shapeMarkup(geometry, w, h, styleAttr) {
+  //
+  // An author's declarations go on the element that paints, never on a <g> around it. A group's
+  // style reaches its children only by inheritance, and inheritance loses to ANY rule that names
+  // the child: `g.outer-path path:nth-child(1)` and `g.label-container circle` both do, so a
+  // `classDef` written on the group was honoured on thirteen geometries and painted over on the
+  // stadium and the double circle -- the held-out review's b01 and b18, whose green and red
+  // terminals came out in the rung's grey. mermaid 11.17.2 writes the style onto each child for
+  // the same reason (both of its stadium's paths and both of its double circle's circles carry it).
+  function shapeMarkup(geometry, w, h, declarations) {
+    var styleAttr = styleAttribute(declarations, STYLE_SHAPE_PROPS, null);
     var W = half4(w), H = half4(h);
     var K;
     switch (geometry) {
@@ -10223,14 +10233,21 @@
         // Two paths, fill then outline, inside a <g class="outer-path">: the theme paints
         // `:nth-child(1)` and `:nth-child(2)` differently because one element carrying both would
         // stroke the fill and double-paint the edge.
-        return '<g class="basic label-container outer-path"' + styleAttr + ">"
-          + '<path d="' + pill + '"/><path d="' + pill + '"/></g>';
+        //
+        // The author's declarations are split the same way rather than written whole onto both,
+        // which is what mermaid does: the value grammar admits `rgba()`, and a translucent fill
+        // laid on both paths composites twice and comes out darker than the colour asked for.
+        return '<g class="basic label-container outer-path">'
+          + '<path d="' + pill + '"' + styleAttribute(declarations, ["fill"], null) + "/>"
+          + '<path d="' + pill + '"' + styleAttribute(declarations, STYLE_OUTLINE_PROPS, null) + "/></g>";
       case "circle":
         return '<circle class="basic label-container" cx="0" cy="0" r="' + W + '"' + styleAttr + "/>";
       case "doublecircle":
-        return '<g class="basic label-container"' + styleAttr + ">"
-          + '<circle cx="0" cy="0" r="' + W + '"/>'
-          + '<circle cx="0" cy="0" r="' + Math.max(GRID, W - 4) + '"/></g>';
+        // Both rings take the whole style, because the theme paints both whole: they are two
+        // filled-and-stroked circles, not a fill and an outline.
+        return '<g class="basic label-container">'
+          + '<circle cx="0" cy="0" r="' + W + '"' + styleAttr + "/>"
+          + '<circle cx="0" cy="0" r="' + Math.max(GRID, W - 4) + '"' + styleAttr + "/></g>";
       case "ellipse":
         return '<path class="basic label-container" d="M' + (-W) + ",0 A" + W + "," + H + " 0 1 0 " + W
           + ",0 A" + W + "," + H + " 0 1 0 " + (-W) + ',0 Z"' + styleAttr + "/>";
@@ -10756,7 +10773,6 @@
     for (i = 0; i < drawing.nodes.length; i += 1) {
       var n = drawing.nodes[i];
       var decls = authorDeclarations(db, n);
-      var shapeStyle = styleAttribute(decls, STYLE_SHAPE_PROPS, null);
       var textStyle = styleAttribute(decls, STYLE_TEXT_PROPS, { color: "fill" });
       // Only `node default` and the rung. A source's own classDef names are deliberately NOT
       // written here: this file emits no classDef stylesheet, so they would style nothing -- and a
@@ -10766,7 +10782,7 @@
         + (n.rung && zoneDepth.has(n.parent) ? " fp-on-depth-" + zoneDepth.get(n.parent) : "");
       nodes.push('<g class="' + classes + '" id="' + esc(renderID + "-" + n.domId)
         + '" transform="translate(' + n.cx + "," + n.cy + ')">'
-        + shapeMarkup(n.geometry, n.width, n.height, shapeStyle)
+        + shapeMarkup(n.geometry, n.width, n.height, decls)
         + (n.lines.length
           ? '<g class="label"><text class="nodeLabel" text-anchor="middle"' + textStyle + ">"
             + tspans(n.lines, n.lineHeight, 0, -half4(n.lines.length * n.lineHeight) + baselineIn(n.lineHeight))

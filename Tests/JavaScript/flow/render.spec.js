@@ -1206,6 +1206,37 @@ describe('[Render] what reaches the markup', () => {
     const out = drawn('flowchart TD\n  A --> B --> C --> D\n  classDef fp-focal fill:#123456\n  class A fp-focal');
     expect(out.svg).not.toContain('class="node default fp-focal"');
   });
+
+  // Every bracket form the grammar knows, one per geometry `shapeMarkup` draws.
+  const STYLED_SHAPES = [
+    ['rect', '[x]'], ['round', '(x)'], ['stadium', '([x])'], ['circle', '((x))'], ['doublecircle', '(((x)))'],
+    ['ellipse', '(-x-)'], ['diamond', '{x}'], ['hexagon', '{{x}}'], ['cylinder', '[(x)]'], ['subroutine', '[[x]]'],
+    ['lean-r', '[/x/]'], ['lean-l', '[\\x\\]'], ['trap-t', '[/x\\]'], ['trap-b', '[\\x/]'], ['odd', '>x]'],
+  ];
+
+  for (const [geometry, brackets] of STYLED_SHAPES) {
+    it(`puts a classDef on every element that paints a ${geometry}, never on a group around them`, () => {
+      // A style on a <g> reaches its children only by inheritance, and inheritance loses to ANY
+      // rule that names the child -- the theme's `g.outer-path path:nth-child(1)` and
+      // `g.label-container circle` both do. That is how the held-out review's stadiums came out in
+      // the rung's grey with the author's fill sitting unread on the group around them.
+      const out = drawn(`flowchart LR\n  P --> N${brackets}:::hot --> Q\n  classDef hot fill:#ffdddd,stroke:#cc0000`);
+      const node = /<g class="node default[^"]*" id="fp-0-flowchart-N-[^"]*" transform="[^"]*">(.*?)<g class="label">/.exec(out.svg)[1];
+      expect(node).not.toMatch(/<g [^>]*style=/);
+      const leaves = node.match(/<(?:rect|circle|ellipse|polygon|path)\b[^>]*>/g);
+      expect(leaves.length).toBeGreaterThan(0);
+      for (const leaf of leaves) expect(leaf).toMatch(/ style="[^"]*!important/);
+      expect(node).toContain('fill:#ffdddd !important');
+      expect(node).toContain('stroke:#cc0000 !important');
+    });
+  }
+
+  it('never writes an author style on a group, on any source', () => {
+    for (const { name, source } of SWEEP) {
+      const nodes = drawn(source).svg.match(/<g class="node default[^>]*>.*?<g class="label">/g) || [];
+      for (const node of nodes) expect(node, name).not.toMatch(/<g class="basic[^>]*style=/);
+    }
+  });
 });
 
 describe('[Render] the classes the editorial stylesheet paints', () => {

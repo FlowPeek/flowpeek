@@ -195,6 +195,19 @@ export function generate() {
         name: `shape fan ${shape} ${dir}`,
         source: `flowchart ${dir}\n  A[Source] --> ${shape}\n  B[Other] --> X\n  C[Third] --> X\n`,
       });
+      // The same geometry painted by its author, in each of the three ways a source can say so:
+      // `:::` on the shape, `class` on its source and `style` on its sink. Until this, no drawing
+      // in the space carried an author style at all, and the stadium and the double circle wrote
+      // theirs on a <g> the theme's child rules then painted over -- found by the second held-out
+      // set (b01, b18), after eight reviews and six held-out passes had never written a classDef.
+      out.push({
+        name: `shape styled ${shape} ${dir}`,
+        source: [
+          `flowchart ${dir}`, `  A[Source] --> ${shape}:::hot --> B[Sink]`,
+          '  classDef hot fill:#ffdddd,stroke:#cc0000,stroke-width:2px', '  classDef cool fill:#ddeeff',
+          '  class A cool', '  style B fill:#e8f5e9,stroke:#2e7d32',
+        ].join('\n'),
+      });
     }
     for (const [family, build] of Object.entries(FAMILIES)) {
       out.push({ name: `${family} ${dir}`, source: build(dir) });
@@ -308,8 +321,9 @@ export const TIGHT_MASKS = [];
  * the three link-form families went in; their 14 pairs are all one segment, and 202 until the three
  * long-edge families added 10 more, which were one segment before their fix as well as after, and
  * 212 until the two labelled-decision families added 10, 222 until the two busy labelled-face
- * families added 20, 242 until the three zone-title families added 20, and 262 until the two
- * return-past families added 8.
+ * families added 20, 242 until the three zone-title families added 20, 262 until the two
+ * return-past families added 8, and 270 until the styled-shape family added 112 -- two per drawing, all
+ * one segment, as they must be: an author's colour changes no geometry.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -320,7 +334,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 270;
+export const ALIGNED_PAIRS = 382;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

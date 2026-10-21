@@ -555,12 +555,12 @@ describe('[Render] bridges at crossings', () => {
   });
 
   it('moves a crossing off an elbow so that it can be bridged like every other', () => {
-    // Two reader-reviewed sources whose one forced crossing was drawn plain while every other
-    // crossing in the set had a bump, and was read as a join. In 07 `changes requested` turned down
-    // 8px above `rollback`'s run, 4px from that run's own elbow; in 08 `App Server 1 --> NAT`
-    // turned right exactly where `Load Balancer --> App Server 2` passed, the two ports 8px apart.
-    // Neither crossing can be removed -- each pair enters its channel in one order and leaves it
-    // in the other -- so what is asserted is that it is drawn where a bump fits, and has one.
+    // A crossing drawn plain while every other in the set had a bump was read as a join. The two
+    // reader-reviewed sources this was written for, 07 and 08, no longer cross at all: their one
+    // crossing each came from the order within a rank, not from the graph, and the ordering now
+    // finds the order without it (see `[Order]` in order.spec.js). 12 still crosses -- `Parser B`'s
+    // climb over `replay` -- and with this pass turned off draws that crossing plain, at 392,280, so it
+    // is what holds the pass now.
     // Crossings are read corner to corner, so one that lands inside an arc is still seen; `polyline`
     // keeps the point where each arc lets go, and a crossing exactly there would sit on a segment's
     // end and pass the strict test unseen, so collinear points are merged first.
@@ -581,17 +581,17 @@ describe('[Render] bridges at crossings', () => {
       return found;
     };
     const sources = {
-      '07 back edges': ['flowchart LR',
-        '    plan[Plan] --> design[Design] --> build[Build] --> test[Test] --> review[Review] --> release[Release] --> monitor[Monitor]',
-        '    test -->|fails| build', '    review -->|changes requested| design', '    monitor -->|incident| plan',
-        '    release -->|rollback| build', '    monitor -->|feedback| design'].join('\n'),
-      '08 nested': ['flowchart TD', '    subgraph Cloud[AWS Account]', '        subgraph VPC[Production VPC]',
-        '            subgraph Public[Public Subnet]', '                alb[Load Balancer]', '                nat[NAT Gateway]',
-        '            end', '            subgraph Private[Private Subnet]', '                app1[App Server 1]',
-        '                app2[App Server 2]', '                subgraph DB[Database Tier]', '                    primary[(Primary)]',
-        '                    replica[(Replica)]', '                end', '            end', '        end',
-        '        s3[(S3 Bucket)]', '    end', '    user[User] --> alb', '    alb --> app1', '    alb --> app2',
-        '    app1 --> primary', '    app2 --> primary', '    primary --> replica', '    app1 --> nat', '    app2 --> s3'].join('\n'),
+      '12 crowded subgraphs': [
+        'flowchart LR', '    subgraph ingest[Ingestion]', '        k1[Kafka topic orders] --> p1[Parser]',
+        '        k2[Kafka topic payments] --> p1', '        k3[Kafka topic refunds] --> p2[Parser B]',
+        '    end', '    subgraph process[Processing]', '        p1 --> v[Validator] --> en[Enricher]',
+        '        p2 --> v', '        en --> dd[Deduplicator]', '    end', '    subgraph store[Storage]',
+        '        dd --> wh[(Warehouse)]', '        dd --> lake[(Data Lake)]',
+        '        dd --> cache[(Hot Cache)]', '    end', '    subgraph serve[Serving]',
+        '        wh --> bi[BI Dashboards]', '        lake --> ml[ML Training]',
+        '        cache --> api[Public API]', '        ml -->|model| api', '    end',
+        '    v -->|invalid| dlq[(Dead letter queue)]', '    dlq -->|replay| p1',
+      ].join('\n'),
     };
     for (const [label, source] of Object.entries(sources)) {
       const paths = edgePaths(drawn(source).svg);
@@ -2141,6 +2141,23 @@ describe('[Render] which connector a label belongs to', () => {
     // which edge any of them named; in Pele every label sits on its own curve. Asserted as the
     // reader's question rather than as a score: the plate's own stroke enters one edge of it and
     // leaves the opposite one, and no other stroke touches it.
+    //
+    // One label is excepted, by name, and the exception is forced by the drawing. Since the order
+    // within a rank started reaching its minimum (`[Order]` in order.spec.js) this drawing has no
+    // crossing at all -- it had four bridged ones, and Pele draws two crossing pairs -- and with
+    // Draining placed under Online, Online -> Draining is one straight vertical. The plate for
+    // "server shutdown notice" is 176px wide; centred on that vertical it would cover heartbeat
+    // lost's run, which leaves Online's bottom face 28px away, and drained's leg, which leaves
+    // Draining's top face 68px away -- each is inside its 88px half-width, where rule 2 wants 8px
+    // of clearance beyond it, so the placer puts that one plate beside its line. The search
+    // reaches one other zero-crossing order, this one's mirror, and it does no better: there
+    // Online -> Draining turns along a 160px leg at the same height heartbeat lost turns along,
+    // and the plate lands beside its line there too. So the exception comes with the drawing, not
+    // with the order this pass happened to pick.
+    //
+    // An exact set, the way corpus.js keeps its records: a second label drifting beside fails,
+    // and so does the day this one is back on its line -- delete the entry then.
+    const BESIDE = ['L_online_draining_0 is not on its own line'];
     const source = [
       'flowchart TD',
       '    idle[Idle] -->|connect| connecting[Connecting]',
@@ -2168,6 +2185,6 @@ describe('[Render] which connector a label belongs to', () => {
         if (segmentsOf(polyline(other.d)).some((leg) => crosses(leg, mask))) loose.push(`${mask.id} covers ${other.id}`);
       }
     }
-    expect(loose).toEqual([]);
+    expect(loose).toEqual(BESIDE);
   });
 });

@@ -4567,9 +4567,76 @@
       layers[items[i].rank].push(i);
     }
 
+    // --- the ends outside the level ---------------------------------------
+    // A zone is laid out on its own, before anything outside it is placed, so an edge that leaves
+    // it is not in this level at all: it belongs to the level holding both ends, which sees only
+    // the zone's box. Left at that, the order inside a zone is whatever its own edges say, and a
+    // zone with none says nothing -- 02's Data zone has no edge inside it, so Postgres, Redis and S3
+    // stood in declaration order and Auth -> Redis crossed both edges into Postgres.
+    //
+    // `level.outside` names, for each edge whose far end is on the rank side the level reads from,
+    // which child the edge reaches and where its far end stands, as an ordinal along this level's
+    // O axis (see `outsideOf`). Each becomes a node of a fixed rank in front of rank 0, with one
+    // ordering-only dummy per rank between it and its child, the same chain a long edge inside the
+    // level gets. So the sweeps, `transpose` and the count below see those edges as edges, and an
+    // outside end that two edges share is one node, which crosses neither. None of it survives the
+    // ordering: the ids are past `m`, the rank is index 0 of the ordering's layers, and both are
+    // dropped before a coordinate is given out. With no outside ends the extra rank is empty and
+    // every step below does what it did without it.
+    //
+    // Rejected: keeping those dummies as real items, so that the zone reserves the edge a corridor
+    // the way it does a long edge. On 02 it took iOS -> API Gateway off CDN and drew no crossing,
+    // but the corridors for iOS and Android sat below CDN, both edges climbed to the gateway's
+    // left tip at the last turn allowed before it, and the two shared 8px of one vertical -- there
+    // is room between CDN's clearance and that turn for one climb, not two. Letting the corridor
+    // pull its child as well bent `subgraph s[Tier] W --> R end / K --> R` (straight.spec.js) and
+    // made 14's two thick edges into the queue cross twice (braid.spec.js).
+    var M = m;
+    var farAt = new Map();
+    var ordUp = [];
+    var ordDown = [];
+    for (i = 0; i < m; i += 1) { ordUp.push(nbrUp[i].slice()); ordDown.push(nbrDown[i].slice()); }
+    var ordSegs = [];
+    for (i = 0; i < segments.length; i += 1) {
+      ordSegs.push({ u: segments[i].u, v: segments[i].v, gap: segments[i].gap + 1 });
+    }
+    layers.unshift([]);
+    var outside = level.outside || [];
+    var slotOf = new Map();
+    for (i = 0; i < n; i += 1) slotOf.set(children[i].id, i);
+    var farNode = new Map();
+    for (i = 0; i < outside.length; i += 1) {
+      var far = outside[i];
+      if (!slotOf.has(far.child)) continue;
+      var reach = slotOf.get(far.child);
+      if (!farNode.has(far.at)) {
+        farNode.set(far.at, M);
+        farAt.set(M, far.at);
+        ordUp.push([]); ordDown.push([]);
+        layers[0].push(M);
+        M += 1;
+      }
+      var tail = farNode.get(far.at);
+      for (var ol = 1; ol <= items[reach].rank + 1; ol += 1) {
+        var hop = reach;
+        if (ol <= items[reach].rank) {
+          hop = M;
+          ordUp.push([]); ordDown.push([]);
+          layers[ol].push(M);
+          M += 1;
+        }
+        ordDown[tail].push(hop);
+        ordUp[hop].push(tail);
+        ordSegs.push({ u: tail, v: hop, gap: ol - 1 });
+        tail = hop;
+      }
+    }
+    // Far ends in O order: the fixed rank is never reordered, so this is the order it keeps.
+    layers[0].sort(function (p, q) { return farAt.get(p) - farAt.get(q); });
+
     function positionsOf(ls) {
       var pos = [];
-      for (var a = 0; a < m; a += 1) pos.push(0);
+      for (var a = 0; a < M; a += 1) pos.push(0);
       for (var b = 0; b < ls.length; b += 1) for (var c = 0; c < ls[b].length; c += 1) pos[ls[b][c]] = c;
       return pos;
     }
@@ -4579,9 +4646,9 @@
       var total = 0;
       for (var g = 0; g + 1 < ls.length; g += 1) {
         var here = [];
-        for (var a = 0; a < segments.length; a += 1) {
-          if (segments[a].gap !== g) continue;
-          here.push([pos[segments[a].u], pos[segments[a].v]]);
+        for (var a = 0; a < ordSegs.length; a += 1) {
+          if (ordSegs[a].gap !== g) continue;
+          here.push([pos[ordSegs[a].u], pos[ordSegs[a].v]]);
         }
         for (var b = 0; b < here.length; b += 1) {
           for (var c = b + 1; c < here.length; c += 1) {
@@ -4600,15 +4667,16 @@
 
     function sweep(ls, down) {
       var pos = positionsOf(ls);
+      // Index 0 is the fixed rank of outside ends: read from, never sorted.
       var from = down ? 1 : ls.length - 2;
-      var stop = down ? ls.length : -1;
+      var stop = down ? ls.length : 0;
       var step = down ? 1 : -1;
       for (var r2 = from; r2 !== stop; r2 += step) {
         var layer = ls[r2];
         var keyed = [];
         for (var a = 0; a < layer.length; a += 1) {
           var id = layer[a];
-          var fixed = down ? nbrUp[id] : nbrDown[id];
+          var fixed = down ? ordUp[id] : ordDown[id];
           var sum = 0;
           for (var b = 0; b < fixed.length; b += 1) sum += pos[fixed[b]];
           // A node with nothing in the fixed rank keeps where it is; moving it would be noise, and
@@ -4623,14 +4691,94 @@
       }
     }
 
+    // Crossings between u and v, with u before v, against both of the ranks beside theirs -- the
+    // only crossings that swapping two neighbours can change, so it is the whole of the question
+    // and costs deg(u)·deg(v) instead of a recount of the level.
+    function pairCost(pos, u, v) {
+      var total = 0;
+      for (var side = 0; side < 2; side += 1) {
+        var nu = side ? ordDown[u] : ordUp[u];
+        var nv = side ? ordDown[v] : ordUp[v];
+        for (var a = 0; a < nu.length; a += 1) {
+          for (var b = 0; b < nv.length; b += 1) if (pos[nu[a]] > pos[nv[b]]) total += 1;
+        }
+      }
+      return total;
+    }
+
+    // Swap neighbours while a swap strictly lowers the crossings, until a pass swaps nothing.
+    // Strictly, so a tie keeps the order the sweep gave it and two equal pairs cannot trade places
+    // forever; each swap lowers a non-negative count, so the loop ends without a guard.
+    function transpose(ls) {
+      var pos = positionsOf(ls);
+      var improved = true;
+      while (improved) {
+        improved = false;
+        for (var r2 = 1; r2 < ls.length; r2 += 1) {
+          var layer = ls[r2];
+          for (var k = 0; k + 1 < layer.length; k += 1) {
+            var u = layer[k];
+            var v = layer[k + 1];
+            if (pairCost(pos, v, u) < pairCost(pos, u, v)) {
+              layer[k] = v; layer[k + 1] = u;
+              pos[v] = k; pos[u] = k + 1;
+              improved = true;
+            }
+          }
+        }
+      }
+    }
+
+    // Eight barycentre sweeps from the breadth-first seed, each followed by `transpose`, the
+    // adjacent-swap pass dot runs after its median one -- and then the same again from a few
+    // shuffled seeds, keeping whichever order crosses least.
+    //
+    // Both halves are measured, against a search that runs median and barycentre sweeps with
+    // `transpose` from 60 random starts. Over the 16 review sources the sweeps alone left 21
+    // crossings where that search finds 12: 17 against 12 on `hard-dense`, and 2 against 0 on the
+    // state machine and on the back-edge chain. 24 sweeps instead of 8 left all 21. Adding
+    // `transpose` took `hard-dense` to 15 and nothing else: each of the three is a local minimum
+    // that no single swap leaves, because what has to move is a whole chain of dummies from one
+    // side of the drawing to the other. Median sweeps, both sweep directions first, and moving
+    // each node to its best slot in the rank (sifting) were each tried on top and left 18 or 19.
+    // Shuffled restarts are what reach it: one, two and three of them leave 16, 14 and 13, four
+    // reach 12, and eight -- the number here -- are four of margin. Seeds reversed rank by rank
+    // reached 0 on the two small ones and only 15 on `hard-dense`, which is why they are shuffled.
+    //
+    // The shuffle is the Park-Miller sequence from a fixed seed, exact in a double, so the drawing
+    // is the same every time. Only a strictly lower count replaces the breadth-first answer, and
+    // nothing runs once it is zero, so a drawing the sweeps already untangle is drawn exactly as
+    // before: over the 172-drawing sweep the count stays at 4, which the 60-start search cannot
+    // lower either.
+    // Restarts stop at 256 segments, where the recount each sweep pays is 32k pairs; past that a
+    // level keeps the one breadth-first run, which is everything it had before.
+    var seeded = copyLayers(layers);
     var best = copyLayers(layers);
     var bestCross = crossings(layers);
-    for (i = 0; i < 8 && bestCross > 0; i += 1) {
-      sweep(layers, (i % 2) === 0);
-      var cross = crossings(layers);
-      if (cross < bestCross) { bestCross = cross; best = copyLayers(layers); }
+    var seed = 1;
+    var RESTARTS = ordSegs.length <= 256 ? 8 : 0;
+    for (var start = 0; start <= RESTARTS && bestCross > 0; start += 1) {
+      if (start > 0) {
+        layers = copyLayers(seeded);
+        for (i = 1; i < layers.length; i += 1) {
+          for (j = layers[i].length - 1; j > 0; j -= 1) {
+            seed = (seed * 48271) % 2147483647;
+            var pick = seed % (j + 1);
+            var held = layers[i][j]; layers[i][j] = layers[i][pick]; layers[i][pick] = held;
+          }
+        }
+      }
+      for (i = 0; i < 8 && bestCross > 0; i += 1) {
+        sweep(layers, (i % 2) === 0);
+        transpose(layers);
+        var cross = crossings(layers);
+        if (cross < bestCross) { bestCross = cross; best = copyLayers(layers); }
+      }
     }
-    layers = best;
+    layers = [];
+    for (i = 1; i < best.length; i += 1) {
+      layers.push(best[i].filter(function (id) { return id < m; }));
+    }
 
     for (i = 0; i < layers.length; i += 1) {
       for (j = 0; j < layers[i].length; j += 1) items[layers[i][j]].order = j;
@@ -5998,11 +6146,37 @@
 
   // Where an end goes after it leaves its face, along that face: the corridor it was handed, or the
   // far box when it reaches that directly.
+  //
+  // A far box behind a zone that holds neither end is not where the route heads first: the route
+  // goes round that zone (no connector enters a foreign zone), and round the side nearer this face.
+  // In 08, once App Server 2 stood left of App Server 1, its edges to Primary and to S3 Bucket tied
+  // -- both far boxes are centred on one x -- and the edge index put S3's port on the right, so
+  // its route left round the left of the Database Tier from the right-hand port and shared 8px
+  // with the edge to Primary under the box. Heading for the zone's near side is what it does.
   function headingOf(face, att, model) {
     var via = att.edge.via || [];
     var level = model.levels.get(att.edge.level);
     if (via.length > 0 && level) return viaAlong(face, level, att.end === 0 ? via[0] : via[via.length - 1]);
-    return face.alongX ? centreX(att.other) : centreY(att.other);
+    var far = face.alongX ? centreX(att.other) : centreY(att.other);
+    var box = face.box;
+    var other = att.other;
+    var mine = ancestry(att.edge.from, model.parentOf).concat(ancestry(att.edge.to, model.parentOf));
+    var lo = face.alongX ? Math.min(box.y + box.h, other.y + other.h) : Math.min(box.x + box.w, other.x + other.w);
+    var hi = face.alongX ? Math.max(box.y, other.y) : Math.max(box.x, other.x);
+    var nearest = null;
+    for (var z = 0; z < model.clusters.length; z += 1) {
+      var zone = model.clusters[z];
+      if (mine.indexOf(zone.id) >= 0) continue;
+      var zLo = face.alongX ? zone.y : zone.x;
+      var zHi = face.alongX ? zone.y + zone.h : zone.x + zone.w;
+      var aLo = face.alongX ? zone.x : zone.y;
+      var aHi = face.alongX ? zone.x + zone.w : zone.y + zone.h;
+      if (zLo < lo || zHi > hi || far <= aLo || far >= aHi) continue;
+      if (nearest === null || Math.abs(zLo - lo) < Math.abs(nearest.lo - lo)) nearest = { lo: zLo, aLo: aLo, aHi: aHi };
+    }
+    if (nearest === null) return far;
+    var centre = face.base + faceCentre(face);
+    return (centre - nearest.aLo <= nearest.aHi - centre) ? nearest.aLo : nearest.aHi;
   }
 
   // Which slot of its face each end of each edge holds, so the two passes after placement --
@@ -6509,7 +6683,83 @@
   // budgets is the one that keeps more labels on one line. 160 wraps 8 again.
   var EDGE_WRAP_PX = 208;
 
+  // Where the far end of each edge that enters a zone stands, per zone, from a drawing whose boxes
+  // are all placed. Only an edge from the side the zone's own ranks are read from is counted -- the
+  // rank side in front of rank 0, which is above a TB zone, left of an LR one, below a BT one and
+  // right of an RL one -- and only when its far end is wholly on that side of the zone's box. Both
+  // limits keep the answer settled: what is upstream of a zone is laid out from what is upstream of
+  // it, so each pass of `layout` settles one more zone in the chain and none of them can chase a
+  // zone that is chasing it back. Taking both sides was measured, and is that chase: Services sorts
+  // by Data's order of the previous pass while Data sorts by Services', so 02 and 08 were still
+  // changing after four passes and stopped on the order they began with -- Postgres, Redis, S3 --
+  // and 12 drew its Ingestion column upside down. Upstream only, 02, 12 and 14 settle in one
+  // extra pass and 08 in two.
+  //
+  // `at` is the far end's rank among the zone's far ends along its O axis, so the key compares
+  // orders and not pixels: a pass that only moves boxes, without reordering any, hands the next
+  // pass the same key, which is what ends the loop.
+  function outsideOf(model) {
+    var byZone = new Map();
+    function contains(zoneId, child) {
+      return ancestry(child.id, model.parentOf).indexOf(zoneId) > 0;
+    }
+    function record(zoneId, childId, farEnd) {
+      var zone = model.clusterById.get(zoneId);
+      var dir = model.levels.get(zoneId).dir;
+      var fx = farEnd.x + farEnd.w / 2;
+      var fy = farEnd.y + farEnd.h / 2;
+      var upstream = (dir === "TB") ? fy < zone.y
+        : (dir === "BT") ? fy > zone.y + zone.h
+          : (dir === "LR") ? fx < zone.x
+            : fx > zone.x + zone.w;
+      if (!upstream) return;
+      if (!byZone.has(zoneId)) byZone.set(zoneId, []);
+      byZone.get(zoneId).push({ child: childId, at: (dir === "TB" || dir === "BT") ? fx : fy });
+    }
+    for (var i = 0; i < model.edges.length; i += 1) {
+      var e = model.edges[i];
+      if (e.selfLoop || e.boundary) continue;
+      for (var end = 0; end < 2; end += 1) {
+        var farEnd = end ? e.fromChild : e.toChild;
+        var child = end ? e.toChild : e.fromChild;
+        for (var guard = 0; guard < 256 && child.parent; guard += 1) {
+          if (contains(child.parent, farEnd)) break;
+          record(child.parent, child.id, farEnd);
+          child = model.clusterById.get(child.parent);
+          if (!child) break;
+        }
+      }
+    }
+    var key = [];
+    byZone.forEach(function (list, zoneId) {
+      var values = list.map(function (o) { return o.at; }).sort(function (a, b) { return a - b; });
+      var ranks = [];
+      for (var k = 0; k < values.length; k += 1) if (k === 0 || values[k] !== values[k - 1]) ranks.push(values[k]);
+      for (var k2 = 0; k2 < list.length; k2 += 1) list[k2].at = ranks.indexOf(list[k2].at);
+      key.push(zoneId + "\u0000" + list.map(function (o) { return o.child + "@" + o.at; }).join(","));
+    });
+    key.sort();
+    return { hints: byZone, key: key.join("\u0001") };
+  }
+
+  // The layout, run again while what it says about each zone's outside ends keeps changing. A
+  // drawing with no edge into a zone from upstream says nothing the first time, and is the first
+  // run exactly. Four is the bound on how deep a chain of zones is settled; one that has not
+  // converged by then draws the last answer, which is still a placed drawing.
   function layout(db, options) {
+    var probe = {};
+    var drawing = layoutOnce(db, options, null, probe);
+    var used = "";
+    for (var pass = 0; pass < 4 && probe.key !== used; pass += 1) {
+      used = probe.key;
+      var hints = probe.hints;
+      probe = {};
+      drawing = layoutOnce(db, options, hints, probe);
+    }
+    return drawing;
+  }
+
+  function layoutOnce(db, options, outside, probe) {
     var opts = options || {};
     // Accepts either the projection or the raw payload it is projected from, so a caller that
     // already built the theme does not pay for it twice and a test can pass nothing at all.
@@ -6611,6 +6861,7 @@
     for (i = 0; i < model.clusters.length; i += 1) {
       var cluster = model.clusters[i];
       var inner = model.levels.get(cluster.id);
+      inner.outside = (outside && outside.get(cluster.id)) || null;
       layoutLevel(inner, env);
       var title = String(cluster.title || "");
       var header = 0;
@@ -6665,6 +6916,10 @@
     // content box. See `renderOrDecline`.
     var grow = opts.grow || { left: 0, top: 0, right: 0, bottom: 0 };
     place("", marginU + grow.left, marginU + grow.top);
+
+    var told = outsideOf(model);
+    probe.hints = told.hints;
+    probe.key = told.key;
 
     assignPorts(model);
     var counts = tagLadder(model);

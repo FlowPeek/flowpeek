@@ -236,3 +236,25 @@ export const ALIGNED_PAIRS = 188;
 // it, "negotiate(adjustRate, self)", is placed beside its first leg and still lies over its own
 // elbow, as it did before; the placer charges it 18 for that leg. It covers its own line, not
 // another's, and render.spec.js names it in an exact set.
+//
+// WHY THE TWO LABEL-DISTANCE METRICS STILL FAVOUR PELE, AND WHY THAT IS NOT A DEFECT. After the
+// differential was taught to measure both engines with the same ruler, two numbers were left where
+// Pele led: mean distance from a label's plate to the nearest stroke that is not its own, 45.32
+// against our 41.03, and the minimum, 10 against our 8. Both were taken apart rather than chased.
+//
+// The MEAN is a trade, not a loss. Pele puts all 39 of its plates on their own line. On the 24
+// where we do the same, WE lead -- 33.00 against 23.95 -- so where the two engines make the same
+// choice ours leaves more room. The whole gap comes from 15 plates in the two reported sources
+// where we place BESIDE and Pele places ON, and Pele buys that with 52% more drawing area and, on
+// one of them, 62 bends against our 12. The metric also rewards the wrong thing on its own terms:
+// a plate that floats away from every stroke scores well, and a label that cannot be matched to
+// its edge was the defect the first reader-facing review ranked FIRST of ten.
+//
+// The MINIMUM is plate size. The 8px is the `no` plate in `labelled fork`, in all four directions,
+// sitting on its own line with another edge one port over on the same circular face running
+// parallel the whole leg; every clean placement there scores the same rival distance. Our plate is
+// 32x24 and Pele's is 23x21, so the two pixels are the box, not where it was put.
+//
+// Levers were swept and each breaks something that matters more: LABEL_GAP 3 reaches 12 and 45.44
+// but takes labels off their lines and adds 105,056 px2 of content area, MIN_PITCH 4 leaves the
+// minimum at 8, and raising LABEL_MARGIN_PX lowers the mean it was meant to raise.

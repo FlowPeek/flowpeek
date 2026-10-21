@@ -5335,6 +5335,9 @@
     // sharing a lane occupy disjoint stretches of it.
     var gapLanes = [];
     var gapLabel = [];
+    // The labelled corridors' stacks, in columns and end to end; see the column note below.
+    var gapStack = [];
+    var gapWhole = [];
     // How much of the gap each of its two faces has to be left alone for. A gap is not symmetric:
     // the face an edge LEAVES needs a stub plus room to round the corner off it, and the face an
     // edge ARRIVES at needs that plus the arrowhead and a shaft behind it. Which face is which is a
@@ -5369,7 +5372,7 @@
       return g === "diamond" || (g === "hexagon" && !vertical);
     };
     for (i = 0; i < maxRank; i += 1) {
-      gapLanes.push(0); gapLabel.push(0); gapStraight.push(0); stacked.push(new Map());
+      gapLanes.push(0); gapLabel.push(0); gapStack.push(0); gapWhole.push(0); gapStraight.push(0); stacked.push(new Map());
       gapLoNeed.push(2 * STUB); gapHiNeed.push(2 * STUB);
     }
     for (i = 0; i < segments.length; i += 1) {
@@ -5458,15 +5461,40 @@
         var stack = stacked[seg.gap];
         var sharing = stack.get(corridor);
         if (!sharing) { sharing = []; stack.set(corridor, sharing); }
-        sharing.push(along);
+        sharing.push({ along: along, across: vertical ? lbl.w : lbl.h });
       }
     }
 
     for (i = 0; i < maxRank; i += 1) {
-      stacked[i].forEach(function (heights) {
-        var depth = (heights.length - 1) * 2 * LABEL_GAP;
-        for (var d = 0; d < heights.length; d += 1) depth += heights[d];
-        if (depth > gapLabel[i]) gapLabel[i] = depth;
+      stacked[i].forEach(function (plates, key) {
+        // How deep the stack has to be, in COLUMNS. A corridor's runs leave one face side by side,
+        // one port pitch apart, so two plates whose lines are k pitches apart can stand at the same
+        // place along the gap once k pitches hold a plate's extent across the gap and the rule 2 gap
+        // either side of it. Then only that many plates need room of their own along it, and the
+        // widest of them is the worst case, whichever lines the placer puts them on.
+        //
+        // End to end, which is what was here, holds the same plates and is right where k reaches the
+        // corridor's size. It is in a TB level: across is a plate's WIDTH and a column there is a
+        // whole fan. In an LR one across is a plate's 24px height and the stack ran along the WIDTHS,
+        // and b04 in the second held-out set came out 1968px wide against Pele's 1201 -- six plates
+        // of one face strung along one gap.
+        //
+        // The pitch is BUSY_PITCH where the face is one `layout` grew for it -- a node, not a zone
+        // or a vertex, with BUSY_N or more labelled ends -- and MIN_PITCH otherwise.
+        var n = plates.length;
+        var at = key.charAt(0) === "u" ? Number(key.slice(1)) : -1;
+        var grown = n >= BUSY_N && at >= 0 && items[at].ref && items[at].ref.kind === "node" && !vertexFork(at);
+        var pitch = grown ? BUSY_PITCH : MIN_PITCH;
+        var across = 0;
+        for (var d = 0; d < n; d += 1) if (plates[d].across > across) across = plates[d].across;
+        var columns = Math.min(n, Math.ceil((across + 2 * LABEL_GAP) / pitch));
+        var alongs = plates.map(function (p) { return p.along; }).sort(function (a, b) { return b - a; });
+        var depth = (columns - 1) * 2 * LABEL_GAP;
+        for (d = 0; d < columns; d += 1) depth += alongs[d];
+        if (depth > gapStack[i]) gapStack[i] = depth;
+        var whole = (n - 1) * 2 * LABEL_GAP;
+        for (d = 0; d < n; d += 1) whole += alongs[d];
+        if (whole > gapWhole[i]) gapWhole[i] = whole;
       });
     }
 
@@ -5857,7 +5885,22 @@
       var needed = gapLoNeed[i] + (lanes > 0 ? laneOff[i][lanes - 1] : 0) + gapHiNeed[i];
       // An edge label lives in the gap, so the gap has to hold it. The router decides which side of
       // the stroke it goes on; reserving the room is the only part layout can settle.
-      var labelled = gapLabel[i] + 2 * STUB;
+      //
+      // A stack in columns stands on the straight stretch of its lines, so the lanes where lines
+      // step across the gap are added to it: a plate over a step has a corner under it. Never more
+      // than the plates end to end, which always fitted. Measured over the three reviewed sets and
+      // the 300-drawing sweep it moves 5 drawings, every one narrower -- b04 1968 -> 1696px, h04
+      // 2316 -> 2240, b16 1584 -> 1528, `labelled returns to one face` LR 752 -> 696 and RL 752 ->
+      // 736 -- with no label leaving its line and no new warning.
+      //
+      // Rejected: the columns without the lanes. b04 came to 1416px, but under the style-guide
+      // ruler it warned label-crowded, as did two request/response exchanges written to test this
+      // (stack.spec.js's, and one with five links): their lines step in the middle of the gap and
+      // the plate between two columns stood on a step. Also rejected: the lanes added without the
+      // cap, which made b11 1544 -> 1648px and h04 wider too; and columns at MIN_PITCH everywhere,
+      // safe but b04 only 1968 -> 1784.
+      var jogs = lanes > 0 ? laneOff[i][lanes - 1] : 0;
+      var labelled = Math.max(gapLabel[i], gapStack[i] > 0 ? Math.min(gapWhole[i], gapStack[i] + jogs) : 0) + 2 * STUB;
       gapSize.push(Math.max(env.rankU, needed, labelled));
     }
 

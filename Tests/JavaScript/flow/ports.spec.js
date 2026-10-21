@@ -35,6 +35,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SWEEP } from './corpus.js';
 import { measureText } from './measure.js';
 import { distanceToOutline, insideOutline, nodeOutlines, rayDepth } from './outline.js';
 
@@ -306,7 +307,7 @@ describe('[Ports] what the rounding costs', () => {
         }
       }
     }
-    expect(`${exact} of ${total} exact, ${proud} outside`).toBe('308 of 360 exact, 0 outside');
+    expect(`${exact} of ${total} exact, ${proud} outside`).toBe('312 of 360 exact, 0 outside');
     expect(`deepest ${worst.toFixed(2)}px, under the grid step ${worst < GRID}`)
       .toBe('deepest 3.63px, under the grid step true');
   });
@@ -498,5 +499,41 @@ describe('[Ports] a port never lands where the outline turns', () => {
     // The two numbers the blocks above assert one drawing at a time, over the whole matrix.
     expect(`worst parallel ${worst.toFixed(2)}, tightest corner ${tightest}px`)
       .toBe('worst parallel 0.86, tightest corner 8px');
+  });
+});
+
+// Three or more connectors on one vertex of a rhombus leave from its slopes, two pitches apart --
+// or, on a face too short for that, as far apart as an even division of the face allows. They used to cluster ON the vertex at the 12px pitch -- 16px for an even count -- which
+// the held-out review read as a bundle whose labels could belong to any of its lines: three exits
+// off 승인 응답 코드's tip, four off h13's Response and h20's Category. Two connectors keep the
+// cluster: a decision's yes and no diverge at the apex, and that is the shape `60fae7a` built.
+describe('[Ports] a vertex shared by three or more', () => {
+  it('spreads their ports along the slopes over the sweep', () => {
+    const tight = [];
+    for (const { name, source } of SWEEP) {
+      const db = new flow.FlowDB();
+      db.clear();
+      flow.parse(source, db);
+      const laid = flow.layout(db, { measureText, theme: EDITORIAL });
+      const diamonds = new Map(laid.nodes.filter((node) => node.geometry === 'diamond').map((node) => [node.id, node]));
+      const faces = new Map();
+      for (const edge of laid.edges) {
+        for (const [id, port] of [[edge.from, edge.start], [edge.to, edge.end]]) {
+          if (!diamonds.has(id) || !port) continue;
+          const key = `${id}.${port.side}`;
+          if (!faces.has(key)) faces.set(key, { node: diamonds.get(id), side: port.side, along: [] });
+          faces.get(key).along.push(port.side === 'top' || port.side === 'bottom' ? port.x : port.y);
+        }
+      }
+      for (const [key, { node, side, along }] of faces) {
+        if (along.length < 3) continue;
+        const face = side === 'top' || side === 'bottom' ? node.width : node.height;
+        const owed = Math.min(24, GRID * Math.floor(face / GRID / (along.length + 1)));
+        along.sort((p, q) => p - q);
+        const least = Math.min(...along.slice(1).map((at, k) => at - along[k]));
+        if (least < owed) tight.push(`${name} ${key} ${least}px of ${owed}`);
+      }
+    }
+    expect(tight).toEqual([]);
   });
 });

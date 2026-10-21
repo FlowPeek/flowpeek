@@ -5299,6 +5299,14 @@
     // on it: the review's 03 went from 704px to 516px tall, and one of its labels was then pushed
     // between two parallel connectors with no zero-penalty position left.
     var onCorridor = function (edge) { return !vertical && edge.chain.length > 2; };
+    // A node whose faces along the rank axis are single points, so `clusterAt` rather than the
+    // fan decides where its ports go: a rhombus on every face, a hexagon on the two it points with.
+    var vertexFork = function (idx) {
+      var ref = items[idx].ref;
+      if (!ref || ref.kind !== "node") return false;
+      var g = geometryOf(ref.shape);
+      return g === "diamond" || (g === "hexagon" && !vertical);
+    };
     for (i = 0; i < maxRank; i += 1) {
       gapLanes.push(0); gapLabel.push(0); gapStraight.push(0); stacked.push(new Map());
       gapLoNeed.push(2 * STUB); gapHiNeed.push(2 * STUB);
@@ -5330,9 +5338,14 @@
       // draws and for the same reason: its cross-line is a step onto a corridor several ranks long,
       // not a branch beside the others, and pairing it with one would ladder a mirror that the port
       // pass is never going to draw.
-      seg.forkAt = (segEdge.chain.length > 2) ? -1
-        : ((!segBack && seg.gap === segEdge.lowRank) ? seg.u
-          : ((segBack && seg.gap + 1 === segEdge.highRank) ? seg.v : -1));
+      seg.forkAt = (!segBack && seg.gap === segEdge.lowRank) ? seg.u
+        : ((segBack && seg.gap + 1 === segEdge.highRank) ? seg.v : -1);
+      // On a vertex the exception does not hold. A diamond places its own ports along its slopes
+      // (`slopesOf`) whatever `mirrorForks` would ask, so an answer that steps onto a corridor
+      // is one more branch beside the others, and outside the ladder it took the gap's next free
+      // lane: on h13 the 5xx answer, the outermost, turned BELOW the 429 answer inside it and
+      // crossed its drop with a hop.
+      if (seg.forkAt >= 0 && segEdge.chain.length > 2 && !vertexFork(seg.forkAt)) seg.forkAt = -1;
       seg.forkBack = segBack;
       seg.forkOff = (seg.forkAt < 0) ? 0
         : ((seg.forkAt === seg.u ? cv : cu) - centreOf(seg.forkAt));
@@ -5760,7 +5773,11 @@
       // sources and not one clash removed.
       if (edgeRoom > 0 && gapStraight[i] > 0) {
         var bothRoom = gapStraight[i] + 2 * LABEL_GAP;
-        if (laneLabelLo) {
+        // A hugged gap is the exception: its lanes sit at the low face by construction, so the
+        // straight run's free stretch is the far one, whatever `laneLabelLo` says. Charged to the
+        // low face instead, in LR, it pushed a three-way decision's outer answers 56px out along
+        // the middle one before they turned, and the middle label had nowhere clean to sit.
+        if (laneLabelLo || hugGap[i]) {
           if (bothRoom > gapHiNeed[i]) gapHiNeed[i] = bothRoom;
         } else if (bothRoom > gapLoNeed[i]) {
           gapLoNeed[i] = bothRoom;
@@ -6158,10 +6175,11 @@
   // a port a fraction inside it is covered, because nodes are painted after every edge (emit's
   // painters order, asserted in render.spec.js). Hence up to the next whole unit, not the nearest.
   //
-  // Measured off the emitted paths, every geometry on every face, three connectors to a face: 308
-  // of 360 ports land exactly on the outline, none lands outside it, and the deepest any sank past
-  // it is 3.63px -- under one grid step, which is what ceil() can cost. ports.spec.js holds those
-  // three numbers.
+  // Measured off the emitted paths, every geometry on every face, three connectors to a face: 312
+  // of 360 ports land exactly on the outline -- 308 until `slopesOf` moved a vertex's three off the
+  // point and onto its slopes -- none lands outside it, and the deepest any sank past it is
+  // 3.63px, under one grid step, which is what ceil() can cost. ports.spec.js holds those three
+  // numbers.
   var DEPTH_EPS = 1e-9;
 
   function portInset(geometry, box, side, t) {
@@ -6344,6 +6362,7 @@
   // connector on their face and 120 of them exactly on the vertex -- the other 14 being the middle
   // member of a fan of three or five.
   function clusterAt(anchor, N, run, span) {
+    if (N >= 3 && run.lo === run.hi) return slopesOf(anchor, N, span);
     // The wider pitch is a nicety and the first thing given up: four connectors on a 48px face took
     // 16px each, filled the face exactly, and landed their outer two ON the corners -- which is the
     // defect the landing run exists to stop.
@@ -6359,6 +6378,37 @@
       : clampInto(start, span.lo, span.hi - width);
     var out = [];
     for (var k = 0; k < N; k += 1) out.push(start + pitch * k);
+    return out;
+  }
+
+  // Three or more connectors on a vertex: both slopes, not the point.
+  //
+  // The cluster above is right for TWO -- a decision's yes and no leave the apex 16px apart and
+  // diverge at once, which is what `60fae7a` built and what every one of the eighteen tuned sources
+  // needed, since none of them had a diamond with a third exit. The held-out review's did: three
+  // answers off 승인 응답 코드's tip at a 12px pitch and four off h13's Response ran down together
+  // until each turned, and a reader could not tell which of the labels below belonged to which
+  // line. Pele leaves such a diamond from points along its two lower edges. This is that, the
+  // cluster's own rule carried on: the middle member of an odd count stays ON the vertex, and the
+  // rest stand out along the slopes, evenly, at the step that divides the face into N + 1 -- so no
+  // port is nearer the side corners than the step, and each is at least two pitches from the next.
+  // Measured on the held-out sources: 승인 응답 코드's three exits went from 12px apart to 36, h13's
+  // Response's four from 16 to 24, h20's Category's four from 16 to 24, h09's deploy decision's
+  // three from 12 to 52.
+  //
+  // Rejected: the third exit on a side vertex.
+  // The rejection beside `landingRun` still holds -- a branch off the side vertex leaves from the
+  // far side of the box it feeds and has to come back under the shape it started from. Also
+  // rejected: spreading two exits the same way. A pair already diverges at the apex, the tuned
+  // sources were read with them that way, and the lane `60fae7a` hugs is sized for that pair.
+  function slopesOf(anchor, N, span) {
+    var step = Math.floor((span.hi - span.lo) / (N + 1));
+    // A face too short to carry the spread at twice the pitch keeps the cluster's behaviour.
+    if (step < 2 * MIN_PITCH) return spreadOf(span, N);
+    var start = anchor - Math.round(step * (N - 1) / 2);
+    start = clampInto(start, span.lo + step, span.hi - step - step * (N - 1));
+    var out = [];
+    for (var k = 0; k < N; k += 1) out.push(start + step * k);
     return out;
   }
 
@@ -9341,6 +9391,18 @@
           // layout's: a rhombus's two exits leave 16px apart, so a plate on either first leg covers
           // the other, and five edges between one pair share a corridor no placement can separate.
           if (!onLine) penalty += 8;
+          // BESIDE with another line inside twice rule 2's gap of the plate: the plate then stands
+          // between two strokes at distances a reader cannot rank, which the held-out review named
+          // as the cost of a bundle -- "a reader cannot tell which label belongs to which line".
+          // The taper above prices the margin, but a margin of a few px is cheap next to a stroke in
+          // ON's gap, so such a plate was still the pick: 2 labels on the held-out sources stood
+          // BESIDE with a foreign stroke under 16px off the plate. This leaves 1, h02's
+          // refresh -> tokens, whose ON costs more than any BESIDE it has.
+          //
+          // 40, under the 50 a mask near another mask costs, and not the "never" a weight of 180
+          // would mean: at 180 it put two of the three "settled" plates of render.spec.js's
+          // labelled fan-in within 8px of each other, and two words run together is the worse failure.
+          if (!onLine && rival < 2 * LABEL_GAP_PX) { penalty += 40; harm += 40; }
           if (best === null || penalty < best.penalty) {
             best = { x: cx, y: cy, rect: rect, penalty: penalty, onLine: onLine, crowded: harm > 0 };
             if (penalty === 0) return best;

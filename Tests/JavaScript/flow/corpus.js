@@ -105,6 +105,19 @@ const FAMILIES = {
     `flowchart ${dir}`, '  A[Start] --> B[Load]', '  B --> C[Parse]', '  B --> X[Side]', '  C --> D[Check]',
     '  X --> D', '  D --> E[Save]', '  E -.->|again| A', '  A --> E',
   ].join('\n'),
+  // Decisions with three and four LABELLED answers. 'fan out' above is a four-way diamond too, but
+  // with no labels it never asked whose line a label was on, and the held-out review's worst
+  // drawings were exactly that question: three exits 12px apart off one tip, labels beside them.
+  // The four-way one sends an answer back up as well, so a long edge leaves the same vertex.
+  'three-way decision': (dir) => [
+    `flowchart ${dir}`, '  A[Request] --> D{Status code}', '  D -->|2xx| B[Return body]',
+    '  D -->|4xx| C[Do not retry]', '  D -->|5xx| E[Back off]', '  E --> F[Record]', '  B --> F',
+  ].join('\n'),
+  'four-way decision': (dir) => [
+    `flowchart ${dir}`, '  A[Intake] --> D{Category}', '  D -->|billing| B[Billing queue]',
+    '  D -->|bug| C[Technical queue]', '  D -->|account| E[Security queue]', '  D -->|how-to| K[Suggest article]',
+    '  B --> Z[Closed]', '  C --> Z', '  E --> Z', '  K -->|still stuck| A',
+  ].join('\n'),
   'long forward edge': (dir) => [
     `flowchart ${dir}`, '  A[Start] --> B[One] --> C[Two] --> D[Three] --> E[End]',
     '  A --> P[Wide parallel step] --> Q[Another one] --> E', '  A -->|skip| E',
@@ -235,9 +248,10 @@ export const TIGHT_MASKS = [];
 /**
  * Pairs of boxes that share a centre line with nothing between them and are nonetheless drawn with
  * a step. The property is "an aligned, unobstructed pair is one segment", and it is measured over
- * 212 pairs in the generated space, against 23 in the twelve literals it replaced. It was 188 until
+ * 222 pairs in the generated space, against 23 in the twelve literals it replaced. It was 188 until
  * the three link-form families went in; their 14 pairs are all one segment, and 202 until the three
- * long-edge families added 10 more, which were one segment before their fix as well as after.
+ * long-edge families added 10 more, which were one segment before their fix as well as after, and
+ * 212 until the two labelled-decision families added 10.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -248,7 +262,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 212;
+export const ALIGNED_PAIRS = 222;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

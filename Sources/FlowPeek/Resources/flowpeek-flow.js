@@ -9893,7 +9893,7 @@
   // harm is real: there is nothing left to trace.
   //
   // `besideOnly` withholds ON, for the drawing-wide pass at the label loop; see there.
-  function placeEdgeLabel(edge, points, ctx, preferEarly, besideOnly) {
+  function placeEdgeLabel(edge, points, ctx, preferEarly, besideOnly, column) {
     if (!(edge.labelWidth > 0) || !(edge.labelHeight > 0)) return null;
     var halfW = half4(edge.labelWidth);
     var halfH = half4(edge.labelHeight);
@@ -9933,6 +9933,8 @@
       for (var m = 0; m < 3; m += 1) {
         var onLine = (m === 2);
         if (onLine && (!onFits || besideOnly)) continue;
+        // `column`: ON a run of that axis at that one place along it, or nowhere (`alignColumns`).
+        if (column && (!onLine || seg.horizontal !== column.horizontal)) continue;
         // Above a horizontal run and to the right of a vertical one, which is where the style guide
         // puts an arrow label; the other side is the second try, not a different rule. On the line
         // there is no side.
@@ -9953,6 +9955,7 @@
           if (mid - step >= aLo) alongs.push(mid - step);
           if (mid + step <= aHi) alongs.push(mid + step);
         }
+        if (column) alongs = column.at >= aLo && column.at <= aHi ? [column.at] : [];
         for (var a = 0; a < alongs.length; a += 1) {
           var cx, cy;
           if (seg.horizontal) {
@@ -10155,7 +10158,7 @@
           var faces = !onLine && facesSibling(rect, seg, side, own, edge, ctx);
           if (faces) penalty += 1;
           if (best === null || penalty < best.penalty) {
-            best = { x: cx, y: cy, rect: rect, penalty: penalty, onLine: onLine, crowded: harm > 0, faces: faces };
+            best = { x: cx, y: cy, rect: rect, penalty: penalty, onLine: onLine, crowded: harm > 0, faces: faces, horizontal: seg.horizontal };
             if (penalty === 0) return best;
           }
         }
@@ -10984,6 +10987,115 @@
       }
       reorderPairs(besideOnly);
     }
+    // One column per field of plates. `9071d73` let a gap's plates share a place along it, so the
+    // gap is shallower, but nothing put them there: each plate takes the middle of its own run,
+    // nearest first, and the runs of one gap start and stop at different places, so a gap holding
+    // four plates showed them at four places. The third held-out set's reviewer named it in b04,
+    // b16 and b20 -- a staggered field a reader hunts through instead of reading as a list.
+    //
+    // So once every plate is placed, the plates on runs of one axis whose extents along that axis
+    // overlap are one field, and the field is offered each place along it in turn: every plate that
+    // can stand there ON its own line at no more than its seat costs takes it, and the rest are
+    // seated again around them, kept only where that costs each nothing and leaves it on the same
+    // kind of seat -- ON or BESIDE, on a run of the same axis. The place most plates can share
+    // wins, then the cheapest, then the one nearest the field's middle. No plate pays more, so no
+    // harm the score knows of is bought, and no route or box moves, so no drawing changes size.
+    //
+    // Measured over the review sources, both held-out sets and the sweep, by fields of two or more
+    // plates that stand at more than one place or have a plate off its line: 63 of 85 -> 38 of 89
+    // in the three sets and 55 of 71 -> 30 of 73 in the sweep; plates off their lines 93 and 66,
+    // before and after.
+    //
+    // Rejected: spreading the lines so every plate has room ON its own line in the column, which is
+    // what b04 needs -- its three links between 小程序前端 and 开发者服务器 run 24px apart end to
+    // end, one plate's height, so the middle one has no seat beside the others. Holding faces at
+    // 48px, a plate and rule 2's gap each side rounded to rule 4's 12, on every labelled face of
+    // four or more ends made b04 1696 -> 1416px wide and 296 -> 368 tall (Pele 1201 x 264), and
+    // `labelled returns to one face`'s Idle nearly doubled, every line jogged into its target and
+    // four aligned pairs stepped. Only on a face sending three or more labelled links to one
+    // neighbour: b04 1544 x 324, and a request/response exchange of b04's shape (stack.spec.js)
+    // warned label-crowded LR. Two or more: b04 1416 x 384, b11 484 -> 620 tall, and four tests
+    // failed -- square corners, the tangent bump and two of label ownership. Each gives the width
+    // back as height, so the layout keeps its pitch.
+    // Also rejected: re-seating the plates that miss the column with no condition. In b02 it put
+    // LISTEN -> CLOSED's "close" ON the short vertical its line turns on, off the run it had sat
+    // on, which the score allowed and the picture did not.
+    function alignColumns() {
+      var placed = [];
+      for (var k = 0; k < routed.length; k += 1) if (routed[k] && routed[k].label) placed.push(k);
+      // Fields: plates on runs of one axis whose extents along it overlap, joined transitively.
+      var fieldOf = placed.map(function (_, f) { return f; });
+      function root(f) { while (fieldOf[f] !== f) f = fieldOf[f]; return f; }
+      function extent(l) { return l.horizontal ? [l.rect.x, l.rect.x + l.rect.width] : [l.rect.y, l.rect.y + l.rect.height]; }
+      for (var a = 0; a < placed.length; a += 1) {
+        for (var b = a + 1; b < placed.length; b += 1) {
+          var la = routed[placed[a]].label, lb = routed[placed[b]].label;
+          if (la.horizontal !== lb.horizontal) continue;
+          var ea = extent(la), eb = extent(lb);
+          if (ea[0] < eb[1] && eb[0] < ea[1]) fieldOf[root(a)] = root(b);
+        }
+      }
+      var fields = new Map();
+      for (a = 0; a < placed.length; a += 1) {
+        var r0 = root(a);
+        if (!fields.has(r0)) fields.set(r0, []);
+        fields.get(r0).push(placed[a]);
+      }
+      fields.forEach(function (members) {
+        if (members.length < 2) return;
+        var labels = members.map(function (m) { return routed[m].label; });
+        var centre = function (l) { return l.horizontal ? l.x : l.y; };
+        var lo = Infinity, hi = -Infinity, aligned = true;
+        for (var f = 0; f < labels.length; f += 1) {
+          var ef = extent(labels[f]);
+          lo = Math.min(lo, ef[0]);
+          hi = Math.max(hi, ef[1]);
+          if (!labels[f].onLine || centre(labels[f]) !== centre(labels[0])) aligned = false;
+        }
+        if (aligned) return;
+        var others = titleRects.slice();
+        for (var o = 0; o < routed.length; o += 1) {
+          if (routed[o] && routed[o].label && members.indexOf(o) < 0) others.push(routed[o].label.rect);
+        }
+        var mid = snap4((lo + hi) / 2);
+        var offers = [];
+        for (var at = snap4(lo); at <= hi; at += GRID) {
+          if (at < lo) continue;
+          ctx.labelRects = others.slice();
+          var seats = [], total = 0, count = 0;
+          for (f = 0; f < members.length; f += 1) {
+            var r = routed[members[f]];
+            var seat = placeEdgeLabel(r.edge, r.points, ctx, r.transit, false, { horizontal: labels[f].horizontal, at: at });
+            if (!seat || seat.penalty > labels[f].penalty) { seats.push(null); continue; }
+            seats.push(seat); total += seat.penalty; count += 1; ctx.labelRects.push(seat.rect);
+          }
+          if (count >= 2) offers.push({ at: at, total: total, seats: seats, count: count });
+        }
+        // Most plates in the column, then the cheapest, then the nearest the middle of the field.
+        offers.sort(function (x, y) { return (y.count - x.count) || (x.total - y.total) || (Math.abs(x.at - mid) - Math.abs(y.at - mid)); });
+        var best = null;
+        for (var c = 0; c < offers.length && !best; c += 1) {
+          // The plates that cannot stand in the column are seated again around it, and the column
+          // is kept only if that costs none of them anything and moves none of them on or off its
+          // line or onto a run of the other axis. Asked of the best offers only, in order: it is a
+          // full search per plate, and asked of every place along the field it tripled the time.
+          var offer = offers[c], ok = true;
+          ctx.labelRects = others.slice();
+          for (f = 0; f < members.length; f += 1) if (offer.seats[f]) ctx.labelRects.push(offer.seats[f].rect);
+          var final = offer.seats.slice();
+          for (f = 0; f < members.length && ok; f += 1) {
+            if (final[f]) continue;
+            var rl = routed[members[f]], was = labels[f];
+            var again = placeEdgeLabel(rl.edge, rl.points, ctx, rl.transit, false);
+            if (!again || again.penalty > was.penalty || again.onLine !== was.onLine || again.horizontal !== was.horizontal) ok = false;
+            else { final[f] = again; ctx.labelRects.push(again.rect); }
+          }
+          if (ok) best = { seats: final };
+        }
+        if (best) for (f = 0; f < members.length; f += 1) routed[members[f]].label = best.seats[f];
+      });
+      ctx.labelRects = platesBut(-1, -1);
+    }
     function countOn() {
       var on = 0, all = 0;
       for (i = 0; i < routed.length; i += 1) {
@@ -10999,6 +11111,7 @@
       placeLabels(true);
       if (countOn().on > 0) placeLabels(false);
     }
+    alignColumns();
     for (i = 0; i < routed.length; i += 1) {
       if (routed[i] && routed[i].label && routed[i].label.crowded) noteWarning(warnings, "label-crowded");
     }

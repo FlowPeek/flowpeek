@@ -244,6 +244,20 @@ const FAMILIES = {
   // marked, no knot, no crossing between routes sharing a node and no crossing without a bump in
   // any direction.
   // At a09c1af Robot arm -> Packer turns down onto the Spot welder's report line RL, with no bump.
+  // One face fanning three or more labelled runs into one gap, one of them coming back labelled.
+  // Families above put two or three plates in a gap, and most sit where the placer's search found
+  // them, each at the middle of its own run -- so no drawing asked that a gap's plates read as one
+  // list; the third held-out set's b04 and b16 put six and four in a gap at staggered places. Found
+  // among 300 random labelled fans of three or four arms: 85 of them drew a gap of three or more
+  // plates at more than one place along it, LR or RL, at 4dc89d0, and with a gap's plates offered
+  // one place together drew every such gap as one column ON its lines, LR and RL on both rulers,
+  // with no warning. This is one of the 85 with its entry link dropped and words for names, and
+  // the same holds for it.
+  // At 4dc89d0 LR draws its four plates at staggered places, and RL its three.
+  'labelled fan with a return': (dir) => [
+    `flowchart ${dir}`, '  desk[Review desk] -->|archive| arch[Archive]', '  desk -->|try again tomorrow| retry[Retry queue]',
+    '  desk -->|send back| author[Author]', '  desk -->|hold for review| legal[Legal hold]', '  retry -->|approve| desk',
+  ].join('\n'),
   'turn onto a lane': (dir) => [
     `flowchart ${dir}`, '  gw[Gateway]', '  scan[Barcode reader] --> sense[Thickness gauge] --> arm[Robot arm]',
     '  arm -->|report| gw', '  arm --> pack[Packer]', '  probe[Spot welder] -->|report| gw', '  probe --> pack',

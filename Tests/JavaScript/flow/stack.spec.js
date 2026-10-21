@@ -14,7 +14,8 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { measureFace } from './measure.js';
+import { SWEEP } from './corpus.js';
+import { measureFace, measureText } from './measure.js';
 
 const require = createRequire(import.meta.url);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -68,5 +69,69 @@ describe('the plates of one face in one gap', () => {
       const endToEnd = widths.reduce((a, b) => a + b, 0) + (widths.length - 1) * 16;
       expect(gap).toBeLessThan(endToEnd);
     });
+  }
+});
+
+// And the plates of one gap stand in ONE column, each on its own line.
+//
+// Columns let the gap be shallower; they did not put the plates in a list. Each plate went to the
+// middle of its own run, nearest first, and the runs of one gap start and stop at different places,
+// so three or four plates in a gap stood at three or four places along it and a reader had to hunt
+// for each one: the third held-out set's b04 and b16. Now the plates whose extents along the gap
+// overlap are offered one place together, ON their own lines, and take it when none of them pays
+// more than it did. `labelled fan with a return` LR and RL draw a staggered field at 4dc89d0.
+const LABEL = /data-id="([^"]*)" transform="translate\((-?[\d.]+),(-?[\d.]+)\)"><rect class="background" x="(-?[\d.]+)" y="(-?[\d.]+)" width="([\d.]+)" height="([\d.]+)"/g;
+const LINK = /<path class="[^"]*flowchart-link[^"]*" data-id="([^"]*)" d="([^"]*)"/g;
+
+/** The plates of a horizontal drawing, grouped where their extents along x overlap. */
+function fields(svg) {
+  const runs = new Map();
+  for (const [, id, d] of svg.matchAll(LINK)) {
+    // Every command ends at its last coordinate pair; an L is a straight stretch from the last end.
+    const out = [];
+    let at = null;
+    for (const [, c, args] of d.matchAll(/([MLQA])([^MLQA]*)/g)) {
+      const n = args.match(/-?[\d.]+/g).map(Number);
+      const end = { x: n[n.length - 2], y: n[n.length - 1] };
+      if (c === 'L' && at) out.push([at, end]);
+      at = end;
+    }
+    runs.set(id, out);
+  }
+  const plates = [...svg.matchAll(LABEL)].map((m) => {
+    const p = { id: m[1], cx: +m[2], cy: +m[3], x: +m[2] + +m[4], w: +m[6] };
+    // ON: a drawn horizontal stretch of its own line runs through the plate's middle, end to end.
+    p.on = (runs.get(p.id) || []).some(([a, b]) => a.y === b.y && a.y === p.cy
+      && Math.min(a.x, b.x) <= p.x && Math.max(a.x, b.x) >= p.x + p.w);
+    return p;
+  });
+  const groups = [];
+  for (const p of plates) {
+    const hit = groups.filter((g) => g.some((q) => p.x < q.x + q.w && q.x < p.x + p.w));
+    const merged = [p, ...hit.flat()];
+    for (const g of hit) groups.splice(groups.indexOf(g), 1);
+    groups.push(merged);
+  }
+  return groups.filter((g) => g.length >= 2);
+}
+
+describe('the plates of one gap', () => {
+  const fan = SWEEP.filter(({ name }) => /^labelled fan with a return (LR|RL)$/.test(name));
+  it('is checked on a fan of three or more labelled runs, both horizontal directions', () => {
+    expect(fan.length).toBe(2);
+  });
+  for (const { name, source } of fan) {
+    for (const [ruler, measure] of [['face', measureFace], ['budget', measureText]]) {
+      it(`stand in one column, each ON its own line: ${name}, ${ruler}`, () => {
+        const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText: measure });
+        expect(out.warnings).toEqual([]);
+        const big = fields(out.svg).filter((g) => g.length >= 3);
+        expect(big.length).toBeGreaterThan(0);
+        for (const g of big) {
+          expect(new Set(g.map((p) => p.cx)).size, g.map((p) => `${p.id}@${p.cx}`).join(' ')).toBe(1);
+          expect(g.filter((p) => !p.on).map((p) => p.id)).toEqual([]);
+        }
+      });
+    }
   }
 });

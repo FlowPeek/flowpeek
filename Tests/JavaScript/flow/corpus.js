@@ -206,21 +206,26 @@ export const STEPPED_PAIRS = [];
 
 export const ALIGNED_PAIRS = 188;
 
-// --- what seven visual reviews left ----------------------------------------------------------
+// --- what eight visual reviews left ----------------------------------------------------------
 //
 // Separately from the records above, which are properties of the generated space, this renderer
 // was compared against Pele -- the other engine in this app, drawing the same sources under the
-// `.pele` theme -- by seven reader-facing reviews of the same eighteen drawings. The per-source
+// `.pele` theme -- by eight reader-facing reviews of the same eighteen drawings. The per-source
 // verdict, "which would a reader rather have", moved PELE 9 : OURS 3 : TIE 4, then 5:5:6, 3:5:8,
-// 2:5:9, 1:6:9 and finally OURS 7 : PELE 1 : TIE 10 across all eighteen, counting the two a reader
-// had actually sent in as broken.
+// 2:5:9, 1:6:9, 1:7:10 and finally PELE 0 : OURS 7 : TIE 11 across all eighteen, counting the two
+// a reader had actually sent in as broken. Pele wins none of them.
 //
 // The one drawing the seventh review still gave to Pele was the dense DAG, for its 15 hops rather
-// than for a defect; it has since stopped marking its crossings (`crossingsAreCommon` in
-// flowpeek-flow.js), which also took away the one face-pressed hop recorded here, and no review has
-// been run since. The items below are recorded rather than open: they are written beside the corpus
-// so the next person finds them from the tests rather than from `git log`, and none is a reason to
-// change the renderer again without a reader asking for it.
+// than for a defect. It has since stopped marking its crossings (`crossingsAreCommon` in
+// flowpeek-flow.js), which also took away the one face-pressed hop once recorded here, and the
+// eighth review scored that drawing a tie and every other one ours or a tie. That review named one
+// concrete defect, an unmarked crossing beside a marked one, which `8fa2b2b` closed by charging a
+// label plate that blocks the only room a crossing's bump could have.
+//
+// The items below are recorded rather than open: they are written beside the corpus so the next
+// person finds them from the tests rather than from `git log`, and none is a reason to change the
+// renderer again without a reader asking. A ninth review of THESE eighteen has nothing left to
+// decide; new sources from real readers are the better next step.
 //
 // ONE PLATE ON ITS OWN ELBOW. The reported drawing that mixed ON and BESIDE is now all BESIDE: the
 // layout keeps a margin between two labelled columns side by side (`facingColumns`). One plate in

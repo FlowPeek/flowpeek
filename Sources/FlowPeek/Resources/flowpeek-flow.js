@@ -4853,6 +4853,42 @@
         if (extents.length > 1 && extents[1] > labelRoomBack[this.i]) labelRoomBack[this.i] = extents[1];
       }, { i: i });
     }
+    // Room for the labels on connectors that LEAVE the zone, which the claims above cannot see: those
+    // runs are drawn by an outer level, so a zone's members were spaced as if they carried none. On
+    // cand.mmd that is C2 and C3, each joined to its Nego by a labelled pair one 12px pitch apart --
+    // a pair whose left label has to stand left of both lanes, because ON covers the sibling and
+    // right of the left lane IS the sibling. The two columns were 256px apart centre to centre, and
+    // in the app, at WebKit's widths, "negotiate(adjustRate, original)" went ON its line and erased
+    // the dotted run beside it while "derivedQuoteId (representative)" lay across two strokes of the
+    // O -> N1 bundle: 2 plates on foreign strokes, nearest 0px.
+    //
+    // A member is owed the widest such label plus one MIN_PITCH per leaving label: the sibling lanes
+    // that stand between its column and the plate, and one more for LABEL_MARGIN_PX, which is the
+    // same 3 units. Without that last one the plate fits but 8px from its own line and 8px from the
+    // next, the placer prices that tie above ON, and the drawing kept 1 plate on a stroke.
+    //
+    // Only where a member has two or more: one leaving label has a free side, and claiming for it
+    // was measured -- on `X -- "crosses the wall" --> I1` it moved I1 off X's line and put a
+    // crossing under "returns",
+    // whose middle then stood nearer X -> I2 than its own run. And only BETWEEN neighbours, not at
+    // the level's outer edge: applied to the edge as well it widened single-column zones too, and
+    // render.spec.js came back with 4 failures, one a new crossing on 12 crowded subgraphs.
+    //
+    // Measured: in the app cand.mmd goes from 608 to 696px wide (Pele draws it at 894), plates on
+    // foreign strokes 2 to 0, nearest foreign stroke 0 to 20px, and C3's column now stands 24px off
+    // N3's, which costs one doubled step: bends 8 to 12. differential.mjs, whose stand-in measurer
+    // wraps those labels and so never saw the collision, moves only cand's area, 561,408 to 567,936
+    // px². The 16 review sources are byte-identical, under the stand-in and under CoreText widths.
+    var leavingRoom = [];
+    for (i = 0; i < m; i += 1) {
+      leavingRoom.push(0);
+      if (!level.leaving || items[i].dummy) continue;
+      var leaving = level.leaving.get(items[i].ref.id);
+      if (!leaving || leaving.length < 2) continue;
+      for (j = 0; j < leaving.length; j += 1) {
+        leavingRoom[i] = Math.max(leavingRoom[i], (vertical ? leaving[j].w : leaving[j].h) + MIN_PITCH * leaving.length);
+      }
+    }
     // Which way the placer looks first, in this level's own O frame. `placeEdgeLabel` offers the
     // right of a vertical run and the top of a horizontal one before the other side, and `localOf`
     // maps O to +x in TB and BT and to +y in LR and RL with no flip anywhere -- so a vertical level
@@ -4867,7 +4903,7 @@
     // off the earlier -- need a third gap between the two masks.
     var centreSep = function (a, b) {
       var plain = (items[a].oSize + items[b].oSize) / 2 + env.spaceU;
-      var forward = labelAfter ? labelRoom[a] : labelRoomBack[a];
+      var forward = Math.max(labelAfter ? labelRoom[a] : labelRoomBack[a], leavingRoom[a]);
       var backward = labelAfter ? labelRoomBack[b] : labelRoom[b];
       var need = 0;
       if (forward > 0) need += forward + LABEL_GAP;
@@ -6704,7 +6740,38 @@
   // diamond's two exits, masking both. Sans at 208 puts 2 and 1, with that label clear of both exits
   // by 24px. 192 measured the same as 208 on all three; 208 is taken because the wider of two equal
   // budgets is the one that keeps more labels on one line. 160 wraps 8 again.
+  //
+  // Not widened to clear the 6 labels differential.mjs reports at two lines on cand and nego. Those
+  // wraps belong to its stand-in measurer, which charges 0.6em a character and so puts the 31
+  // characters of "negotiate(adjustRate, original)" at 223.2px; WebKit sets it in a 176px plate, on
+  // one line, at this budget. Re-swept against today's renderer under the stand-in, 224 and every
+  // setting past it does unwrap all 6 -- and puts 2 plates on foreign strokes in cand, nearest 0px,
+  // which is the drawing the app was already showing. That was room, not budget; see `leavingRoom`.
   var EDGE_WRAP_PX = 208;
+
+  // The labels on a zone member's connectors that leave the zone, keyed by the member: the child of
+  // the zone the inside end descends from. Those connectors are drawn by a level further out, so the
+  // room pass inside the zone never sees them, and the zone is sized as if its members carried no
+  // labels at all. See `leavingRoom` in `layoutLevel` for what is done with them.
+  function leavingLabels(model, zoneId) {
+    var byChild = new Map();
+    for (var i = 0; i < model.edges.length; i += 1) {
+      var e = model.edges[i];
+      if (e.selfLoop || e.boundary || !e.labelBox) continue;
+      var ends = [e.fromChild, e.toChild];
+      var inside = [];
+      for (var k = 0; k < 2; k += 1) {
+        var chain = ancestry(ends[k].id, model.parentOf);
+        var at = chain.indexOf(zoneId);
+        inside.push(at > 0 ? chain[at - 1] : null);
+      }
+      if ((inside[0] === null) === (inside[1] === null)) continue;
+      var member = inside[0] !== null ? inside[0] : inside[1];
+      if (!byChild.has(member)) byChild.set(member, []);
+      byChild.get(member).push(e.labelBox);
+    }
+    return byChild;
+  }
 
   // Where the far end of each edge that enters a zone stands, per zone, from a drawing whose boxes
   // are all placed. Only an edge from the side the zone's own ranks are read from is counted -- the
@@ -6885,6 +6952,7 @@
       var cluster = model.clusters[i];
       var inner = model.levels.get(cluster.id);
       inner.outside = (outside && outside.get(cluster.id)) || null;
+      inner.leaving = leavingLabels(model, cluster.id);
       layoutLevel(inner, env);
       var title = String(cluster.title || "");
       var header = 0;

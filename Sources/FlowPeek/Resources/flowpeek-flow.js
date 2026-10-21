@@ -5887,14 +5887,29 @@
       // a desire of 4, and the two ports that wanted to be 13 apart were pulled to 9 and 12.
       // A self-loop puts both of its ends in one group, which is also what stops them landing on the
       // same point.
-      f.group.sort(function (p, q) {
+      //
+      // Ties go to where each end is headed next, which for an edge handed a corridor is that
+      // corridor rather than its far box: two ends leaning to the same end of a run tie, and once
+      // they did, on A's bottom face in the dense review source the edge to M -- whose corridor runs
+      // outside everything on the right while M itself stands left of D -- was slotted inside
+      // A --> D by M's centre and crossed it on the way out.
+      var byDesire = function (p, q) {
         if (p.desire !== q.desire) return p.desire - q.desire;
-        var pk = f.alongX ? centreX(p.other) : centreY(p.other);
-        var qk = f.alongX ? centreX(q.other) : centreY(q.other);
+        var pk = headingOf(f, p, model);
+        var qk = headingOf(f, q, model);
         if (pk !== qk) return pk - qk;
         if (p.edge.index !== q.edge.index) return p.edge.index - q.edge.index;
         return p.end - q.end;
-      });
+      };
+      f.group.sort(byDesire);
+      if (isInverted(f, model) || unalignsAny(f)) {
+        // An end whose desire something else has since set -- `mirrorForks` -- keeps that one.
+        for (var g3 = 0; g3 < f.group.length; g3 += 1) {
+          var leaning = f.group[g3];
+          if (leaning.lean && leaning.desire === leaning.lean.from) leaning.desire = leaning.lean.desire;
+        }
+        f.group.sort(byDesire);
+      }
       for (var g2 = 0; g2 < f.group.length; g2 += 1) f.desires.push(f.group[g2].desire);
       recordSlots(f);
       f.offsets = placeFace(f);
@@ -5902,6 +5917,15 @@
     }
 
     for (i = 0; i < model.edges.length; i += 1) alignUnitJog(model.edges[i], model);
+  }
+
+  // Where an end goes after it leaves its face, along that face: the corridor it was handed, or the
+  // far box when it reaches that directly.
+  function headingOf(face, att, model) {
+    var via = att.edge.via || [];
+    var level = model.levels.get(att.edge.level);
+    if (via.length > 0 && level) return viaAlong(face, level, att.end === 0 ? via[0] : via[via.length - 1]);
+    return face.alongX ? centreX(att.other) : centreY(att.other);
   }
 
   // Which slot of its face each end of each edge holds, so the two passes after placement --
@@ -5963,6 +5987,8 @@
       // because the same corridor is also the last station before the far port.
       s.desire = clampToRun(s.face, viaAlong(s.face, level, via[0]) - s.face.base);
       e.desire = clampToRun(e.face, viaAlong(e.face, level, via[via.length - 1]) - e.face.base);
+      s.aligned = true;
+      e.aligned = true;
       return;
     }
     // One end the shape has already placed. The free end aims at THAT, which is the only reading
@@ -5973,6 +5999,7 @@
       var free = s.face.fixed ? e : s;
       if (fixedPoint) {
         free.desire = clampToRun(free.face, (free.face.alongX ? fixedPoint.x : fixedPoint.y) - free.face.base);
+        free.aligned = true;
       }
       return;
     }
@@ -5996,8 +6023,72 @@
           Math.round((faceCentre(s.face) + s.face.base + faceCentre(e.face) + e.face.base) / 2)));
         s.desire = meet - s.face.base;
         e.desire = meet - e.face.base;
+        s.aligned = true;
+        e.aligned = true;
+      } else {
+        s.lean = leanOf(s, e);
+        e.lean = leanOf(e, s);
       }
     }
+  }
+
+  // An end that cannot line up with its far end still knows which way the far end lies, and on a
+  // face it shares that is the one thing its slot must agree with. Left at the face's middle, it
+  // asks for the same offset as every other end that cannot go straight, while an end that CAN go
+  // straight asks for its own meeting point -- and the face is sorted by desire, so the straight
+  // end is slotted by where it is straight and the rest around the middle, and the two orders can
+  // disagree. That was the whole of three reader-reported crossings: Notifications took the
+  // Central Event Bus's leftmost port and crossed the four arms from further left, License Check
+  // took Release Pipeline's rightmost and crossed five, and App Server 1's edge up to NAT Gateway
+  // left to the LEFT of the edge arriving from Load Balancer with NAT Gateway on the right.
+  //
+  // So such an end may instead ask for the end of its landing run nearest the far box: the order it
+  // sorts into is then the order the far ends stand in, and `placeFace` still owns the spacing.
+  // Sorting the face by the far ends and leaving the desires alone was rejected: it gives the right
+  // order, but `placeFace` then pulls the straight arms off their meeting points towards the middle
+  // the others still ask for -- on the fan-in both Notifications and Analytics bend, where with this
+  // only Notifications has to, because four arms must sit to its left on a run too short to hold
+  // them and keep it straight.
+  //
+  // Only recorded here, and taken only on a face where the middle does harm: one whose order it
+  // inverts (`isInverted`), or one where it would push an aligned neighbour off its line
+  // (`unalignsAny`).
+  function leanOf(att, far) {
+    if (att.face.fixed) return undefined;
+    var at = att.face.alongX ? centreX(far.box) : centreY(far.box);
+    return { desire: clampToRun(att.face, at - att.face.base), from: att.desire };
+  }
+
+  // Whether placing the face as sorted would take an end that lines up with its far end off the
+  // offset it lines up at. The middle a non-aligned end asks for is where an aligned neighbour is
+  // likeliest to want to be: in the harness's `rank skip LR`, B --> C asked for B's middle and
+  // pushed B --> D off the meeting point that would have drawn it as one straight line.
+  function unalignsAny(face) {
+    var desires = face.group.map(function (att) { return att.desire; });
+    var probe = { run: face.run, span: face.span, group: face.group, desires: desires };
+    var offsets = placeFace(probe);
+    for (var g = 0; g < face.group.length; g += 1) {
+      if (face.group[g].aligned && offsets[g] !== face.group[g].desire) return true;
+    }
+    return false;
+  }
+
+  // Whether sorting a face by desire puts an end ahead of one headed further along it. Leaning
+  // every end that could lean was tried first and rejected twice. It spends offsets no ordering
+  // needs: on the ellipse in ports.spec.js's matrix, three arms whose desires already sorted in
+  // their far ends' order were pushed to the two ends of the run, where the rounded inset left 4 of
+  // 360 ports outside the drawn outline. And on the reader-reported `cand` drawing, Nego-H1's three
+  // edges to and from Original leaned at BOTH ends, the three Zs between them shrank into one narrow
+  // corridor, and two label plates landed on foreign strokes where there had been none -- a face
+  // whose ends all lead to one box cannot be out of order, and this test leaves it alone.
+  function isInverted(face, model) {
+    var seen = -Infinity;
+    for (var g = 0; g < face.group.length; g += 1) {
+      var at = headingOf(face, face.group[g], model);
+      if (at < seen) return true;
+      seen = Math.max(seen, at);
+    }
+    return false;
   }
 
   function viaAlong(face, level, v) {

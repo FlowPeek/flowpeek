@@ -425,6 +425,10 @@ describe('[Render] bridges at crossings', () => {
     'flowchart TD\n  A --> B --> C --> D --> E\n  A --> E\n  A --> D\n  B --> E',
     'flowchart TD\n  H --> A\n  H --> B\n  H --> C\n  H --> D\n  H --> E\n  A --> Z\n  B --> Z\n  C --> Z\n  D --> Z\n  E --> Z',
     'flowchart LR\n  A1 --> B1\n  A2 --> B2\n  A1 --> B2\n  A2 --> B1\n  B1 --> C\n  B2 --> C',
+    // The three-by-three braid, K3,3, which no layout draws without crossings. The four above were
+    // chosen when their crossings were the layout's to make, and once ports took their far ends'
+    // order the fan into Z stopped crossing at all; this one cannot stop.
+    'flowchart TD\n  A1 --> B1 & B2 & B3\n  A2 --> B1 & B2 & B3\n  A3 --> B1 & B2 & B3',
   ];
   const ALL = [...SWEEP_SOURCES, ...CROSSING];
 
@@ -520,43 +524,34 @@ describe('[Render] bridges at crossings', () => {
     // write-back), or the one with lighter stroke weight (dashed, muted)". One crossing, held
     // fixed, with the weight of one of its two edges changed underneath it.
     //
-    // A four-way fan-in, where `A --> Z`'s cross-line and `B --> Z`'s stub cross in the gap above Z.
-    // What makes the choice between them a choice at all is that BOTH have the room a bump needs --
-    // 8px of straight either side of the crossing, which is a 16px bump's own width. Measured over
-    // the 300-source corpus: 4 crossings in the whole of it have that on both strokes, and this fan
-    // is two of them. Most crossings can only be bridged one way round, and a fixture like that
-    // asserts nothing about importance however its edges are weighted.
+    // The three-by-three braid, K3,3, where `A1 --> B2`'s cross-line and `A3 --> B1`'s stub cross
+    // in the gap above the Bs. What makes the choice between them a choice at all is that BOTH have
+    // the room a bump needs -- 8px of straight either side of the crossing, which is a 16px bump's
+    // own width -- and most crossings can only be bridged one way round, which asserts nothing
+    // about importance however their edges are weighted. This was a four-way fan-in until the ports
+    // of a face took the order their far ends stand in: that fan stopped crossing, which is the fix,
+    // and a braid is the shape that has to cross whatever its ports do.
     //
-    // The crossing is one point, so which edge carries the bump is the whole assertion: the bridged
-    // path is the one that has an arc in it at all. Either way the bump is centred on that point --
-    // `A --> Z` is interrupted along its horizontal there and `B --> Z` along its vertical.
-    const where = (source, index) => bridges(edgePaths(drawn(source).svg)[index].d).map((h) => `${h.at.x},${h.at.y}`);
-    const body = (first, second) => [
-      'flowchart TD', `  A ${first} Z`, `  B ${second} Z`, '  C --> Z', '  D --> Z',
-    ].join('\n');
-    const AT = '204,100';
+    // The crossing is one point, so which edge carries the bump there is the whole assertion. The
+    // braid crosses elsewhere too, and those bumps are not what is under test.
+    const E = [['A1', 'B1'], ['A1', 'B2'], ['A1', 'B3'], ['A2', 'B1'], ['A2', 'B2'], ['A2', 'B3'],
+      ['A3', 'B1'], ['A3', 'B2'], ['A3', 'B3']];
+    const FIRST = 1;
+    const SECOND = 6;
+    const body = (first, second) => ['flowchart TD', ...E.map(([a, b], k) =>
+      `  ${a} ${k === FIRST ? first : k === SECOND ? second : '-->'} ${b}`)].join('\n');
+    const AT = '144,136';
+    const bridgedAt = (source, index) => bridges(edgePaths(drawn(source).svg)[index].d)
+      .some((h) => `${h.at.x},${h.at.y}` === AT);
+    const which = (source) => [bridgedAt(source, FIRST), bridgedAt(source, SECOND)];
 
     // Nothing separates two solid edges, so the tie goes to the one declared later and the first
     // one written stays whole. A tie-break, not a judgement; the four below are the judgement.
-    const solid = body('-->', '-->');
-    expect(where(solid, 0)).toEqual([]);
-    expect(where(solid, 1)).toEqual([AT]);
-
-    const dashedFirst = body('-.->', '-->');
-    expect(where(dashedFirst, 0)).toEqual([AT]);
-    expect(where(dashedFirst, 1)).toEqual([]);
-
-    const dashedSecond = body('-->', '-.->');
-    expect(where(dashedSecond, 0)).toEqual([]);
-    expect(where(dashedSecond, 1)).toEqual([AT]);
-
-    const thickFirst = body('==>', '-->');
-    expect(where(thickFirst, 0)).toEqual([]);
-    expect(where(thickFirst, 1)).toEqual([AT]);
-
-    const thickSecond = body('-->', '==>');
-    expect(where(thickSecond, 0)).toEqual([AT]);
-    expect(where(thickSecond, 1)).toEqual([]);
+    expect(which(body('-->', '-->'))).toEqual([false, true]);
+    expect(which(body('-.->', '-->'))).toEqual([true, false]);
+    expect(which(body('-->', '-.->'))).toEqual([false, true]);
+    expect(which(body('==>', '-->'))).toEqual([false, true]);
+    expect(which(body('-->', '==>'))).toEqual([true, false]);
   });
 });
 
@@ -577,6 +572,47 @@ describe('[Render] fanning a face', () => {
         }
       }
       expect(pairs, `${dir} crossing edge-pairs`).toBe(0);
+    }
+  });
+
+  it('gives the ports of one face the order their far ends stand in', () => {
+    // Three of the reader-reviewed sources. In each, one or two arms of a crowded face could reach
+    // their far end straight and the rest could not, and the straight ones were slotted by where
+    // they could go straight while the rest all asked for the face's middle. The two orders
+    // disagreed: Notifications took the hub's leftmost port and crossed the four arms from further
+    // left (05), License Check took Release Pipeline's rightmost and crossed five (06), and the
+    // edge up to NAT Gateway left App Server 1 to the left of the edge arriving from Load Balancer,
+    // with NAT Gateway on the right (08). Two edges that share a node and cross are counted; a
+    // crossing between edges with no node in common is a placement question, not this one.
+    const sources = {
+      'fan-in BT': ['flowchart BT', '    hub[(Central Event Bus)]',
+        ...['Checkout', 'Inventory', 'Shipping', 'Payments', 'Notifications', 'Analytics',
+          'Search Indexer', 'Recommendations', 'Fraud Detection', 'Audit Log']
+          .map((name, i) => `    s${i + 1}[${name}] --> hub`)].join('\n'),
+      'fan-out TD': ['flowchart TD',
+        ...[['lint', 'Lint'], ['unit', 'Unit Tests'], ['integ', 'Integration Tests'], ['e2e', 'E2E Tests'],
+          ['sec', 'Security Scan'], ['lic', 'License Check'], ['perf', 'Perf Bench'], ['docs', 'Docs Build'],
+          ['img', 'Container Image'], ['sbom', 'SBOM'], ['sign', 'Sign Artifacts']]
+          .map(([id, name]) => `    root[Release Pipeline] --> ${id}[${name}]`)].join('\n'),
+      nested: ['flowchart TD', '    subgraph Cloud[AWS Account]', '        subgraph VPC[Production VPC]',
+        '            subgraph Public[Public Subnet]', '                alb[Load Balancer]', '                nat[NAT Gateway]',
+        '            end', '            subgraph Private[Private Subnet]', '                app1[App Server 1]',
+        '                app2[App Server 2]', '                subgraph DB[Database Tier]', '                    primary[(Primary)]',
+        '                    replica[(Replica)]', '                end', '            end', '        end', '        s3[(S3 Bucket)]',
+        '    end', '    user[User] --> alb', '    alb --> app1', '    alb --> app2', '    app1 --> primary',
+        '    app2 --> primary', '    primary --> replica', '    app1 --> nat', '    app2 --> s3'].join('\n'),
+    };
+    const ends = (id) => /^L_(.+)_(.+)_\d+$/.exec(id).slice(1, 3);
+    for (const [name, source] of Object.entries(sources)) {
+      const paths = edgePaths(drawn(source).svg);
+      const crossed = [];
+      for (let i = 0; i < paths.length; i += 1) {
+        for (let j = i + 1; j < paths.length; j += 1) {
+          if (!ends(paths[i].id).some((n) => ends(paths[j].id).includes(n))) continue;
+          if (crossings(paths[i].d, paths[j].d).length > 0) crossed.push(`${paths[i].id} x ${paths[j].id}`);
+        }
+      }
+      expect(crossed, `${name} edges sharing a node that cross`).toEqual([]);
     }
   });
 
@@ -1471,14 +1507,23 @@ describe('[Render] where an edge label lands', () => {
   });
 
   it('stacks the labels of connectors that share one corridor, on the reported drawing', () => {
-    // cand.mmd: five labelled connectors between one node and one zone, every one of them running
-    // straight down the gap between them. `assignPorts` fans the five ports across the narrower
-    // face, 28px apart against labels 128 to 168px wide, so side by side was never available --
-    // the gap is what had to grow, and the five masks come out at five different heights.
+    // cand.mmd: five labelled connectors between one node and one zone, all running down the gap
+    // between them. While `assignPorts` fanned the five ports across the narrower face 28px apart,
+    // against labels 128 to 168px wide, side by side was never available and the five masks had to
+    // come out at five different heights. Since a face's ports take the order their far ends stand
+    // in, the edges to Nego-H2 and Nego-H3 leave Original's face beside their own targets rather
+    // than in the middle of the fan, and two of the five stand far enough apart to share a height.
+    // So what is asserted is what the heights were for: no two of the five masks overlap.
     const out = drawn(CAND);
-    const rising = masks(out.svg).filter((m) => /_O_|_O_0$|_N\d_O_/.test(m.id)).map((m) => m.y);
+    const rising = masks(out.svg).filter((m) => /_O_|_O_0$|_N\d_O_/.test(m.id));
     expect(rising.length).toBeGreaterThanOrEqual(5);
-    expect(new Set(rising).size).toBe(rising.length);
+    for (let i = 0; i < rising.length; i += 1) {
+      for (let j = i + 1; j < rising.length; j += 1) {
+        const [a, b] = [rising[i], rising[j]];
+        const apart = a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y;
+        expect(`${a.id} / ${b.id} apart ${apart}`).toBe(`${a.id} / ${b.id} apart true`);
+      }
+    }
   });
 
   it('spaces two lanes of one gap far enough apart to write on both', () => {

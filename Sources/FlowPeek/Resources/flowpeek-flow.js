@@ -4466,6 +4466,55 @@
     return across + LABEL_GAP;
   }
 
+  // What one end's plate takes across the run, or 0 where the end has none at this face.
+  function plateAcross(edge, runsAlongX) {
+    var sb = edge.labelBox;
+    if (!sb || (runsAlongX && edge.chain && edge.chain.length > 2)) return 0;
+    return runsAlongX ? sb.h : sb.w;
+  }
+
+  // The seat paid gap by gap, `edges` in the order they stand on the face, or null where
+  // `seatPitch` asks nothing: a gap beside a plate is that plate's own seat, the taller of the two
+  // where both have one, and a gap between two bare ends keeps the face's. Paid face by face, the
+  // tallest plate set every gap: c17's Slack, seven one-line plates and one two-line one, stood
+  // 352px tall at 48px a gap where the one-line pairs need 32.
+  //
+  // Measured and refused, the bare gaps any narrower. At 12px c14's Draft went 208 to 168 and its
+  // "request changes" off its line: a face that short ends above In review's port, and the router
+  // swaps that end with "delete (admins only)" and hops it. A plate beside a bare end at half its
+  // extent plus LABEL_GAP took c05's 同行评审 144 to 136, and b14's PLC gateway 112 to 104 with its
+  // line to the first robot laid along two boxes' tops and six hops.
+  function seatGaps(edges, runsAlongX) {
+    var seat = seatPitch(edges, runsAlongX);
+    if (seat === 0) return null;
+    var gaps = [];
+    for (var k = 0; k + 1 < edges.length; k += 1) {
+      var wider = Math.max(plateAcross(edges[k], runsAlongX), plateAcross(edges[k + 1], runsAlongX));
+      gaps.push(wider === 0 ? seat : wider + LABEL_GAP);
+    }
+    return gaps;
+  }
+
+  // The longest run `seatGaps` can ask of these ends in any order, for `layoutLevel`, which sizes a
+  // face before anything has ordered it. A gap beside a plate is at most the taller plate's seat,
+  // and each plate stands beside at most two gaps, so the plates' seats, each counted twice, the
+  // largest first, bound the gaps beside plates; the rest are bare.
+  function seatSpan(edges, runsAlongX) {
+    var seat = seatPitch(edges, runsAlongX);
+    var N = edges.length;
+    if (seat === 0) return 0;
+    var charges = [];
+    for (var k = 0; k < N; k += 1) {
+      var h = plateAcross(edges[k], runsAlongX);
+      if (h > 0) charges.push(h + LABEL_GAP, h + LABEL_GAP);
+    }
+    charges.sort(function (a, b) { return b - a; });
+    var beside = Math.min(N - 1, charges.length);
+    var span = (N - 1 - beside) * seat;
+    for (k = 0; k < beside; k += 1) span += charges[k];
+    return span;
+  }
+
   function layoutLevel(level, env) {
     var vertical = (level.dir === "TB" || level.dir === "BT");
     var children = level.children;
@@ -4605,10 +4654,10 @@
         ];
         for (var wi = 0; wi < 2; wi += 1) {
           var bn = want[wi][0];
-          var bp = (bn >= BUSY_N && want[wi][1]) ? BUSY_PITCH : 0;
-          // And a face with two or more labelled ends grows until each has a seat (`seatPitch`):
-          // the pitch `facePitch` will ask of it is only usable if the run holds it.
-          bp = Math.max(bp, seatPitch(want[wi][3], !vertical));
+          var bp = (bn >= BUSY_N && want[wi][1]) ? BUSY_PITCH * (bn - 1) : 0;
+          // And a face with two or more labelled ends grows until each has a seat (`seatGaps`): the
+          // pitches `facePitches` will ask of it are only usable if the run holds them.
+          bp = Math.max(bp, seatSpan(want[wi][3], !vertical));
           if (bp === 0) continue;
           // Grown against the landing run rather than the box, because the run is what `placeFace`
           // spends: a stadium loses its two caps, and Closed sized as 8 x 24px of box still put its
@@ -4618,7 +4667,7 @@
             var tb = { x: 0, y: 0, w: bc.w, h: bc.h };
             var tr = landingRun(bg, tb, want[wi][2], portSpan(bg, tb, want[wi][2]));
             if (tr.hi === tr.lo) break;
-            if (tr.hi - tr.lo >= bp * (bn - 1)) break;
+            if (tr.hi - tr.lo >= bp) break;
             if (bg === "circle" || bg === "doublecircle") { bc.w += 2; bc.h = bc.w; }
             else if (vertical) bc.w += 2;
             else bc.h += 2;
@@ -7180,7 +7229,9 @@
     // rather than the shape's is what keeps a port off the corner it was allowed to sit on.
     var span = face.run;
     var N = face.group.length;
-    var pitch = facePitch(face);
+    var gaps = facePitches(face);
+    var at = [0];
+    for (var c = 0; c < gaps.length; c += 1) at.push(at[c] + gaps[c]);
     // No placement holds the pitch on a face this short, and the even spread is what the file has
     // always done here. `layout` widens a node until 3(N + 1) units fit, but it sizes for
     // max(in, out) -- so the face that overflows is the one a CYCLE loads from both sides, which is
@@ -7191,7 +7242,7 @@
     var blocks = [];
     var k;
     for (k = 0; k < N; k += 1) {
-      var p = face.desires[k] - pitch * k;
+      var p = face.desires[k] - at[k];
       blocks.push({ vals: [p], value: p, n: 1 });
       while (blocks.length > 1 && blocks[blocks.length - 2].value > blocks[blocks.length - 1].value) {
         var b = blocks.pop();
@@ -7201,11 +7252,11 @@
         a.value = middleOf(a.vals);
       }
     }
-    var top = span.hi - pitch * (N - 1);
+    var top = span.hi - at[N - 1];
     var out = [];
     for (k = 0; k < blocks.length; k += 1) {
       var v = Math.min(top, Math.max(span.lo, blocks[k].value));
-      for (var j = 0; j < blocks[k].n; j += 1) out.push(v + pitch * out.length);
+      for (var j = 0; j < blocks[k].n; j += 1) out.push(v + at[out.length]);
     }
     return out;
   }
@@ -7223,11 +7274,11 @@
       if (group[g].end === 0) {
         group[g].edge.startPoint = point;
         group[g].edge.startInset = inset;
-        group[g].edge.startPitch = facePitch(face);
+        group[g].edge.startPitch = endPitch(face, g);
       } else {
         group[g].edge.endPoint = point;
         group[g].edge.endInset = inset;
-        group[g].edge.endPitch = facePitch(face);
+        group[g].edge.endPitch = endPitch(face, g);
       }
     }
     face.group = group;
@@ -7268,6 +7319,33 @@
     // As much of the busy pitch as the run allows: a face the pass in `layoutLevel` did not grow --
     // an end arriving from another level, which that pass does not count -- keeps what fits.
     return Math.max(MIN_PITCH, Math.min(want, Math.floor((face.run.hi - face.run.lo) / (N - 1))));
+  }
+
+  // The pitch between each pair of neighbours on a face, in the order `group` stands: `seatGaps`'
+  // where the run holds them, and `facePitch`'s uniform answer everywhere else.
+  function facePitches(face) {
+    var N = face.group.length;
+    var gaps = null;
+    if (N >= 2 && face.run.hi !== face.run.lo) {
+      var edges = [];
+      for (var g = 0; g < N; g += 1) edges.push(face.group[g].edge);
+      gaps = seatGaps(edges, !face.alongX);
+      var total = 0;
+      for (g = 0; gaps && g < gaps.length; g += 1) total += gaps[g];
+      if (gaps && total > face.run.hi - face.run.lo) gaps = null;
+    }
+    if (gaps) return gaps;
+    var pitch = facePitch(face);
+    gaps = [];
+    for (var k = 0; k + 1 < N; k += 1) gaps.push(pitch);
+    return gaps;
+  }
+
+  // How close another port on the face may stand to slot `g`'s: the wider of its two gaps.
+  function endPitch(face, g) {
+    var gaps = facePitches(face);
+    if (gaps.length === 0) return facePitch(face);
+    return Math.max(g > 0 ? gaps[g - 1] : 0, g < gaps.length ? gaps[g] : 0);
   }
 
   // A route's first turn is where the stub off a port meets the next station -- the first waypoint
@@ -7353,7 +7431,7 @@
     if (want < face.run.lo || want > face.run.hi) return false;
     for (var i = 0; i < face.offsets.length; i += 1) {
       if (i === slot) continue;
-      if (Math.abs(face.offsets[i] - want) < facePitch(face)) return false;
+      if (Math.abs(face.offsets[i] - want) < Math.max(endPitch(face, i), endPitch(face, slot))) return false;
     }
     face.offsets[slot] = want;
     return true;

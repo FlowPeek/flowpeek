@@ -336,6 +336,15 @@ const HORIZONTAL_FAMILIES = {
     `flowchart ${dir}`, '  s[Listen] -->|open| a[Established]', '  a -->|close and send FIN| b[Fin wait]',
     '  a -->|receive FIN and ack| c[Close wait]', '  b --> z[Closed]', '  c --> z',
   ].join('\n'),
+  // A seated face whose plates are not all one height: four one-line labels and one two-line one
+  // leaving one face for one neighbour. Every seated face above writes its labels on one line, so
+  // nothing asked whose plate sets the seat: the third held-out set's c17 paid its two-line retry
+  // plate's 48px between all eight of Slack's ends, 352px tall against Pele's 48.
+  // At a87dab0 Hub is 208px tall LR and RL, against 144 with the two-line label written as one word.
+  'one tall plate on a seated face': (dir) => [
+    `flowchart ${dir}`, '  hub[Hub] -->|view| ev[Events]', '  hub -->|block| ev', '  hub -->|mention| ev',
+    '  hub -->|shortcut| ev', '  hub -->|retry after 1 min<br>up to 3 times| ev',
+  ].join('\n'),
 };
 
 /**
@@ -498,7 +507,8 @@ export const TIGHT_MASKS = [];
  * after, and 444 until `nesting past a third route` added 4, one segment before a nest was offered
  * a free lane as after, and 448 until `third route beside a two-way pair` added 8, one segment
  * before a third route was eased off a slid pair as after, and 456 until `keyed menu` added 8, one
- * segment before a face that only sends stopped growing as after.
+ * segment before a face that only sends stopped growing as after, and 464 until `one tall plate on a
+ * seated face` added 10, one segment before a face paid its seats gap by gap as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -509,7 +519,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 464;
+export const ALIGNED_PAIRS = 474;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

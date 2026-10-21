@@ -603,4 +603,25 @@ describe('[Ports] a busy labelled face', () => {
     expect(menus).toHaveLength(2);
     expect(grown).toEqual([]);
   });
+
+  it('pays a tall plate its seat only beside its own line', () => {
+    const extent = (source, id) => {
+      const db = new flow.FlowDB();
+      db.clear();
+      flow.parse(source, db);
+      const laid = flow.layout(db, { measureText, theme: EDITORIAL });
+      return laid.nodes.find((n) => n.id === id).height;
+    };
+    const grown = [];
+    const hubs = SWEEP.filter(({ name }) => /^one tall plate on a seated face (LR|RL)$/.test(name));
+    for (const { name, source } of hubs) {
+      // The two-line plate's 48px seat, against 32 for every one-line pair: eight more px for each
+      // of the two gaps beside it, and nothing for the other three.
+      const tall = extent(source, 'hub');
+      const flat = extent(source.replace('retry after 1 min<br>up to 3 times', 'retry'), 'hub');
+      if (tall > flat + 2 * 16) grown.push(`${name} ${tall}px against ${flat}`);
+    }
+    expect(hubs).toHaveLength(2);
+    expect(grown).toEqual([]);
+  });
 });

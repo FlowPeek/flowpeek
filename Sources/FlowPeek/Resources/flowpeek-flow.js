@@ -5328,7 +5328,30 @@
     // where the glue has to infer it from overlapping rects, so "innermost" is simply the parent.
     // Both ends have to be in a zone: an edge to a node in no subgraph has not crossed a boundary,
     // and counting it as one made every edge in a half-grouped diagram "crossing".
-    if (model.clusters.length > 0) {
+    //
+    // ...unless the reader has already spent the dash. The class is drawn `stroke: link` plus
+    // `stroke-dasharray: 6,3`, and the dash is load-bearing rather than decorative: link against
+    // muted is 1.003:1 in greyscale in the light palette (1.668:1 in dark), so hue alone carries
+    // nothing for a reader who cannot separate those two hues. But a source that writes `-.->`
+    // has ALREADY given dashes a meaning, and then one picture holds two kinds of dashed line --
+    // one the author marked optional, one this function decided crosses a boundary -- with nothing
+    // to tell them apart. Measured on `WB --> EA` beside `WA -.-> EB` across two subgraphs: the
+    // solid edge came out `fp-cross`, which the stylesheet dashes, next to the authored dotted
+    // edge, and a reader cannot recover which is which.
+    //
+    // So the renderer yields the whole category for that drawing. The alternative considered first
+    // was dropping the dash and keeping the hue, which the 1.003:1 above rules out; a second dash
+    // pattern was considered and rejected because two dash patterns are still two kinds of dashed
+    // line. Yielding is also what the loop below already does edge by edge -- a dotted edge is
+    // skipped rather than restyled -- so this is that deference applied to the whole picture
+    // instead of one edge. The cost is that a diagram mixing `-.->` with zone crossings loses a
+    // category it would otherwise have had, which is the right way round: the author's meaning
+    // outranks the renderer's.
+    var authoredDash = false;
+    for (i = 0; i < model.edges.length; i += 1) {
+      if (model.edges[i].pattern === "dotted") { authoredDash = true; break; }
+    }
+    if (model.clusters.length > 0 && !authoredDash) {
       var crossing = [];
       for (i = 0; i < model.edges.length; i += 1) {
         var e = model.edges[i];

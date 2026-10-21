@@ -972,6 +972,24 @@ describe('[Render] the classes the editorial stylesheet paints', () => {
     expect(THEME_SWIFT).toContain('.flowchart-link.fp-cross');
   });
 
+  // The category is the renderer's own invention, and the stylesheet spends a dash on it because
+  // hue cannot carry it alone -- link against muted is 1.003:1 in greyscale in the light palette.
+  // A source that writes `-.->` has already spent the dash on its own meaning, and a picture
+  // holding both kinds of dashed line gives a reader no way to tell "the author marked this
+  // optional" from "the renderer decided this crosses a boundary". So the whole category yields
+  // for that drawing, and this is the pair of drawings that says so: the same two subgraphs and
+  // the same crossing edge, with and without one authored dotted edge elsewhere.
+  it('drops the zone-crossing class when the source has already spent the dash', () => {
+    const zones = [
+      'flowchart LR',
+      '  subgraph west[West]', '    WA[Worker A] --> WB[Worker B]', '  end',
+      '  subgraph east[East]', '    EA[Worker C] --> EB[Worker D]', '  end',
+      '  WB --> EA',
+    ];
+    expect(drawn(zones.join('\n')).svg).toContain('fp-cross');
+    expect(drawn(zones.concat(['  WA -.-> EB']).join('\n')).svg).not.toContain('fp-cross');
+  });
+
   it('names the edge classes the theme keys its weight and pattern off', () => {
     const svg = drawn('graph TD\n  A ==> B\n  B -.-> C\n  C --> D').svg;
     expect(svg).toContain('class="edge-thickness-thick edge-pattern-solid flowchart-link"');

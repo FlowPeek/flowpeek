@@ -7267,6 +7267,234 @@
     }
   }
 
+  // A crossing drawn where neither connector can carry a bump.
+  //
+  // `bridgeCrossings` bridges a crossing only on a straight stretch with a bump's width and a grid
+  // step of air each side, and that is right: a bump run into a corner arc reads as a wobble. But
+  // the crossings it then leaves plain are not rare accidents at the edge of that rule -- they are
+  // the ones the router put next to an elbow, and the review read them as joins. In 07 the
+  // `changes requested` connector turns down at x=576 and `rollback` crosses it 8px below the turn,
+  // 4px from the end of its own straight; in 08 `App Server 1 --> NAT` turns right exactly where
+  // `LB --> App Server 2` passes, 4px above that one's next corner. Both crossings are forced -- the
+  // two connectors enter a channel in one order and leave it in the other -- so no lane order
+  // removes them; what can change is WHERE they happen. Over SWEEP and the 16 review sources, 17
+  // crossings were drawn with no bump: 9 at a corner, 8 on stretches shorter than a bump needs.
+  //
+  // So before labels are placed, a crossing that no bump could sit on offers each of its two runs a
+  // slide along its own normal, nearest first, a grid step at a time and at most a rank gap's worth.
+  // The slide is the same move `uncrossPairs` makes -- `shiftRun`, so no bend is added and no stub
+  // drops below its floor; a port moves only along a flat face, below -- and is kept only when the
+  // moved route has strictly fewer crossings that cannot be bridged, no more crossings in all, no
+  // stretch laid along or beside another stroke that it did not have, the same daylight from every
+  // box, and no new foreign zone. Labels come after, so a label lands on the run where it now is
+  // rather than being left beside where it was. Over the same sources this leaves 8 plain: four
+  // copies of `crossing` (TD, LR, BT, RL), where 52px between the two ranks' ports leaves the
+  // crossed run 4px of straight between two elbows whichever way it slides; three of `nested
+  // subgraphs`, where Z's two ports stand in the inverted order and the crossing sits inside
+  // `Y --> Z`'s arrival leg -- removed only by swapping them, which is port order, not a slide; and
+  // one in the dense review source, two elbows 4px apart.
+  //
+  // Relaxing the bump's own guard was the alternative, and the evidence is against it: the 07
+  // crossing has 4px of straight on its horizontal and none on its vertical, so a bump there would
+  // have to start inside an arc -- the wobble the guard exists to refuse. Marking these crossings
+  // some other way (a gap in the lower stroke) would draw two conventions for one event, which is
+  // the complaint itself.
+  var SLIDE_STEPS = 8;
+
+  function bumpRoom(points, k, at, ctx, clear) {
+    var run = bumpRun(points, k, straightRuns(points));
+    var horizontal = points[k].y === points[k + 1].y;
+    var centre = horizontal ? at.x : at.y;
+    if (centre - clear < run.lo || centre + clear > run.hi) return false;
+    var near = horizontal
+      ? { x: at.x - HOP_R - GRID, y: at.y - HOP_R - GRID, width: 2 * HOP_R + 2 * GRID, height: HOP_R + 2 * GRID }
+      : { x: at.x - HOP_R - GRID, y: at.y - HOP_R - GRID, width: HOP_R + 2 * GRID, height: 2 * HOP_R + 2 * GRID };
+    for (var i = 0; i < ctx.boxes.length; i += 1) {
+      if (rectsOverlap(near, ctx.boxes[i])) return false;
+    }
+    return true;
+  }
+
+  // The run a bump jumps over has to be straight where the bump stands, a bump's height each side:
+  // `bridgeCrossings` asks only that the crossing be inside it, and a bump beside the other
+  // connector's elbow has that elbow's arc running into its crest.
+  function straightThrough(points, k, at, clear) {
+    var run = straightRuns(points)[k];
+    var centre = points[k].y === points[k + 1].y ? at.x : at.y;
+    return centre - clear >= run.lo && centre + clear <= run.hi;
+  }
+
+  function crossingTally(points, others, ctx) {
+    // `stranded`: no bump fits at all; `cramped`: none fits with ROOMY_CLEAR, a superset.
+    var tally = { all: 0, stranded: 0, cramped: 0 };
+    for (var o = 0; o < others.length; o += 1) {
+      var q = others[o].points;
+      for (var i = 0; i + 1 < points.length; i += 1) {
+        for (var j = 0; j + 1 < q.length; j += 1) {
+          if (!crossesAt(points[i], points[i + 1], q[j], q[j + 1])) continue;
+          tally.all += 1;
+          var at = points[i].y === points[i + 1].y
+            ? { x: q[j].x, y: points[i].y } : { x: points[i].x, y: q[j].y };
+          var overQ = bumpRoom(points, i, at, ctx, HOP_CLEAR) && straightThrough(q, j, at, HOP_R);
+          var overP = bumpRoom(q, j, at, ctx, HOP_CLEAR) && straightThrough(points, i, at, HOP_R);
+          if (!overQ && !overP) tally.stranded += 1;
+          var roomyQ = bumpRoom(points, i, at, ctx, ROOMY_CLEAR) && straightThrough(q, j, at, HOP_R + GRID);
+          var roomyP = bumpRoom(q, j, at, ctx, ROOMY_CLEAR) && straightThrough(points, i, at, HOP_R + GRID);
+          if (!roomyQ && !roomyP) tally.cramped += 1;
+        }
+      }
+    }
+    return tally;
+  }
+
+  // Parallel stretches of two different connectors closer than two grid steps: a pair that close
+  // reads as one doubled line. `runsAlong` refuses the same line; this refuses the next lane over.
+  function besideCount(points, others) {
+    var n = 0;
+    for (var o = 0; o < others.length; o += 1) {
+      var q = others[o].points;
+      for (var i = 0; i + 1 < points.length; i += 1) {
+        var a = points[i], b = points[i + 1];
+        var aH = a.y === b.y;
+        for (var j = 0; j + 1 < q.length; j += 1) {
+          var c = q[j], d = q[j + 1];
+          if (aH !== (c.y === d.y)) continue;
+          var gap = aH ? Math.abs(a.y - c.y) : Math.abs(a.x - c.x);
+          if (gap === 0 || gap >= 2 * GRID) continue;
+          var lo = aH ? Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x)) : Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
+          var hi = aH ? Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x)) : Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+          if (hi > lo) n += 1;
+        }
+      }
+    }
+    return n;
+  }
+
+  function roomForBridges(routed, ctx) {
+    var live = [];
+    for (var i = 0; i < routed.length; i += 1) {
+      if (routed[i] && !routed[i].edge.selfLoop) live.push(routed[i]);
+    }
+    function othersOf(r) {
+      return live.filter(function (o) { return o !== r; });
+    }
+    function tightLegs(points, edge, others) {
+      var drawn = [];
+      for (var o = 0; o < others.length; o += 1) {
+        for (var s = 0; s + 1 < others[o].points.length; s += 1) drawn.push([others[o].points[s], others[o].points[s + 1]]);
+      }
+      var saved = ctx.drawn;
+      ctx.drawn = drawn;
+      var n = 0;
+      for (var t = 0; t + 1 < points.length; t += 1) {
+        if (!legIsClear(points[t], points[t + 1], ctx, 3, edge)) n += 1;
+      }
+      var blocked = !routeIsClear(points, ctx, 2, edge);
+      ctx.drawn = saved;
+      return blocked ? Infinity : n;
+    }
+    // Every slide of one interior run, and of two neighbouring runs together, cheapest first. A pair
+    // is needed where the crossing sits between two elbows of the same connector: in 07 `rollback`
+    // turns at x=588 and again at y=116, 12px right of and 8px below `changes requested`'s elbow,
+    // so moving either run alone only carries the crossing from one of its corners to the other.
+    function slides(r) {
+      var points = r.points;
+      var out = [];
+      var k, d, e;
+      var lo = portSlides(r, 0) ? 0 : 1;
+      var hi = portSlides(r, points.length - 1) ? points.length - 2 : points.length - 3;
+      for (k = lo; k <= hi; k += 1) {
+        for (d = 1; d <= SLIDE_STEPS; d += 1) {
+          out.push({ cost: d, moves: [[k, -d]] }, { cost: d, moves: [[k, d]] });
+        }
+      }
+      for (k = lo; k + 1 <= hi; k += 1) {
+        for (d = -SLIDE_STEPS; d <= SLIDE_STEPS; d += 1) {
+          for (e = -SLIDE_STEPS; e <= SLIDE_STEPS; e += 1) {
+            if (d === 0 || e === 0) continue;
+            out.push({ cost: Math.abs(d) + Math.abs(e), moves: [[k, d], [k + 1, e]] });
+          }
+        }
+      }
+      // Stable, so equal costs keep the order above: singles before pairs, earlier runs first.
+      return out.sort(function (a, b) { return a.cost - b.cost; });
+    }
+    // A run that ends on a port moves the port with it, which is allowed only along a flat face:
+    // the ends of 08's crossing are four ports on four different boxes, App Server 1's top and the
+    // Load Balancer's bottom 8px apart and App Server 2's top and NAT's bottom 4px apart, so the
+    // crossing sits on an elbow at whichever pair it is moved to, and no interior run reaches it.
+    // Only on a rectangle -- an outline elsewhere would need the port re-sunk to it -- and only
+    // where the face keeps the same corner clearance and port pitch the layout gave it.
+    function portSlides(r, end) {
+      var box = ctx.boxById.get(end === 0 ? r.edge.from : r.edge.to);
+      var inset = end === 0 ? r.edge.start.inset : r.edge.end.inset;
+      return !!box && box.geometry === "rect" && inset === 0;
+    }
+    function portsHold(r, moved, others) {
+      var ends = [0, moved.length - 1];
+      for (var e = 0; e < 2; e += 1) {
+        var at = moved[ends[e]], was = r.points[ends[e]];
+        if (at.x === was.x && at.y === was.y) continue;
+        var box = ctx.boxById.get(e === 0 ? r.edge.from : r.edge.to);
+        var alongX = at.y === was.y;
+        var lo = alongX ? box.x : box.y;
+        var hi = lo + (alongX ? box.width : box.height);
+        var c = alongX ? at.x : at.y;
+        if (c < lo + 2 * GRID || c > hi - 2 * GRID) return false;
+        for (var o = 0; o < others.length; o += 1) {
+          var q = others[o].points;
+          var tips = [q[0], q[q.length - 1]];
+          for (var t = 0; t < 2; t += 1) {
+            var onFace = alongX ? tips[t].y === at.y : tips[t].x === at.x;
+            if (onFace && Math.abs((alongX ? tips[t].x : tips[t].y) - c) < px(MIN_PITCH)) return false;
+          }
+        }
+      }
+      return true;
+    }
+    function trySlide(r, others, before) {
+      var tight = tightLegs(r.points, r.edge, others);
+      var beside = besideCount(r.points, others);
+      var passes = foreignPassages(r.points, ctx, r.edge);
+      var options = slides(r);
+      for (var phase = 0; phase < 2; phase += 1) {
+        for (var o = 0; o < options.length; o += 1) {
+          var moved = r.points;
+          for (var m = 0; m < options[o].moves.length && moved; m += 1) {
+            var k = options[o].moves[m][0];
+            var axis = moved[k].y === moved[k + 1].y ? "y" : "x";
+            moved = shiftRun(moved, k, r.points[k][axis] + options[o].moves[m][1] * GRID, r.edge);
+          }
+          if (!moved || !portsHold(r, moved, others)) continue;
+          var after = crossingTally(moved, others, ctx);
+          if (after.stranded >= before.stranded || after.all > before.all) continue;
+          if (phase === 0 && after.cramped >= before.cramped) continue;
+          if (!stubsAndBodyClear(moved, ctx, r.edge)) continue;
+          if (tightLegs(moved, r.edge, others) > tight) continue;
+          if (besideCount(moved, others) > beside) continue;
+          if (foreignPassages(moved, ctx, r.edge) > passes) continue;
+          r.points = moved;
+          return true;
+        }
+      }
+      return false;
+    }
+    // Bounded for the same reason as `uncrossPairs`: each accepted slide strictly lowers a finite
+    // count.
+    for (var round = 0; round < 4; round += 1) {
+      var progressed = false;
+      for (var a = 0; a < live.length; a += 1) {
+        var P = live[a];
+        if (P.transit) continue;
+        var others = othersOf(P);
+        var before = crossingTally(P.points, others, ctx);
+        if (before.stranded === 0) continue;
+        if (trySlide(P, others, before)) progressed = true;
+      }
+      if (!progressed) break;
+    }
+  }
+
   function routeIsClear(points, ctx, strict, edge) {
     for (var i = 0; i + 1 < points.length; i += 1) {
       if (!legIsClear(points[i], points[i + 1], ctx, strict, edge)) return false;
@@ -7518,6 +7746,11 @@
   // The grid step is there because a bump that ends on the pixel an arc begins reads as one
   // continuous wobble rather than as a bridge -- seen on `Y --> Z` in the nested-subgraph source.
   var HOP_CLEAR = HOP_R + GRID;
+  // What a slide aims for first: a bump with two grid steps of straight before it and the run it
+  // jumps a grid step clear of its elbow either side, rather than the bare minimum. At the bare
+  // minimum 07's `changes requested` came out as elbow, 4px of line, bump -- one S-shaped wobble --
+  // where 8px later the same rule draws a corner and then, plainly, a bridge.
+  var ROOMY_CLEAR = HOP_CLEAR + GRID;
 
   // Higher is more important. Bridge the lower of the two.
   function hopWeight(edge) {
@@ -7550,6 +7783,20 @@
     return runs;
   }
 
+  // The run a bump may use on the leg a route arrives on stops short of the tip by the approach
+  // run, less what HOP_CLEAR already keeps: a bump there has to leave the head its 16px of shaft
+  // (`ARRIVE`), or the head hangs off the bump the way it hung off an elbow arc. No sweep source
+  // put a bump there; `roomForBridges` did, sliding a route under `nested subgraphs LR` at a rank
+  // spacing of 64 until `Y --> Z`'s last leg had a bump 4px from its tip.
+  function bumpRun(points, k, runs) {
+    var run = runs[k];
+    if (k + 2 !== points.length) return run;
+    var tip = points[k + 1], from = points[k];
+    var back = ARRIVE_PX - HOP_CLEAR;
+    var forward = (tip.x !== from.x) ? tip.x > from.x : tip.y > from.y;
+    return forward ? { lo: run.lo, hi: run.hi - back } : { lo: run.lo + back, hi: run.hi };
+  }
+
   function hopFits(run, centre, existing) {
     if (centre - HOP_CLEAR < run.lo || centre + HOP_CLEAR > run.hi) return false;
     for (var i = 0; i < existing.length; i += 1) {
@@ -7562,7 +7809,7 @@
     var existing = seg.owner.hops[seg.index] || [];
     var hop;
     if (seg.horizontal) {
-      if (!hopFits(seg.run, x, existing)) return false;
+      if (!hopFits(seg.room, x, existing)) return false;
       // The bump goes to -y on a horizontal run and to -x on a vertical one, whichever way the run
       // travels, so a drawing reads its bridges as one gesture. In SVG's y-down frame sweep 1 is
       // the increasing-angle direction, which lifts a left-to-right arc upwards and drops a
@@ -7573,7 +7820,7 @@
         sweep: seg.u > 0 ? 1 : 0
       };
     } else {
-      if (!hopFits(seg.run, y, existing)) return false;
+      if (!hopFits(seg.room, y, existing)) return false;
       hop = {
         at: y, box: { x: x - HOP_R, y: y - HOP_R, width: HOP_R, height: 2 * HOP_R },
         from: { x: x, y: y - seg.u * HOP_R }, to: { x: x, y: y + seg.u * HOP_R },
@@ -7619,7 +7866,7 @@
         var u = sign(horizontal ? q.x - p.x : q.y - p.y);
         if (runs[s].hi - runs[s].lo <= 0) continue;
         segs.push({
-          owner: r, order: i, index: s, horizontal: horizontal, u: u, run: runs[s],
+          owner: r, order: i, index: s, horizontal: horizontal, u: u, run: runs[s], room: bumpRun(r.points, s, runs),
           fixed: horizontal ? p.y : p.x
         });
       }
@@ -8690,6 +8937,7 @@
     // is rebuilt from the result: the label pass tells a route's own legs from a rival's by the
     // identity of the point objects, so it has to hold the arrays the routes now carry.
     uncrossPairs(routed, ctx);
+    roomForBridges(routed, ctx);
     ctx.drawn = [];
     for (i = 0; i < routed.length; i += 1) {
       if (!routed[i]) continue;

@@ -553,6 +553,63 @@ describe('[Render] bridges at crossings', () => {
     expect(which(body('==>', '-->'))).toEqual([false, true]);
     expect(which(body('-->', '==>'))).toEqual([true, false]);
   });
+
+  it('moves a crossing off an elbow so that it can be bridged like every other', () => {
+    // Two reader-reviewed sources whose one forced crossing was drawn plain while every other
+    // crossing in the set had a bump, and was read as a join. In 07 `changes requested` turned down
+    // 8px above `rollback`'s run, 4px from that run's own elbow; in 08 `App Server 1 --> NAT`
+    // turned right exactly where `Load Balancer --> App Server 2` passed, the two ports 8px apart.
+    // Neither crossing can be removed -- each pair enters its channel in one order and leaves it
+    // in the other -- so what is asserted is that it is drawn where a bump fits, and has one.
+    // Crossings are read corner to corner, so one that lands inside an arc is still seen; `polyline`
+    // keeps the point where each arc lets go, and a crossing exactly there would sit on a segment's
+    // end and pass the strict test unseen, so collinear points are merged first.
+    const corners = (d) => polyline(d).filter((p, k, all) => k === 0 || k === all.length - 1
+      || !((all[k - 1].x === p.x && p.x === all[k + 1].x) || (all[k - 1].y === p.y && p.y === all[k + 1].y)));
+    const crossingsAt = (a, b) => {
+      const found = [];
+      for (const [p, q] of segmentsOf(corners(a))) {
+        for (const [r, t] of segmentsOf(corners(b))) {
+          if ((p.y === q.y) === (r.y === t.y)) continue;
+          const [h, v] = p.y === q.y ? [[p, q], [r, t]] : [[r, t], [p, q]];
+          const x = v[0].x, y = h[0].y;
+          if (x <= Math.min(h[0].x, h[1].x) || x >= Math.max(h[0].x, h[1].x)) continue;
+          if (y <= Math.min(v[0].y, v[1].y) || y >= Math.max(v[0].y, v[1].y)) continue;
+          found.push({ x, y });
+        }
+      }
+      return found;
+    };
+    const sources = {
+      '07 back edges': ['flowchart LR',
+        '    plan[Plan] --> design[Design] --> build[Build] --> test[Test] --> review[Review] --> release[Release] --> monitor[Monitor]',
+        '    test -->|fails| build', '    review -->|changes requested| design', '    monitor -->|incident| plan',
+        '    release -->|rollback| build', '    monitor -->|feedback| design'].join('\n'),
+      '08 nested': ['flowchart TD', '    subgraph Cloud[AWS Account]', '        subgraph VPC[Production VPC]',
+        '            subgraph Public[Public Subnet]', '                alb[Load Balancer]', '                nat[NAT Gateway]',
+        '            end', '            subgraph Private[Private Subnet]', '                app1[App Server 1]',
+        '                app2[App Server 2]', '                subgraph DB[Database Tier]', '                    primary[(Primary)]',
+        '                    replica[(Replica)]', '                end', '            end', '        end',
+        '        s3[(S3 Bucket)]', '    end', '    user[User] --> alb', '    alb --> app1', '    alb --> app2',
+        '    app1 --> primary', '    app2 --> primary', '    primary --> replica', '    app1 --> nat', '    app2 --> s3'].join('\n'),
+    };
+    for (const [label, source] of Object.entries(sources)) {
+      const paths = edgePaths(drawn(source).svg);
+      const plain = [];
+      let crossed = 0;
+      for (let i = 0; i < paths.length; i += 1) {
+        for (let j = i + 1; j < paths.length; j += 1) {
+          for (const c of crossingsAt(paths[i].d, paths[j].d)) {
+            crossed += 1;
+            const bridged = [paths[i], paths[j]].some((p) => bridges(p.d).some((h) => h.at.x === c.x && h.at.y === c.y));
+            if (!bridged) plain.push(`${paths[i].id} x ${paths[j].id} at ${c.x},${c.y}`);
+          }
+        }
+      }
+      expect(crossed, label).toBeGreaterThan(0);
+      expect(plain, label).toEqual([]);
+    }
+  });
 });
 
 describe('[Render] fanning a face', () => {

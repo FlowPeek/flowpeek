@@ -537,3 +537,44 @@ describe('[Ports] a vertex shared by three or more', () => {
     expect(tight).toEqual([]);
   });
 });
+
+// Four or more ends on a flat face, any of them labelled, stand two pitches apart -- the vertex
+// rule above carried onto a face with no slopes to spend, so the face grows instead. At rule 4's
+// 12px the held-out review's h04 ran six lines along one face of Advertising with three labels in
+// the bundle, each plate 24px tall over the lines either side of its own, and h20 ran seven into
+// Closed; `labelled fan in` and `labelled returns to one face` are those two loads with nothing
+// else of either drawing kept.
+describe('[Ports] a busy labelled face', () => {
+  it('holds two pitches between its ends over the sweep', () => {
+    const tight = [];
+    let held = 0;
+    for (const { name, source } of SWEEP) {
+      const db = new flow.FlowDB();
+      db.clear();
+      flow.parse(source, db);
+      const laid = flow.layout(db, { measureText, theme: EDITORIAL });
+      const nodes = new Map(laid.nodes.map((node) => [node.id, node]));
+      const faces = new Map();
+      for (const edge of laid.edges) {
+        for (const [id, port] of [[edge.from, edge.start], [edge.to, edge.end]]) {
+          const node = nodes.get(id);
+          if (!node || !port || node.geometry === 'diamond') continue;
+          const key = `${id}.${port.side}`;
+          if (!faces.has(key)) faces.set(key, { along: [], labelled: false });
+          const face = faces.get(key);
+          face.along.push(port.side === 'top' || port.side === 'bottom' ? port.x : port.y);
+          if (edge.label) face.labelled = true;
+        }
+      }
+      for (const [key, { along, labelled }] of faces) {
+        if (along.length < 4 || !labelled) continue;
+        held += 1;
+        along.sort((p, q) => p - q);
+        const least = Math.min(...along.slice(1).map((at, k) => at - along[k]));
+        if (least < 2 * 12) tight.push(`${name} ${key} ${least}px`);
+      }
+    }
+    expect(held).toBeGreaterThanOrEqual(8);
+    expect(tight).toEqual([]);
+  });
+});

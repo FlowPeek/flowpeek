@@ -4506,6 +4506,67 @@
     }
     for (i = 0; i < n; i += 1) items[i].rank = rank[i];
 
+    // A busy face's room, now that ranks say which face each end lands on.
+    //
+    // The pass in `layout` sized every node for max(in, out) at rule 4's 12px, before ranks existed,
+    // and said so: a cycle that brings ends back onto the face its out-edges leave from is left at
+    // whatever pitch remains. That is the face the held-out review ranked first. h04's Advertising
+    // was sized for five ends and carried six on its right face -- four back edges in, two edges out
+    // -- at 12px along a 256px straight run, three of the six labelled; h20's Closed took seven ends
+    // at 12px on a stadium sized for exactly that. A plate on a line in such a bundle is 24px tall,
+    // so at a 12px pitch it covers the line either side, and BESIDE there is no gap to stand in.
+    // `slopesOf` gave a busy VERTEX two pitches per port by spreading over slopes it already had; a
+    // flat face has nothing spare -- `17c84b4` measured these faces full at the pitch -- so the face
+    // grows until its landing run holds BUSY_PITCH between neighbours.
+    //
+    // Chosen over a trunk, which merges the ends before the face into one stroke and one head. It
+    // keeps 12px but changes what the drawing says -- a junction no source wrote -- and it moves the
+    // labels' problem rather than solving it: every label still has to sit on a branch, and the
+    // branches meet where the bundle was. What growing costs, measured: h04's drawing went from
+    // 2392x388 to 2316x392 (Advertising 72px to 136px tall), h20's and h19's kept their size (Closed
+    // 96px to 200px wide), and the 204-drawing sweep did not change, because none of its faces with
+    // four or more ends carries a label.
+    {
+      var ends = [];
+      for (i = 0; i < n; i += 1) ends.push({ lo: 0, hi: 0, loL: false, hiL: false });
+      for (i = 0; i < proper.length; i += 1) {
+        var be = proper[i];
+        var rA = rank[be.a.slot], rB = rank[be.b.slot];
+        if (rA === rB) continue;
+        var labelled = !!be.labelBox;
+        var low = rA < rB ? be.a.slot : be.b.slot;
+        var high = rA < rB ? be.b.slot : be.a.slot;
+        ends[low].hi += 1; if (labelled) ends[low].hiL = true;
+        ends[high].lo += 1; if (labelled) ends[high].loL = true;
+      }
+      for (i = 0; i < n; i += 1) {
+        var bc = children[i];
+        if (bc.kind !== "node") continue;
+        var bg = geometryOf(bc.shape);
+        var sides = FORWARD_SIDES[level.dir] || FORWARD_SIDES.TB;
+        var want = [[ends[i].hi, ends[i].hiL, sides[0]], [ends[i].lo, ends[i].loL, sides[1]]];
+        for (var wi = 0; wi < 2; wi += 1) {
+          var bn = want[wi][0];
+          if (bn < BUSY_N || !want[wi][1]) continue;
+          // Grown against the landing run rather than the box, because the run is what `placeFace`
+          // spends: a stadium loses its two caps, and Closed sized as 8 x 24px of box still put its
+          // seven ports 12-16px apart. A face whose run is one point is a vertex, `slopesOf`'s to
+          // answer for. Bounded, and two units a step to keep the box even.
+          for (var tries = 0; tries < 64; tries += 1) {
+            var tb = { x: 0, y: 0, w: bc.w, h: bc.h };
+            var tr = landingRun(bg, tb, want[wi][2], portSpan(bg, tb, want[wi][2]));
+            if (tr.hi === tr.lo) break;
+            if (tr.hi - tr.lo >= BUSY_PITCH * (bn - 1)) break;
+            if (bg === "circle" || bg === "doublecircle") { bc.w += 2; bc.h = bc.w; }
+            else if (vertical) bc.w += 2;
+            else bc.h += 2;
+          }
+        }
+        items[i].oSize = vertical ? bc.w : bc.h;
+        items[i].rSize = vertical ? bc.h : bc.w;
+      }
+    }
+
     var maxRank = 0;
     for (i = 0; i < n; i += 1) if (rank[i] > maxRank) maxRank = rank[i];
 
@@ -6901,6 +6962,7 @@
     // rather than the shape's is what keeps a port off the corner it was allowed to sit on.
     var span = face.run;
     var N = face.group.length;
+    var pitch = facePitch(face);
     // No placement holds the pitch on a face this short, and the even spread is what the file has
     // always done here. `layout` widens a node until 3(N + 1) units fit, but it sizes for
     // max(in, out) -- so the face that overflows is the one a CYCLE loads from both sides, which is
@@ -6911,7 +6973,7 @@
     var blocks = [];
     var k;
     for (k = 0; k < N; k += 1) {
-      var p = face.desires[k] - MIN_PITCH * k;
+      var p = face.desires[k] - pitch * k;
       blocks.push({ vals: [p], value: p, n: 1 });
       while (blocks.length > 1 && blocks[blocks.length - 2].value > blocks[blocks.length - 1].value) {
         var b = blocks.pop();
@@ -6921,11 +6983,11 @@
         a.value = middleOf(a.vals);
       }
     }
-    var top = span.hi - MIN_PITCH * (N - 1);
+    var top = span.hi - pitch * (N - 1);
     var out = [];
     for (k = 0; k < blocks.length; k += 1) {
       var v = Math.min(top, Math.max(span.lo, blocks[k].value));
-      for (var j = 0; j < blocks[k].n; j += 1) out.push(v + MIN_PITCH * out.length);
+      for (var j = 0; j < blocks[k].n; j += 1) out.push(v + pitch * out.length);
     }
     return out;
   }
@@ -6943,9 +7005,11 @@
       if (group[g].end === 0) {
         group[g].edge.startPoint = point;
         group[g].edge.startInset = inset;
+        group[g].edge.startPitch = facePitch(face);
       } else {
         group[g].edge.endPoint = point;
         group[g].edge.endInset = inset;
+        group[g].edge.endPitch = facePitch(face);
       }
     }
     face.group = group;
@@ -6953,6 +7017,29 @@
 
   // SKILL.md §6 rule 4's "at least 12px between adjacent attach points", in grid units.
   var MIN_PITCH = 3;
+  // A face carrying BUSY_N or more ends, any of them labelled, is held at BUSY_PITCH: twice rule 4's
+  // minimum, which is what `slopesOf` already gives a vertex, and the 24px a label plate is tall --
+  // the least that lets a plate sit ON one line of the bundle without covering its neighbour.
+  //
+  // Four, not three. Swept at three: 12 of the 204 sweep drawings changed and gained 12 bends
+  // between them -- `open links`, `long back edge past a fork` and `long forward edge`, in all four
+  // directions -- and in the three looked at (TD) the three lines already parted within one gap of
+  // the face, so the spread only added a jog. At four and five the sweep is byte-identical and the
+  // held-out faces the review named -- h04's Advertising (6), h20's Closed (7) and Tier 1 (4 and 4)
+  // -- are all held. Unlabelled faces keep 12px: a fan-in with nothing written on it has nothing a
+  // reader must match to a line, and h01's, h08's and h11's four- to six-end faces stay as they were.
+  var BUSY_N = 4;
+  var BUSY_PITCH = 2 * MIN_PITCH;
+  function facePitch(face) {
+    var N = face.group.length;
+    if (N < BUSY_N || face.run.hi === face.run.lo) return MIN_PITCH;
+    var lab = false;
+    for (var g = 0; g < N; g += 1) if (face.group[g].edge.labelBox) lab = true;
+    if (!lab) return MIN_PITCH;
+    // As much of the busy pitch as the run allows: a face the pass in `layoutLevel` did not grow --
+    // an end arriving from another level, which that pass does not count -- keeps what fits.
+    return Math.max(MIN_PITCH, Math.min(BUSY_PITCH, Math.floor((face.run.hi - face.run.lo) / (N - 1))));
+  }
 
   // A route's first turn is where the stub off a port meets the next station -- the first waypoint
   // the layout reserved, or the far port when there is none. When those two differ by exactly one
@@ -7037,7 +7124,7 @@
     if (want < face.run.lo || want > face.run.hi) return false;
     for (var i = 0; i < face.offsets.length; i += 1) {
       if (i === slot) continue;
-      if (Math.abs(face.offsets[i] - want) < MIN_PITCH) return false;
+      if (Math.abs(face.offsets[i] - want) < facePitch(face)) return false;
     }
     face.offsets[slot] = want;
     return true;
@@ -7476,8 +7563,8 @@
         selfLoop: e2.selfLoop === true,
         // `inset` is how far the port sank from the bounding box's face to reach the shape's own
         // outline. The router needs it: its stub is measured from the face, not from the port.
-        start: { x: px(e2.startPoint.x), y: px(e2.startPoint.y), side: e2.startSide, inset: px(e2.startInset) },
-        end: { x: px(e2.endPoint.x), y: px(e2.endPoint.y), side: e2.endSide, inset: px(e2.endInset) },
+        start: { x: px(e2.startPoint.x), y: px(e2.startPoint.y), side: e2.startSide, inset: px(e2.startInset), pitch: px(e2.startPitch || MIN_PITCH) },
+        end: { x: px(e2.endPoint.x), y: px(e2.endPoint.y), side: e2.endSide, inset: px(e2.endInset), pitch: px(e2.endPitch || MIN_PITCH) },
         channel: channel,
         via: via,
         label: e2.raw.text,
@@ -8269,7 +8356,7 @@
           var tips = [q[0], q[q.length - 1]];
           for (var t = 0; t < 2; t += 1) {
             var onFace = alongX ? tips[t].y === at.y : tips[t].x === at.x;
-            if (onFace && Math.abs((alongX ? tips[t].x : tips[t].y) - c) < px(MIN_PITCH)) return false;
+            if (onFace && Math.abs((alongX ? tips[t].x : tips[t].y) - c) < (e === 0 ? r.edge.start.pitch : r.edge.end.pitch)) return false;
           }
         }
       }

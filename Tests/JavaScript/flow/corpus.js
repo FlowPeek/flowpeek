@@ -118,6 +118,20 @@ const FAMILIES = {
     '  D -->|bug| C[Technical queue]', '  D -->|account| E[Security queue]', '  D -->|how-to| K[Suggest article]',
     '  B --> Z[Closed]', '  C --> Z', '  E --> Z', '  K -->|still stuck| A',
   ].join('\n'),
+  // Busy rectangular faces with labels on them. 'fan in' and 'heads at both ends' already put five
+  // ends on one rect face, but with nothing written on any of the five, so the question the
+  // held-out review asked of h04 and h20 -- which of six lines 12px apart does this label name --
+  // never came up. One is a labelled fan-in of five; the other brings back edges onto the face its
+  // own labelled out-edges leave from, which is the load the node sizing cannot see before ranks.
+  'labelled fan in': (dir) => [
+    `flowchart ${dir}`, '  A[Web] -->|signup| Z[Accounts]', '  B[Mobile] -->|login| Z',
+    '  C[Partner] -->|token| Z', '  D[Admin] -->|reset| Z', '  E[Batch] -->|import| Z', '  Z --> Q[Audit]',
+  ].join('\n'),
+  'labelled returns to one face': (dir) => [
+    `flowchart ${dir}`, '  S[Start] --> I[Idle]', '  I -->|wake| W[Working]', '  I -->|sync| Y[Syncing]',
+    '  I -->|scan| C[Scanning]', '  W -->|done| I', '  Y -->|synced| I', '  C -->|nothing found| I',
+    '  W --> F[Finish]',
+  ].join('\n'),
   'long forward edge': (dir) => [
     `flowchart ${dir}`, '  A[Start] --> B[One] --> C[Two] --> D[Three] --> E[End]',
     '  A --> P[Wide parallel step] --> Q[Another one] --> E', '  A -->|skip| E',
@@ -251,7 +265,8 @@ export const TIGHT_MASKS = [];
  * 222 pairs in the generated space, against 23 in the twelve literals it replaced. It was 188 until
  * the three link-form families went in; their 14 pairs are all one segment, and 202 until the three
  * long-edge families added 10 more, which were one segment before their fix as well as after, and
- * 212 until the two labelled-decision families added 10.
+ * 212 until the two labelled-decision families added 10, and 222 until the two busy labelled-face
+ * families added 20.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -262,7 +277,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 222;
+export const ALIGNED_PAIRS = 242;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

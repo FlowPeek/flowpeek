@@ -4426,6 +4426,10 @@
   // LAYOUT is now the first thing that needs it: a label that has to sit 8px off its own stroke has
   // to be given 8px to sit in, and only the layout can hand out room.
   var LABEL_GAP = 2;
+  // How long a marker is along its route, in grid units: `markerMarkup` draws every one 8 wide. The
+  // placer charges an ON plate within LABEL_GAP of where the head begins, so a gap sized for plates
+  // ON their lines has to hold this too.
+  var HEAD = 2;
 
   // How far apart one face's ends have to stand for each labelled one to have a seat: its plate ON
   // its own line, in the same column as its neighbours' plates, with rule 2's gap between plates.
@@ -5381,6 +5385,8 @@
     var gapLabel = [];
     // The labelled corridors' stacks, in columns and end to end; see the column note below.
     var gapStack = [];
+    var seatedAt = [];
+    var seatRooms = [];
     var gapWhole = [];
     // How much of the gap each of its two faces has to be left alone for. A gap is not symmetric:
     // the face an edge LEAVES needs a stub plus room to round the corner off it, and the face an
@@ -5416,7 +5422,7 @@
       return g === "diamond" || (g === "hexagon" && !vertical);
     };
     for (i = 0; i < maxRank; i += 1) {
-      gapLanes.push(0); gapLabel.push(0); gapStack.push(0); gapWhole.push(0); gapStraight.push(0); stacked.push(new Map());
+      gapLanes.push(0); gapLabel.push(0); gapStack.push(0); seatedAt.push({}); gapWhole.push(0); gapStraight.push(0); stacked.push(new Map());
       gapLoNeed.push(2 * STUB); gapHiNeed.push(2 * STUB);
     }
     for (i = 0; i < segments.length; i += 1) {
@@ -5541,6 +5547,7 @@
         var alongs = plates.map(function (p) { return p.along; }).sort(function (a, b) { return b - a; });
         var depth = (columns - 1) * 2 * LABEL_GAP;
         for (d = 0; d < columns; d += 1) depth += alongs[d];
+        if (seatedFace) seatedAt[i][key] = true;
         if (depth > gapStack[i]) gapStack[i] = depth;
         var whole = (n - 1) * 2 * LABEL_GAP;
         for (d = 0; d < n; d += 1) whole += alongs[d];
@@ -5951,7 +5958,47 @@
       // safe but b04 only 1968 -> 1784.
       var jogs = lanes > 0 ? laneOff[i][lanes - 1] : 0;
       var labelled = Math.max(gapLabel[i], gapStack[i] > 0 ? Math.min(gapWhole[i], gapStack[i] + jogs) : 0) + 2 * STUB;
-      gapSize.push(Math.max(env.rankU, needed, labelled));
+      // A seated face's plates stand ON the straight its lines run after they step across the gap,
+      // between the lane and the far face -- the face is the gap's low end, `seg.u` -- and that
+      // straight is shorter than the gap by more than the two stubs `labelled` above adds: it
+      // starts after the step's elbow (`cornerRadius`, 2 units at most) and has to end LABEL_GAP
+      // short of the head, because the placer charges an ON plate nearer than that 10 and a BESIDE
+      // one only 8. The held-out set's b02 showed it at 14a73f8: ESTABLISHED's two exits ran 128px
+      // straight into their heads, "rcv FIN / send ACK" is 120, and it sat 8px under its line. So
+      // each such line's straight is measured from its own lane, and the gap grows where one is short;
+      // and where centring the lanes in the slack would hand the straight only half of it, the lanes
+      // stand at the low reserve instead (`seatRooms`).
+      //
+      // Only a line that steps onto a lane and ends in its own head at the far face: one arriving at
+      // the seated face has no head out there, a straight run has the whole gap, and a line whose
+      // lane stands far out has a seat on the straight before it -- `labelled fan with a return`
+      // RL grew 40px for that, with every plate on its line before and after.
+      //
+      // Rejected: the seat from the gap's outermost lane, as a far reserve. A plate stands on its own
+      // line, not the outermost one, and the reserve bound wherever lanes spread: plates off their
+      // run over the three sets and the sweep 99 -> 95 under the face ruler, but b11 1432 -> 1576px
+      // wide with no plate moved, and b04 1416 -> 1456. Also rejected: centring the column over each
+      // lane's longest straight run instead of the gap, as the sixth review proposed. Every run here
+      // ends in a head, so the column's x is not what is short; the straight's length is.
+      var band0 = Math.max(env.rankU, needed, labelled);
+      var centred0 = hugGap[i] ? 0 : Math.floor((band0 - gapLoNeed[i] - jogs - gapHiNeed[i]) / 2);
+      var seatRoom = 0;
+      for (j = 0; j < segments.length; j += 1) {
+        var ss = segments[j];
+        if (ss.gap !== i || ss.lane < 0 || ss.lo === ss.hi || !seatedAt[i]["u" + ss.u]) continue;
+        if (onCorridor(ss.edge) || !ss.edge.labelBox) continue;
+        if (rank[ss.edge.a.slot] > rank[ss.edge.b.slot] || i + 1 !== ss.edge.highRank) continue;
+        var plate = vertical ? ss.edge.labelBox.h : ss.edge.labelBox.w;
+        var lane = gapLoNeed[i] + centred0 + laneOff[i][ss.lane];
+        // Either straight holding the plate is a seat: before the lane, between the stub and the
+        // elbow, where no head asks for room, or after it.
+        if (lane - STUB - 2 >= plate) continue;
+        if (band0 - lane - 2 >= plate + LABEL_GAP + HEAD) continue;
+        var straight = gapLoNeed[i] + laneOff[i][ss.lane] + 2 + plate + LABEL_GAP + HEAD;
+        if (straight > seatRoom) seatRoom = straight;
+      }
+      seatRooms.push(seatRoom);
+      gapSize.push(Math.max(band0, seatRoom));
     }
 
     var rankStart = [];
@@ -5976,7 +6023,8 @@
       var band = gapSize[i];
       var used = gapLanes[i] > 0 ? laneOff[i][gapLanes[i] - 1] : 0;
       var slack = band - gapLoNeed[i] - used - gapHiNeed[i];
-      laneAt.push(bandStart + gapLoNeed[i] + (hugGap[i] ? 0 : Math.floor(slack / 2)));
+      var centred = hugGap[i] || seatRooms[i] > 0 ? 0 : Math.floor(slack / 2);
+      laneAt.push(bandStart + gapLoNeed[i] + centred);
     }
 
     // --- one switch, four directions --------------------------------------
@@ -7827,9 +7875,8 @@
   // than as an 8 of its own: the layout reserves the room and the placer spends it, and two
   // spellings of one number is how those two stop agreeing.
   var LABEL_GAP_PX = px(LABEL_GAP);
-  // How long a marker is along its route: `markerMarkup` draws every one of them 8 wide. Only the
-  // placer needs it as a length -- it is how much of an ON label's tail an arrowhead takes.
-  var HEAD_PX = px(2);
+  // How much of an ON label's tail an arrowhead takes (HEAD, in the layout's units).
+  var HEAD_PX = px(HEAD);
   // How much nearer a label's plate has to be to its own connector than to the nearest connector
   // that is not, before "which line is this naming?" stops needing an answer.
   //

@@ -293,6 +293,16 @@ const HORIZONTAL_FAMILIES = {
     '  queue --> work[Working]', '  rec -->|ok| check[Checking]', '  check -->|pause| held[Held]', '  queue --> idle',
     '  rec -->|resume| queue', '  check -->|retry| rec',
   ].join('\n'),
+  // Two labelled exits of one face that each step onto a lane and run straight into their head.
+  // Every labelled face above either runs its lines straight across the gap or steps them where a
+  // longer gap leaves the plate a straight on either side, so nothing asked whether the straight
+  // after the step holds the plate and the head's clearance: the held-out set's b02 did at
+  // 14a73f8, ESTABLISHED's two exits running 128px into heads under a 120px plate.
+  // At 643afb8 both plates stand beside their lines LR.
+  'labelled exits that step into heads': (dir) => [
+    `flowchart ${dir}`, '  s[Listen] -->|open| a[Established]', '  a -->|close and send FIN| b[Fin wait]',
+    '  a -->|receive FIN and ack| c[Close wait]', '  b --> z[Closed]', '  c --> z',
+  ].join('\n'),
 };
 
 /**
@@ -450,7 +460,9 @@ export const TIGHT_MASKS = [];
  * and 416 until `turn onto a lane` added 16, one segment before its tangent bump as after
  * (`trade before nesting` adds none), and 432 until `labelled links between one pair` added 6,
  * one segment before `seatPitch` spread its face as after, and 438 until `two-way pair past a held
- * lane` added 4, one segment before the slide `uncrossPairs` offers as after.
+ * lane` added 4, one segment before the slide `uncrossPairs` offers as after, and 442 until
+ * `labelled exits that step into heads` added 2, one segment before a seated straight was sized as
+ * after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -461,7 +473,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 442;
+export const ALIGNED_PAIRS = 444;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

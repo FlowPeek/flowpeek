@@ -164,3 +164,27 @@ describe('the labelled lines under one column', () => {
     }
   }
 });
+
+// And the straight a seated plate stands on is long enough to hold it.
+//
+// A face's labelled exits that step onto a lane run the rest of the gap straight into their heads,
+// and the placer charges a plate nearer a head than rule 2's gap more than one standing BESIDE its
+// line. The gap was sized for the widest plate and the two stubs, not for the step's elbow and the
+// head, so both plates went beside: the held-out set's b02, at 14a73f8.
+describe('the straight after a step', () => {
+  const steps = SWEEP.filter(({ name }) => /^labelled exits that step into heads (LR|RL)$/.test(name));
+  it('is checked on two labelled exits that step, both horizontal directions', () => {
+    expect(steps.length).toBe(2);
+  });
+  for (const { name, source } of steps) {
+    for (const [ruler, measure] of [['face', measureFace], ['budget', measureText]]) {
+      it(`holds each exit's plate ON its line: ${name}, ${ruler}`, () => {
+        const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText: measure });
+        expect(out.warnings).toEqual([]);
+        const exits = fields(out.svg).flat().filter((p) => /^L_a_[bc]_0$/.test(p.id));
+        expect(exits.length).toBe(2);
+        expect(exits.filter((p) => !p.on).map((p) => p.id)).toEqual([]);
+      });
+    }
+  }
+});

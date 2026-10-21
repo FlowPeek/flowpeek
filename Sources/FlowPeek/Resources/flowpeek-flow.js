@@ -4838,6 +4838,21 @@
     var gapHiNeed = [];
     var gapStraight = [];
     var stacked = [];
+    // An edge that crosses more than one gap of a horizontal level is labelled on its corridor, and
+    // claims no room in any gap for it. In LR and RL that corridor is the long horizontal run past
+    // the intermediate ranks, and its cross-lines are short vertical jogs; the placer takes the
+    // longest run first, so the label goes on the corridor and never beside a jog. Charging it as
+    // if it did reserved the label's WIDTH, beside every jog and in every gap the edge passed: the
+    // review's 07 -- a seven-node LR chain with five labelled back edges -- came out 2016px wide,
+    // about twice Pele's, with gaps of 112-352px between boxes 80px wide. Without the charge it is
+    // 984px, its gaps 40-108px, and every label is still on its own line.
+    //
+    // Rejected: keeping the gap claim but charging it once, in whichever gap the edge's label
+    // fits best, which is 1036px on 07 for room the placer does not use either. Also rejected: the
+    // same rule in TB and BT. There the cross-line IS the long run along a rank and the labels go
+    // on it: the review's 03 went from 704px to 516px tall, and one of its labels was then pushed
+    // between two parallel connectors with no zero-penalty position left.
+    var onCorridor = function (edge) { return !vertical && edge.chain.length > 2; };
     for (i = 0; i < maxRank; i += 1) {
       gapLanes.push(0); gapLabel.push(0); gapStraight.push(0); stacked.push(new Map());
       gapLoNeed.push(2 * STUB); gapHiNeed.push(2 * STUB);
@@ -4889,7 +4904,7 @@
       seg.mergeBack = segBack;
       seg.mergeOff = (seg.mergeAt < 0) ? 0
         : ((seg.mergeAt === seg.u ? cv : cu) - centreOf(seg.mergeAt));
-      var lbl = seg.edge.labelBox;
+      var lbl = onCorridor(segEdge) ? null : seg.edge.labelBox;
       if (lbl) {
         var along = vertical ? lbl.h : lbl.w;
         if (along > gapLabel[seg.gap]) gapLabel[seg.gap] = along;
@@ -5142,7 +5157,7 @@
       // lane at all (`takeLane` is never called for lo === hi) and its label is `centreSep`'s
       // business, across the rank rather than along it.
       if (ns.gap >= maxRank || ns.lane < 0 || ns.lo === ns.hi) continue;
-      var nbox = ns.edge.labelBox;
+      var nbox = onCorridor(ns.edge) ? null : ns.edge.labelBox;
       if (!nbox) continue;
       var nExtent = vertical ? nbox.h : nbox.w;
       var here = laneNeed[ns.gap];

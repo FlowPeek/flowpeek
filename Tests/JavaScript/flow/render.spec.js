@@ -2416,4 +2416,39 @@ describe('[Render] which connector a label belongs to', () => {
     }
     expect(loose).toEqual(BESIDE);
   });
+
+  it('never sits a plate on its line with another line running under it the same way', () => {
+    // Two lines come down into Done side by side, 52px apart: ok from Response and record missing
+    // from Cancel. "record missing" sat ON its own drop as a 120px plate, and ok's line ran under
+    // it top to bottom, parallel to its own: the plate read as either line's. The ownership margin
+    // called it owned -- its own stroke is covered more deeply -- so the only thing that could
+    // tell this plate from a clean one was the direction of the stroke under it. The held-out
+    // review's h03 was the same failure with the two lines a 12px pitch apart off one face.
+    const covered = [];
+    for (const dir of ['TD', 'BT']) {
+      const svg = drawn([
+        `flowchart ${dir}`,
+        '  A[Request] --> D{Response}',
+        '  D -->|ok| W[Done]',
+        '  D -->|declined| F[Failed]',
+        '  D -->|timeout| C[Cancel and re-query]',
+        '  C -->|record missing| W',
+        '  C -->|found| F',
+      ].join('\n')).svg;
+      const paths = edgePaths(svg);
+      for (const mask of masks(svg)) {
+        const ownLegs = runsOf(paths.find((p) => p.id === mask.id).d).filter((leg) => crosses(leg, mask));
+        for (const other of paths) {
+          if (other.id === mask.id) continue;
+          for (const leg of segmentsOf(polyline(other.d))) {
+            const vertical = leg[0].x === leg[1].x;
+            if (crosses(leg, mask) && ownLegs.some((own) => (own[0].x === own[1].x) === vertical)) {
+              covered.push(`${dir}: ${mask.id} runs along ${other.id}`);
+            }
+          }
+        }
+      }
+    }
+    expect(covered).toEqual([]);
+  });
 });

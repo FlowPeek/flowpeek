@@ -9039,6 +9039,36 @@
     return rival - mine;
   }
 
+  // Does a stroke that is not the label's own run under the plate ALONG the run the plate sits on?
+  // `rectSegDist` cannot say so: it scores a buried stroke by covered length plus depth, and a
+  // sibling 12px over from the plate's own line, covered end to end, comes out only 12 shallower
+  // than the plate's own -- a margin the taper in `placeEdgeLabel` calls owned. A reader sees two
+  // lines enter the plate on the same axis and leave it on the same axis, and nothing to say which
+  // of the two the words name. A crossing under a plate is the other case and is not this one: it
+  // enters across the plate's own line and leaves across it, which the comment on `rival < 0`
+  // weighs. Strictly inside the plate, so a stroke that only meets its edge is left to the gap terms.
+  function parallelUnder(rect, seg, own, ctx) {
+    for (var i = 0; i < ctx.drawn.length; i += 1) {
+      var d = ctx.drawn[i];
+      if ((d[0].y === d[1].y) !== seg.horizontal) continue;
+      if (d[0].x !== d[1].x && d[0].y !== d[1].y) continue;
+      var mine = false;
+      for (var j = 0; j < own.length; j += 1) {
+        if (own[j][0] === d[0] && own[j][1] === d[1]) { mine = true; break; }
+      }
+      if (mine) continue;
+      var across = seg.horizontal ? d[0].y : d[0].x;
+      var aLo = seg.horizontal ? rect.y : rect.x;
+      var aHi = aLo + (seg.horizontal ? rect.height : rect.width);
+      var lo = seg.horizontal ? Math.min(d[0].x, d[1].x) : Math.min(d[0].y, d[1].y);
+      var hi = seg.horizontal ? Math.max(d[0].x, d[1].x) : Math.max(d[0].y, d[1].y);
+      var bLo = seg.horizontal ? rect.x : rect.y;
+      var bHi = bLo + (seg.horizontal ? rect.width : rect.height);
+      if (across > aLo && across < aHi && hi > bLo && lo < bHi) return true;
+    }
+    return false;
+  }
+
   // How near the plate comes to the route it annotates. BESIDE this is the rule 2 gap; ON it is
   // the negative depth above, because the stroke runs under the plate. Taken over the whole route
   // rather than the one segment the placement was built around: a corner leg of the SAME edge
@@ -9337,6 +9367,25 @@
           // covers a crossing. A label whose line cannot be told is the worse of the two: a crossing
           // under a plate still comes out of the far edge. 10 is the bottom of the flat stretch.
           if (rival < 0) penalty += 10;
+          // An ON plate with a foreign stroke running under it beside its own, along the same axis
+          // (`parallelUnder`). The held-out review found one, and `17c84b4` put it there: h03's
+          // "승인 내역 없음" sat ON its line with its sibling exit, 12px over on the same face, running
+          // the plate's whole height, because that ON cost 20 and the BESIDE above its own elbow
+          // cost 58 once the term below charged it 40 for a third line 8px off. It is the same
+          // failure as that BESIDE -- a plate between strokes a reader cannot rank -- so it pays the
+          // same 40, and the two are then ordered by the harm each does besides.
+          //
+          // Swept at 0, 20, 40, 60, 100 and 180 over 750 drawings that put two labelled exits on
+          // one rect face beside a third line (three directions, five label lengths for each of
+          // three labels, both rulers): plates with a foreign stroke parallel under them 76, 60,
+          // 52, 52, 48, 44. 20 leaves h03 as it was; 40 is the first that clears it, and it stays
+          // there, under the 50 of a mask near a mask and the 100 of a mask near a node, because
+          // either of those is worse than a plate a reader has to puzzle over. Of the 52 left, the
+          // two read off by candidate had nothing better on their route -- every other plate went
+          // into a node or over a different stroke -- so the rest are the layout's to part, not the
+          // placer's. The 204-drawing sweep is byte-identical at every weight: none of its plates
+          // had this.
+          if (onLine && parallelUnder(rect, seg, own, ctx)) penalty += 40;
           // An ON plate inside a marker's length plus rule 2's gap of the tip it points at. The head
           // then sits flush on the plate with no shaft and reads as a barb on the label rather than
           // as the end of a line: without this term 7 of 91 ON plates did, against Pele's nearest

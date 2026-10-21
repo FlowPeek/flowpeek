@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SWEEP } from './corpus.js';
-import { measureFace } from './measure.js';
+import { measureFace, measureText } from './measure.js';
 
 const require = createRequire(import.meta.url);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -144,6 +144,39 @@ describe('a plate beside its line', () => {
   it('faces the line of another edge leaving the same node only where every other seat is a harm', () => {
     const found = SWEEP.flatMap(({ name, source }) => platesFacingASibling(name, source));
     expect(found).toEqual(FACING_A_SIBLING);
+  });
+
+  it('is never ON its line with another edge of its node running under it beside its own', () => {
+    // The third held-out set's c12: two answers into one target, the second's line under the
+    // first's plate from end to end. Under the flat budget, which is the ruler the family was
+    // found on: the face measures this plate narrower than the gap it sits in.
+    const under = [];
+    const routesSeen = new Set();
+    const pairs = SWEEP.filter(({ name }) => name.startsWith('two answers into one target'));
+    for (const { name, source } of pairs) {
+      const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText });
+      expect(out.reason || 'ok').toBe('ok');
+      if (/flowchart-link" data-id="L_/.test(out.svg)) routesSeen.add(name);
+      const routes = new Map([...out.svg.matchAll(/<path[^>]*flowchart-link" data-id="(L_[^"]+)" d="([^"]+)"/g)].map((m) => [m[1], legs(m[2])]));
+      for (const m of out.svg.matchAll(/<g class="label" data-id="([^"]+)" transform="translate\(([-\d.]+),([-\d.]+)\)"><rect class="background" x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/g)) {
+        const [ox, oy, x, y, w, h] = m.slice(2).map(Number);
+        const plate = { x0: ox + x, y0: oy + y, x1: ox + x + w, y1: oy + y + h };
+        const sits = (routes.get(m[1]) || []).some(([a, b]) => (a.x === b.x
+          ? a.x > plate.x0 && a.x < plate.x1 && Math.min(a.y, b.y) < plate.y0 && Math.max(a.y, b.y) > plate.y1
+          : a.y > plate.y0 && a.y < plate.y1 && Math.min(a.x, b.x) < plate.x0 && Math.max(a.x, b.x) > plate.x1));
+        if (!sits) continue;
+        for (const [other, own] of routes) {
+          if (other === m[1]) continue;
+          const crosses = own.some(([a, b]) => (a.x === b.x
+            ? a.x > plate.x0 && a.x < plate.x1 && Math.max(a.y, b.y) > plate.y0 && Math.min(a.y, b.y) < plate.y1
+            : a.y > plate.y0 && a.y < plate.y1 && Math.max(a.x, b.x) > plate.x0 && Math.min(a.x, b.x) < plate.x1));
+          if (crosses) under.push(`${name}: ${m[1]} over ${other}`);
+        }
+      }
+    }
+    expect(pairs).toHaveLength(4);
+    expect([...routesSeen]).toEqual(pairs.map(({ name }) => name));
+    expect(under).toEqual([]);
   });
 
   it('is checked on the decision families that put the two answers on opposite sides', () => {

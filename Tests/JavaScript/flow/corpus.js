@@ -296,6 +296,17 @@ const FAMILIES = {
     '  N1 -->|next| N5', '  N0 --> N6', '  N5 --> N7', '  N6 --> N8', '  N5 --> N6', '  N3 --> N0',
     '  N4 --> N0', '  N7 --> N2', '  N3 --> N4', '  N2 -->|ok| N0',
   ].join('\n'),
+  // Two answers of one decision into one target, beside a third answer into another. Every
+  // decision above sends its answers to different boxes, so nothing asked what a plate ON one
+  // answer's line does to the other answer running beside it the whole way down: the third
+  // held-out set's c12 drew していない's line through the plate of はい・5自治体以内, and a reader
+  // could not tell which answer was which. This is c12's last decision in English.
+  // At 77ca735 the plate of "yes, five or fewer" has "not donating"'s line under it TD and BT.
+  'two answers into one target': (dir) => [
+    `flowchart ${dir}`, '  F{Medical or donation deduction?} -->|yes| G[File for a refund<br>first-year mortgage credit too]',
+    '  F -->|no| H{One-stop exemption?}', '  H -->|yes, five or fewer| N[No return needed]', '  H -->|no| G',
+    '  H -->|not donating| N',
+  ].join('\n'),
 };
 
 // Families drawn only in LR and RL, where a plate is shorter across its run than along it and so

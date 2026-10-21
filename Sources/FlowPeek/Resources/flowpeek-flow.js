@@ -6731,6 +6731,7 @@
         alongX: alongX,
         base: alongX ? box.x : box.y,
         group: group,
+        pairs: model.seatPairs,
         desires: [],
         offsets: []
       };
@@ -7334,11 +7335,32 @@
       for (g = 0; gaps && g < gaps.length; g += 1) total += gaps[g];
       if (gaps && total > face.run.hi - face.run.lo) gaps = null;
     }
-    if (gaps) return gaps;
-    var pitch = facePitch(face);
-    gaps = [];
-    for (var k = 0; k + 1 < N; k += 1) gaps.push(pitch);
-    return gaps;
+    if (!gaps) {
+      var pitch = facePitch(face);
+      gaps = [];
+      for (var k = 0; k + 1 < N; k += 1) gaps.push(pitch);
+    }
+    return face.pairs ? pairGaps(face, gaps) : gaps;
+  }
+
+  // The gaps again, with every pair the label pass found a plate over its sibling's line held half
+  // that plate plus rule 2's gap apart, or unchanged where the run cannot hold it. Half, not
+  // `seatPitch`'s whole plate: the plates of one gap stack along it, so what the plate has to clear
+  // is its neighbour's LINE, not its neighbour's plate. See the plate pass in `renderOrDecline`.
+  function pairGaps(face, gaps) {
+    var out = gaps.slice(), total = 0, wider = false;
+    for (var k = 0; k + 1 < face.group.length; k += 1) {
+      var a = face.group[k].edge, b = face.group[k + 1].edge;
+      for (var p = 0; p < face.pairs.length; p += 1) {
+        var pair = face.pairs[p];
+        var plate = pair[0] === a.id && pair[1] === b.id ? a : (pair[0] === b.id && pair[1] === a.id ? b : null);
+        if (!plate) continue;
+        var seat = plateAcross(plate, !face.alongX) / 2 + LABEL_GAP;
+        if (seat > out[k]) { out[k] = seat; wider = true; }
+      }
+    }
+    for (k = 0; k < out.length; k += 1) total += out[k];
+    return wider && total <= face.run.hi - face.run.lo ? out : gaps;
   }
 
   // How close another port on the face may stand to slot `g`'s: the wider of its two gaps.
@@ -7622,6 +7644,8 @@
 
     var rootDir = normaliseDirection(opts.direction || db.getDirection(), "TB");
     var model = buildModel(db, rootDir);
+    // Pairs of edges whose ports must stand a plate apart (`renderOrDecline`, `facePitches`).
+    model.seatPairs = opts.seatPairs || null;
     env.clusters = model.clusterById;
     var warnings = model.warnings;
     var i;
@@ -10248,6 +10272,21 @@
     return false;
   }
 
+  // The edges sharing a box with this one whose strokes run under its ON plate along the run it
+  // sits on -- `parallelUnder`'s case, asked of a placed plate and answered with whose line it is.
+  function siblingsUnder(label, edge, ctx) {
+    var out = [];
+    var rect = label.rect;
+    for (var i = 0; i < ctx.drawn.length; i += 1) {
+      var d = ctx.drawn[i];
+      var other = d.edge;
+      if (!other || other === edge || out.indexOf(other) >= 0) continue;
+      if (other.from !== edge.from && other.from !== edge.to && other.to !== edge.from && other.to !== edge.to) continue;
+      if (parallelUnder(rect, { horizontal: label.horizontal }, [], { drawn: [d] })) out.push(other);
+    }
+    return out;
+  }
+
   // Is the next stroke past a BESIDE plate -- across the plate, on the side away from its own run,
   // anywhere along the plate's length -- a sibling's: another edge leaving the node this one leaves?
   //
@@ -11683,6 +11722,13 @@
     for (i = 0; i < routed.length; i += 1) {
       if (routed[i] && routed[i].label && routed[i].label.crowded) noteWarning(warnings, "label-crowded");
     }
+    // Plates ON their line with a sibling's line under them, for the plate pass in `renderOrDecline`.
+    var sibling = [];
+    for (i = 0; i < routed.length; i += 1) {
+      if (!routed[i] || !routed[i].label || !routed[i].label.onLine) continue;
+      var under = siblingsUnder(routed[i].label, routed[i].edge, ctx);
+      for (var su = 0; su < under.length; su += 1) sibling.push([routed[i].edge.id, under[su].id]);
+    }
 
     // After the labels, not before: a bridge may not land under a mask, and where the masks are is
     // only settled once every one of them has been placed.
@@ -11826,7 +11872,7 @@
 
     var plates = [];
     for (i = 0; i < routed.length; i += 1) if (routed[i] && routed[i].label) plates.push(routed[i].label.rect);
-    return { svg: svg, css: css, warnings: warnings, plates: plates, struck: struck };
+    return { svg: svg, css: css, warnings: warnings, plates: plates, struck: struck, sibling: sibling };
   }
 
   // ===========================================================================
@@ -11922,6 +11968,35 @@
       drawing = layout(db, { measureText: p.measureText, theme: theme, titleRoom: titleRoom });
       out = emit(db, drawing, theme, renderID);
     }
+    // A plate ON its line with a sibling's line under it, answered by laying the drawing out again
+    // with that pair's ports half the plate plus rule 2's gap apart wherever a face holds both.
+    //
+    // The placer prices it already -- `parallelUnder` charges 40 on top of the 10 for the stroke
+    // and the 10 for a stroke under the plate -- and still takes it, because nothing cheaper is on
+    // the route. The third held-out set's c12 sent はい・5自治体以内 (a 120px plate) and していない
+    // into 確定申告は不要 from a diamond's slopes 52px apart, and the two landed 36px apart: every
+    // seat on はい's route had one of its siblings under it, and the one it took cost 60 against 70
+    // for the next. Only the layout can give the room, and only once the plate has shown where it
+    // needs it: widening every such pair up front moved 12 of the 60 held-out drawings and added
+    // 20 bends to differential.mjs's drawings, none of which had a plate over a sibling.
+    //
+    // Kept only where it removes a plate from over a sibling. A pair that shares no face it can
+    // move -- c15's two exits of one diamond into different boxes -- lays out the same and is
+    // dropped.
+    var seatPairs = null;
+    if (out.sibling.length) {
+      var db2 = new FlowDB();
+      db2.clear();
+      parse(p.source, db2);
+      var drawing2 = layout(db2, { measureText: p.measureText, theme: theme, titleRoom: titleRoom, seatPairs: out.sibling });
+      var out2 = emit(db2, drawing2, theme, renderID);
+      if (out2.sibling.length < out.sibling.length) {
+        seatPairs = out.sibling;
+        db = db2;
+        drawing = drawing2;
+        out = out2;
+      }
+    }
     // A plate the placer put outside the content box is given a canvas that holds it, by laying the
     // drawing out again with that much more room on that side. The layout reserves room for the
     // labels it can predict, and the placer still sometimes finds its best position past the last
@@ -11952,7 +12027,7 @@
       db = new FlowDB();
       db.clear();
       parse(p.source, db);
-      drawing = layout(db, { measureText: p.measureText, theme: theme, grow: grow, titleRoom: titleRoom });
+      drawing = layout(db, { measureText: p.measureText, theme: theme, grow: grow, titleRoom: titleRoom, seatPairs: seatPairs });
       out = emit(db, drawing, theme, renderID);
     }
 

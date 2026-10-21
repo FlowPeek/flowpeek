@@ -8340,6 +8340,25 @@
     return n;
   }
 
+  // Between every two routes the corridors pass orders -- no self-loop, no transit leg -- the
+  // crossings, and the stretches drawn on one line (`runsAlong`) or beside one (`besideCount`).
+  function tangleOfRoutes(routed) {
+    var live = routed.filter(function (r) { return r && !r.edge.selfLoop && !r.transit; });
+    var out = { crossed: 0, doubled: 0 };
+    for (var a = 0; a < live.length; a += 1) {
+      var p = live[a].points;
+      for (var b = a + 1; b < live.length; b += 1) {
+        var q = live[b].points;
+        out.crossed += crossingsBetween(p, q);
+        out.doubled += besideCount(p, [live[b]]);
+        for (var i = 0; i + 1 < p.length; i += 1) {
+          for (var j = 0; j + 1 < q.length; j += 1) if (runsAlong(p[i], p[i + 1], q[j], q[j + 1])) out.doubled += 1;
+        }
+      }
+    }
+    return out;
+  }
+
   // The route with run k (points k and k+1) moved onto `value` across its own axis, or null when
   // that would turn a leg round, shorten a stub below its floor, or leave a leg too short to round.
   function shiftRun(points, k, value, edge) {
@@ -8682,7 +8701,8 @@
   // says which way round. Its leftovers: where two of a face's routes hold one lane between them,
   // end to end, the lanes they hold are too few to nest them, and the order is not attempted --
   // a labelled variant of braid.spec.js's three-arm fan keeps 2 hops so, in all four directions.
-  function orderCorridors(routed, ctx) {
+  function orderCorridors(routed, ctx, free) {
+    var freedParts = 0;
     var live = [];
     for (var i = 0; i < routed.length; i += 1) {
       if (routed[i] && !routed[i].edge.selfLoop && !routed[i].transit) live.push(routed[i]);
@@ -8752,32 +8772,120 @@
         if (e.level === levels[m]) continue;
         var next = shiftRun(e.r.points, e.k, levels[m], e.r.edge);
         if (!next) return;
-        moved.push({ e: e, points: next, was: e.r.points });
+        moved.push({ e: e, points: next, was: e.r.points, rank: m });
       }
       if (moved.length === 0) return;
       var before = crossingsOfAll();
       for (m = 0; m < moved.length; m += 1) moved[m].e.r.points = moved[m].points;
-      var ok = crossingsOfAll() < before;
-      for (m = 0; ok && m < moved.length; m += 1) {
-        var r = moved[m].e.r;
-        if (!stubsAndBodyClear(r.points, ctx, r.edge)) ok = false;
-        else if (foreignPassages(r.points, ctx, r.edge) > foreignPassages(moved[m].was, ctx, r.edge)) ok = false;
-        else {
-          var drawn = [];
-          for (var o = 0; o < live.length; o += 1) {
-            if (live[o] === r) continue;
-            for (var s = 0; s + 1 < live[o].points.length; s += 1) drawn.push([live[o].points[s], live[o].points[s + 1]]);
-          }
-          var saved = ctx.drawn;
-          ctx.drawn = drawn;
-          // The legs between the two stubs: a port that has sunk into a rounded outline starts inside
-          // its own box's rectangle, which `stubsAndBodyClear` above already excuses and this would not.
-          if (!routeIsClear(r.points.slice(1, r.points.length - 1), ctx, 2, r.edge)) ok = false;
-          ctx.drawn = saved;
+      var face = g[0].face;
+      function out(v) { return Math.abs(v - face); }
+      // The lane a route was handed is refused, and the lanes the part holds are not the only ones
+      // in the gap. In b09 STAT200 -> CS450 was handed the lane CS350 -> CS450 held, and on it the
+      // climb to CS450 ran along CS360 -> CS460's climb to CS460, a route of another face that holds
+      // the same line further down the corridor; in h12q rowner -> pread, nested onto projects:read,
+      // ran along rowner -> pdeploy the same way. Those were the only two refusals of this kind over
+      // SWEEP and the three review sets, and each left its face's routes crossing where nested they
+      // need not. So the route is offered the free lanes beside it, a grid step at a time and
+      // nearest first, as far as `roomForBridges` slides a run -- but only between its neighbours
+      // in the order, so the nest still holds -- and of those that pass every check the handed lane
+      // failed it keeps the one laid beside fewest other strokes, never more than where it was.
+      // b09 then draws 10 crossings where it drew 13, and h12q 3 where it drew 5; no other drawing
+      // in those sets moves.
+      // Rejected: keeping the handed lane and ignoring the shared run. That draws STAT200's climb
+      // on CS360 -> CS460's line, and b09 still ends with 14 crossings, not fewer. Rejected too:
+      // the first free lane that passes. For STAT200 that is 4px from CS360 -> CS460's climb, the
+      // part then lays more beside other strokes than it did and is refused, and b09 stays at 13;
+      // over the 163 random DAGs counted below it leaves 4 with fewer crossings where this leaves 55.
+      function freeLane(mv, leave) {
+        var lane = levels[mv.rank];
+        var away = sign(lane - face) || 1;
+        var inner = mv.rank > 0 ? out(levelOf(order[mv.rank - 1])) : 0;
+        var outer = mv.rank + 1 < order.length ? out(levels[mv.rank + 1]) : Infinity;
+        var rest = others(mv.e.r);
+        var best = null;
+        var least = besideCount(mv.was, rest);
+        for (var d = 1; d <= 2 * SLIDE_STEPS; d += 1) {
+          var v = lane + away * (d % 2 ? 1 : -1) * Math.ceil(d / 2) * GRID;
+          if (out(v) <= inner || out(v) >= outer) continue;
+          var alt = shiftRun(mv.was, mv.e.k, v, mv.e.r.edge);
+          if (!alt) continue;
+          var beside = besideCount(alt, rest);
+          if (best && beside >= least) continue;
+          if (beside > least) continue;
+          mv.e.r.points = alt;
+          if (fits(mv.e.r, mv.was, leave)) { best = alt; least = beside; }
         }
+        mv.e.r.points = best || mv.points;
+        if (best) mv.points = best;
+        return best !== null;
       }
+      var ok = true;
+      var freed = false;
+      for (m = 0; ok && m < moved.length; m += 1) {
+        if (fits(moved[m].e.r, moved[m].was, false)) continue;
+        freed = true;
+        ok = free && freeLane(moved[m], true);
+      }
+      // A part that needed a free lane is a nest the pass used to refuse, and it is held to one
+      // check more, over every route it moves: the leg a route leaves its node by keeps the run an
+      // 8px fillet needs on both sides, where it had that run. A lane the part held can lie that
+      // close to another route's source face -- it was some other route's lane -- and `shiftRun`
+      // only keeps the stub's floor. In `nesting past a third route`, once B --> E had its free lane,
+      // D --> E took the lane B --> E gave up 12px off D and turned on a 4px fillet in every
+      // direction, the shape arrival.spec.js measures on every source; with this it takes a free
+      // lane 16px off D.
+      // Rejected: the same check on every part. It also refuses nests the pass has always made --
+      // r-cand and h20 move, neither with a crossing fewer -- which is a change to drawings nobody
+      // reported, and not this one's to make.
+      for (m = 0; ok && freed && m < moved.length; m += 1) {
+        if (!fits(moved[m].e.r, moved[m].was, true)) ok = freeLane(moved[m], true);
+      }
+      if (ok && freed) ok = besideOfAll(moved, true) <= besideOfAll(moved, false);
+      if (ok) ok = crossingsOfAll() < before;
       if (!ok) for (m = 0; m < moved.length; m += 1) moved[m].e.r.points = moved[m].was;
+      else if (freed) freedParts += 1;
     });
+    return freedParts;
+    function others(r) {
+      return live.filter(function (o) { return o !== r; });
+    }
+    // Stretches of the drawing laid beside another stroke (`besideCount`), with the part's moves
+    // applied or with each moved route back where it was.
+    function besideOfAll(moved, applied) {
+      var m;
+      if (!applied) for (m = 0; m < moved.length; m += 1) moved[m].e.r.points = moved[m].was;
+      var n = 0;
+      for (var a = 0; a < live.length; a += 1) n += besideCount(live[a].points, live.slice(a + 1));
+      if (!applied) for (m = 0; m < moved.length; m += 1) moved[m].e.r.points = moved[m].points;
+      return n;
+    }
+    function levelOf(e) {
+      var p = e.r.points;
+      return p[e.k].y === p[e.k + 1].y ? p[e.k].y : p[e.k].x;
+    }
+    // What `uncrossPairs` asks of a swap, of one moved route, and with `leave` the leg it leaves
+    // its node by kept at 16px where it was at least that.
+    function fits(r, was, leave) {
+      if (leave) {
+        var now = Math.abs(r.points[1].x - r.points[0].x) + Math.abs(r.points[1].y - r.points[0].y);
+        var then = Math.abs(was[1].x - was[0].x) + Math.abs(was[1].y - was[0].y);
+        if (now < Math.min(then, 2 * STUB_PX)) return false;
+      }
+      if (!stubsAndBodyClear(r.points, ctx, r.edge)) return false;
+      if (foreignPassages(r.points, ctx, r.edge) > foreignPassages(was, ctx, r.edge)) return false;
+      var drawn = [];
+      for (var o = 0; o < live.length; o += 1) {
+        if (live[o] === r) continue;
+        for (var s = 0; s + 1 < live[o].points.length; s += 1) drawn.push([live[o].points[s], live[o].points[s + 1]]);
+      }
+      var saved = ctx.drawn;
+      ctx.drawn = drawn;
+      // The legs between the two stubs: a port that has sunk into a rounded outline starts inside
+      // its own box's rectangle, which `stubsAndBodyClear` above already excuses and this would not.
+      var clear = routeIsClear(r.points.slice(1, r.points.length - 1), ctx, 2, r.edge);
+      ctx.drawn = saved;
+      return clear;
+    }
   }
 
   // A crossing drawn where neither connector can carry a bump.
@@ -11064,10 +11172,39 @@
     // braids the trades were added for -- pairs crossing twice over SWEEP, the review sources and
     // both held-out sets went from 3 to 6 -- because it also refuses trades like b11's Esc / Boss
     // defeated, which leaves that pair crossing once where it crossed twice.
-    orderCorridors(routed, ctx);
-    uncrossPairs(routed, ctx);
-    orderCorridors(routed, ctx);
-    roomForBridges(routed, ctx);
+    //
+    // The corridors pass may give a refused nest a free lane (`orderCorridors`), and it keeps one
+    // when the nest leaves fewer crossings where the routes then stand -- but the passes after it
+    // start from what it kept, and a nest they would have done better without is not undone. Over
+    // 3,000 distinct random DAGs of six to twelve nodes, 163 had a nest refused this way, and
+    // taking the free lane wherever it helped on the spot left 7 of them with more crossings at the
+    // end than without it, one going from 3 to 8: uncrossPairs and roomForBridges had untied the
+    // refused drawing, and could not untie the nested one. So where a free lane was taken, the
+    // four passes are run again from the same routes with free lanes refused, and the free lanes
+    // are kept only if they end with strictly fewer crossings and no more stretches on or beside
+    // another route's line. The second half is not idle: in one of the 163, `roomForBridges`,
+    // starting from a free lane, slid N2 -> N4's run onto N3 -> N6's line. With both, none of the
+    // 163 draws more crossings than at bbfbea3, 55 draw fewer, and their drawn crossings go from
+    // 646 to 587. It costs those drawings a second run of the four passes and no other drawing
+    // anything; on a tie the drawing is the one it was.
+    var untangledFrom = routed.map(function (r) { return r ? r.points : null; });
+    if (untangle(true) > 0) {
+      var withFree = routed.map(function (r) { return r ? r.points : null; });
+      var tangledFree = tangleOfRoutes(routed);
+      for (i = 0; i < routed.length; i += 1) if (routed[i]) routed[i].points = untangledFrom[i];
+      untangle(false);
+      var tangled = tangleOfRoutes(routed);
+      if (tangledFree.crossed < tangled.crossed && tangledFree.doubled <= tangled.doubled) {
+        for (i = 0; i < routed.length; i += 1) if (routed[i]) routed[i].points = withFree[i];
+      }
+    }
+    function untangle(free) {
+      var n = orderCorridors(routed, ctx, free);
+      uncrossPairs(routed, ctx);
+      n += orderCorridors(routed, ctx, free);
+      roomForBridges(routed, ctx);
+      return n;
+    }
     ctx.drawn = [];
     for (i = 0; i < routed.length; i += 1) {
       if (!routed[i]) continue;

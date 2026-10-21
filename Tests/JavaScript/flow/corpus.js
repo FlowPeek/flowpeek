@@ -263,6 +263,17 @@ const FAMILIES = {
     '  arm -->|report| gw', '  arm --> pack[Packer]', '  probe[Spot welder] -->|report| gw', '  probe --> pack',
     '  ctl[Control] -->|order| gw', '  gw -->|result| ctl', '  pack --> store[(Store)]',
   ].join('\n'),
+  // A crowded gap where nesting one lane puts it along a third route's. Every nesting above lands
+  // on a lane its face's routes held between them, so nothing asked what happens when that lane
+  // also carries a route of another face further along the corridor: the held-out set's b09 did,
+  // STAT200 -> CS450 nested onto a lane CS360 -> CS460 climbs. Found by rendering random DAGs of
+  // six to twelve nodes and keeping those where a nesting into one face was refused for running
+  // along a route the nest did not move; this one does it with no warning in any direction.
+  // At bbfbea3 B --> E crosses D --> E, in every direction.
+  'nesting past a third route': (dir) => [
+    `flowchart ${dir}`, '  A --> B', '  A --> C', '  C --> D', '  B --> E', '  E --> F', '  D --> G', '  A --> H',
+    '  C --> I', '  D --> E', '  A --> E', '  B --> G', '  C --> E', '  C --> H',
+  ].join('\n'),
 };
 
 // Families drawn only in LR and RL, where a plate is shorter across its run than along it and so
@@ -462,7 +473,8 @@ export const TIGHT_MASKS = [];
  * one segment before `seatPitch` spread its face as after, and 438 until `two-way pair past a held
  * lane` added 4, one segment before the slide `uncrossPairs` offers as after, and 442 until
  * `labelled exits that step into heads` added 2, one segment before a seated straight was sized as
- * after.
+ * after, and 444 until `nesting past a third route` added 4, one segment before a nest was offered
+ * a free lane as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -473,7 +485,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 444;
+export const ALIGNED_PAIRS = 448;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

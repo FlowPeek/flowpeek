@@ -212,6 +212,16 @@ describe('[Braid] routes into one face take their lanes in the order of its port
     const found = families.flatMap(({ name, source }) => sharedEndCrossings(source).map((b) => `${name}: ${b}`));
     expect(found).toEqual([]);
   });
+
+  // The lane the nest hands B --> E runs along D --> G, which the nest does not move, so the order
+  // only holds with B --> E on a free lane beside it. At bbfbea3 B --> E crosses D --> E in every
+  // direction.
+  it('holds where the nested lane would run along a third route', () => {
+    const family = SWEEP.filter(({ name }) => /^nesting past a third route /.test(name));
+    expect(family.length).toBe(4);
+    const found = family.flatMap(({ name, source }) => sharedEndCrossings(source).map((b) => `${name}: ${b}`));
+    expect(found).toEqual([]);
+  });
 });
 
 // A fork's arm lands on the near side of a corridor into the same face.

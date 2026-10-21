@@ -2451,4 +2451,42 @@ describe('[Render] which connector a label belongs to', () => {
     }
     expect(covered).toEqual([]);
   });
+
+  it('never lays another line along the edge of a plate from end to end', () => {
+    // A plate is opaque and painted over the strokes, so a stroke lying ON its edge loses half its
+    // width for the plate's whole length and reads as the plate's border: the line looks broken,
+    // and the plate stands between two lines on one axis -- the case above with the other stroke
+    // one pitch further out. The held-out review's h04 drew "DFU request" on its line with "CRC
+    // error"'s line, running the other way 12px below, on the bottom edge of the 24px plate for all
+    // 88px of it. The pair below is that load with nothing else of h04 kept: a labelled pair both
+    // ways one pitch apart, and a third labelled exit off the same face. It is not in the sweep
+    // because drawn TD or BT it trips label-crowded and a mask inside rule 2's gap, before this
+    // fix and after -- the layout leaves the three no room -- and the sweep's records are empty.
+    const PAIR = (dir) => [
+      `flowchart ${dir}`, '  S[Start] -->|ok| C[Client]', '  C -->|go| V[Server]', '  V -->|checksum failed| C',
+      '  C -->|supervision timeout| W[Watchdog]', '  W --> V',
+    ].join('\n');
+    const sources = [...SWEEP, ...['TD', 'LR', 'BT', 'RL'].map((dir) => ({ name: `two-way pair ${dir}`, source: PAIR(dir) }))];
+    const along = [];
+    for (const ruler of [measureText, measureFace]) {
+      for (const { name, source } of sources) {
+        const svg = drawn(source, { measureText: ruler }).svg;
+        const paths = edgePaths(svg);
+        for (const mask of masks(svg)) {
+          for (const other of paths) {
+            if (other.id === mask.id) continue;
+            for (const [p, q] of segmentsOf(polyline(other.d))) {
+              const onEdge = p.y === q.y
+                ? (p.y === mask.y || p.y === mask.y + mask.height)
+                  && Math.min(p.x, q.x) <= mask.x && Math.max(p.x, q.x) >= mask.x + mask.width
+                : p.x === q.x && (p.x === mask.x || p.x === mask.x + mask.width)
+                  && Math.min(p.y, q.y) <= mask.y && Math.max(p.y, q.y) >= mask.y + mask.height;
+              if (onEdge) along.push(`${ruler === measureFace ? 'face' : 'budget'} ${name}: ${other.id} along ${mask.id}`);
+            }
+          }
+        }
+      }
+    }
+    expect(along).toEqual([]);
+  });
 });

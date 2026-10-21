@@ -9133,7 +9133,22 @@
   // lines enter the plate on the same axis and leave it on the same axis, and nothing to say which
   // of the two the words name. A crossing under a plate is the other case and is not this one: it
   // enters across the plate's own line and leaves across it, which the comment on `rival < 0`
-  // weighs. Strictly inside the plate, so a stroke that only meets its edge is left to the gap terms.
+  // weighs.
+  //
+  // Inside the plate, or lying ON its edge from one end of the plate to the other. The plate is
+  // opaque and painted over the strokes, so a stroke on its edge loses half its width for the whole
+  // length and reads as the plate's border: the line looks broken where the words are, and the
+  // plate stands between two lines on one axis exactly as above. The held-out review's h04 drew
+  // "DFU request" ON its line with "CRC error"'s line 12px below -- one pitch, half the plate's 24px
+  // -- on its bottom edge for all 88px, and this test, strictly inside, let it pass. The review
+  // read the miss as a direction test, but nothing here asks direction; the boundary was the bug.
+  //
+  // Rejected: any stroke meeting the edge for any length. Run over 576 drawings that put a labelled
+  // two-way pair beside a third exit on one face, it moved 4 whose third exit clipped 4px of a
+  // plate's corner before turning away -- a stroke a reader still sees leave -- and took "close"
+  // off its line to stand between two others. End to end on the edge moved 8 of the 576, took 2
+  // plates off a stroke they erased, moved h04 alone of the held-out twenty, and left all
+  // 212 sweep drawings byte-identical. A partial meeting stays with the gap terms.
   function parallelUnder(rect, seg, own, ctx) {
     for (var i = 0; i < ctx.drawn.length; i += 1) {
       var d = ctx.drawn[i];
@@ -9152,6 +9167,7 @@
       var bLo = seg.horizontal ? rect.x : rect.y;
       var bHi = bLo + (seg.horizontal ? rect.width : rect.height);
       if (across > aLo && across < aHi && hi > bLo && lo < bHi) return true;
+      if ((across === aLo || across === aHi) && lo <= bLo && hi >= bHi) return true;
     }
     return false;
   }

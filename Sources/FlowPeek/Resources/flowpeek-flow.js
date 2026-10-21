@@ -7026,6 +7026,138 @@
     return current;
   }
 
+  // Two connectors that cross each other twice.
+  //
+  // Each route is chosen alone, against the strokes drawn before it, and nothing in that choice
+  // counts crossings: the first clear cross-line nearest the reserved lane wins. So two edges whose
+  // cross-runs share a stretch of one rank gap can come out in the order where each one's leg cuts
+  // the other's run -- a crossing, a stretch side by side, and a crossing back. That is the braid
+  // the review could not trace through ("rows of bumps"), and between the two of them it is never
+  // needed: swap the two runs' coordinates and the same two shapes cross each other zero times.
+  // Whether the swap is TAKEN depends on the rest of the drawing -- below. Measured over the 16 review sources
+  // before this pass, 15 pairs of connectors crossed twice -- 11 of them in the dense 14-node DAG,
+  // where they were 22 of its 43 crossings -- and none in the 172-source sweep.
+  //
+  // Reordering the gap's LANES in the layout was the first lever tried, since lanes are handed out
+  // in declaration order with no notion of crossings: every permutation of each gap's lanes,
+  // scored by crossings at the box centres, the best one kept. It predicted 43 in-gap crossings
+  // falling to 28 over the review sources and drew 90 crossings where there had been 90. The
+  // prediction is made at the centres, before ports are fanned and before the router departs from
+  // a lane it cannot take, so it was optimising a drawing that is never made. This works on the
+  // finished points instead.
+  //
+  // A swap only moves two interior runs along their own normal, so it adds no bend, leaves both
+  // ports and both stubs where they were (a stub may lengthen, never drop below its floor), and is
+  // kept only when the two routes together cross strictly fewer strokes than before, are still
+  // clear at the same strictness `straightenDetours` asks for, and enter no foreign zone they did
+  // not already. Self-loops are not offered: the loop is the detour.
+  function crossesAt(p, q, r, s) {
+    if (p.y === q.y && r.x === s.x) {
+      return r.x > Math.min(p.x, q.x) && r.x < Math.max(p.x, q.x) && p.y > Math.min(r.y, s.y) && p.y < Math.max(r.y, s.y);
+    }
+    if (p.x === q.x && r.y === s.y) return crossesAt(r, s, p, q);
+    return false;
+  }
+
+  function crossingsBetween(a, b) {
+    var n = 0;
+    for (var i = 0; i + 1 < a.length; i += 1) {
+      for (var j = 0; j + 1 < b.length; j += 1) {
+        if (crossesAt(a[i], a[i + 1], b[j], b[j + 1])) n += 1;
+      }
+    }
+    return n;
+  }
+
+  // The route with run k (points k and k+1) moved onto `value` across its own axis, or null when
+  // that would turn a leg round, shorten a stub below its floor, or leave a leg too short to round.
+  function shiftRun(points, k, value, edge) {
+    var axis = (points[k].y === points[k + 1].y) ? "y" : "x";
+    var out = points.map(function (p) { return { x: p.x, y: p.y }; });
+    out[k][axis] = value;
+    out[k + 1][axis] = value;
+    for (var i = 0; i + 1 < out.length; i += 1) {
+      var was = sign(points[i + 1].x - points[i].x) + 2 * sign(points[i + 1].y - points[i].y);
+      var now = sign(out[i + 1].x - out[i].x) + 2 * sign(out[i + 1].y - out[i].y);
+      if (was !== now) return null;
+    }
+    var last = out.length - 1;
+    var first = Math.abs(out[1].x - out[0].x) + Math.abs(out[1].y - out[0].y);
+    var arrive = Math.abs(out[last].x - out[last - 1].x) + Math.abs(out[last].y - out[last - 1].y);
+    if (first < STUB_PX + edge.start.inset) return null;
+    if (arrive < ARRIVE_PX + edge.end.inset) return null;
+    if (!legsAreDrawable(out)) return null;
+    return out;
+  }
+
+  function uncrossPairs(routed, ctx) {
+    var live = [];
+    for (var i = 0; i < routed.length; i += 1) {
+      if (routed[i] && !routed[i].edge.selfLoop) live.push(routed[i]);
+    }
+    function othersCrossing(points, skipA, skipB) {
+      var n = 0;
+      for (var o = 0; o < live.length; o += 1) {
+        if (live[o] === skipA || live[o] === skipB) continue;
+        n += crossingsBetween(points, live[o].points);
+      }
+      return n;
+    }
+    function clearWith(points, edge, skipA, skipB, partner) {
+      var drawn = [];
+      for (var o = 0; o < live.length; o += 1) {
+        if (live[o] === skipA || live[o] === skipB) continue;
+        for (var s = 0; s + 1 < live[o].points.length; s += 1) drawn.push([live[o].points[s], live[o].points[s + 1]]);
+      }
+      for (var t = 0; t + 1 < partner.length; t += 1) drawn.push([partner[t], partner[t + 1]]);
+      var saved = ctx.drawn;
+      ctx.drawn = drawn;
+      var ok = routeIsClear(points, ctx, 2, edge);
+      ctx.drawn = saved;
+      return ok;
+    }
+    // Bounded, because each accepted swap strictly lowers a finite count and a few rounds is all the
+    // review sources ever use; the bound is there so a pathological source costs time linearly.
+    for (var round = 0; round < 4; round += 1) {
+      var moved = false;
+      for (var a = 0; a < live.length; a += 1) {
+        for (var b = a + 1; b < live.length; b += 1) {
+          var P = live[a], Q = live[b];
+          if (P.transit || Q.transit) continue;
+          var mutual = crossingsBetween(P.points, Q.points);
+          if (mutual < 2) continue;
+          var before = mutual + othersCrossing(P.points, P, Q) + othersCrossing(Q.points, P, Q);
+          var done = false;
+          for (var j = 1; j + 2 < P.points.length && !done; j += 1) {
+            var pH = P.points[j].y === P.points[j + 1].y;
+            for (var k = 1; k + 2 < Q.points.length && !done; k += 1) {
+              var qH = Q.points[k].y === Q.points[k + 1].y;
+              if (pH !== qH) continue;
+              var pc = pH ? P.points[j].y : P.points[j].x;
+              var qc = qH ? Q.points[k].y : Q.points[k].x;
+              if (pc === qc) continue;
+              var P2 = shiftRun(P.points, j, qc, P.edge);
+              if (!P2) continue;
+              var Q2 = shiftRun(Q.points, k, pc, Q.edge);
+              if (!Q2) continue;
+              var after = crossingsBetween(P2, Q2) + othersCrossing(P2, P, Q) + othersCrossing(Q2, P, Q);
+              if (after >= before) continue;
+              if (!stubsAndBodyClear(P2, ctx, P.edge) || !stubsAndBodyClear(Q2, ctx, Q.edge)) continue;
+              if (!clearWith(P2, P.edge, P, Q, Q2) || !clearWith(Q2, Q.edge, P, Q, P2)) continue;
+              if (foreignPassages(P2, ctx, P.edge) > foreignPassages(P.points, ctx, P.edge)) continue;
+              if (foreignPassages(Q2, ctx, Q.edge) > foreignPassages(Q.points, ctx, Q.edge)) continue;
+              P.points = P2;
+              Q.points = Q2;
+              done = true;
+              moved = true;
+            }
+          }
+        }
+      }
+      if (!moved) break;
+    }
+  }
+
   function routeIsClear(points, ctx, strict, edge) {
     for (var i = 0; i + 1 < points.length; i += 1) {
       if (!legIsClear(points[i], points[i + 1], ctx, strict, edge)) return false;
@@ -8441,6 +8573,16 @@
       if (head) markers.set(head + "End", true);
       if (tail) markers.set(tail + "Start", true);
       if (edge.kind && head === "point") markers.set("fp-" + edge.kind, true);
+    }
+
+    // After every route exists, because a braid is a fact about two finished routes. `ctx.drawn`
+    // is rebuilt from the result: the label pass tells a route's own legs from a rival's by the
+    // identity of the point objects, so it has to hold the arrays the routes now carry.
+    uncrossPairs(routed, ctx);
+    ctx.drawn = [];
+    for (i = 0; i < routed.length; i += 1) {
+      if (!routed[i]) continue;
+      for (var ds = 0; ds + 1 < routed[i].points.length; ds += 1) ctx.drawn.push([routed[i].points[ds], routed[i].points[ds + 1]]);
     }
 
     // Between the two passes on purpose: every stroke is drawn by now, which is what the title has

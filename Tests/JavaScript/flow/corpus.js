@@ -178,6 +178,22 @@ const FAMILIES = {
     `flowchart ${dir}`, '  A[Start] --> B[One] --> C[Two] --> D[Three] --> E[End]',
     '  A --> P[Wide parallel step] --> Q[Another one] --> E', '  A -->|skip| E',
   ].join('\n'),
+  // A decision whose two labelled answers leave it in OPPOSITE directions across the rank axis, one
+  // to each side. Every decision above sends its answers to one side or fans them down one face,
+  // so the gap between two answers that diverge from one vertex never held both plates; the second
+  // held-out set's b20 put "불가" and "가능" in exactly that gap and the reviewer could swap them.
+  // The second family adds what made that gap the only seat: a labelled skip arriving beside one
+  // answer, and a plain link arriving beside the other.
+  'opposed answers': (dir) => [
+    `flowchart ${dir}`, '  A[Submit form] --> D{Guarantee available?}', '  D -->|no| X([Give up])',
+    '  D -->|yes| P[Pay deposit]', '  P --> Q[Sign lease]',
+  ].join('\n'),
+  'opposed answers beside a skip': (dir) => [
+    `flowchart ${dir}`, '  M[Search listings] --> R[Read the registry: owner and mortgage]',
+    '  R -->|mortgage over 70% of price| X([Give up])', '  R -->|no problem| T[Request proof of paid taxes]',
+    '  T -.-> D{Guarantee?}', '  D -.->|refused| X', '  D -.->|granted| P[Pay the holding deposit]', '  T --> P',
+    '  P --> Q[Sign the lease]',
+  ].join('\n'),
 };
 
 /**
@@ -323,7 +339,8 @@ export const TIGHT_MASKS = [];
  * 212 until the two labelled-decision families added 10, 222 until the two busy labelled-face
  * families added 20, 242 until the three zone-title families added 20, 262 until the two
  * return-past families added 8, and 270 until the styled-shape family added 112 -- two per drawing, all
- * one segment, as they must be: an author's colour changes no geometry.
+ * one segment, as they must be: an author's colour changes no geometry -- and 382 until the two
+ * opposed-answer families added 16, one segment before `facesSibling` as well as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -334,7 +351,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 382;
+export const ALIGNED_PAIRS = 398;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

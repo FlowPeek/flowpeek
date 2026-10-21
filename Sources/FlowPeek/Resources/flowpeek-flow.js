@@ -9469,6 +9469,43 @@
     return false;
   }
 
+  // Is the next stroke past a BESIDE plate -- across the plate, on the side away from its own run,
+  // anywhere along the plate's length -- a sibling's: another edge leaving the node this one leaves?
+  //
+  // Then the plate stands in the gap between two lines that leave one vertex, and those are the two
+  // lines a reader is most likely to confuse: they start together, and what is written on them is the
+  // same kind of word -- "yes" and "no", "불가" and "가능". The second held-out set's b20 drew both of
+  // a decision's answers that way, each plate facing the other's line, and its reviewer could swap
+  // them; every margin the placer scores was positive, because each plate was 8px from its own line
+  // and 40px from its sibling's. A plate that faces some unrelated line is not this case: that line
+  // does not start where its own does, and the margin term already prices it by distance.
+  //
+  // Across the plate's whole length, not only from its middle: tested from the middle, b20's "불가"
+  // slid 4px along its run until the ray missed the end of "가능"'s line, and stood where it was.
+  function facesSibling(rect, seg, side, own, edge, ctx) {
+    var best = Infinity, owner = null;
+    var lo = seg.horizontal ? rect.x : rect.y;
+    var hi = lo + (seg.horizontal ? rect.width : rect.height);
+    var far = seg.horizontal ? (side > 0 ? rect.y + rect.height : rect.y) : (side > 0 ? rect.x + rect.width : rect.x);
+    for (var i = 0; i < ctx.drawn.length; i += 1) {
+      var d = ctx.drawn[i];
+      if (!d.edge || d.edge === edge) continue;
+      var across, dLo, dHi;
+      if (seg.horizontal) {
+        if (d[0].y !== d[1].y) continue;
+        across = d[0].y; dLo = Math.min(d[0].x, d[1].x); dHi = Math.max(d[0].x, d[1].x);
+      } else {
+        if (d[0].x !== d[1].x) continue;
+        across = d[0].x; dLo = Math.min(d[0].y, d[1].y); dHi = Math.max(d[0].y, d[1].y);
+      }
+      if (dHi <= lo || dLo >= hi) continue;
+      var dist = (across - far) * side;
+      if (dist >= 0 && dist < best) { best = dist; owner = d.edge; }
+    }
+    return owner !== null && owner.from === edge.from;
+  }
+
+
   // How near the plate comes to the route it annotates. BESIDE this is the rule 2 gap; ON it is
   // the negative depth above, because the stroke runs under the plate. Taken over the whole route
   // rather than the one segment the placement was built around: a corner leg of the SAME edge
@@ -9857,8 +9894,28 @@
           // would mean: at 180 it put two of the three "settled" plates of render.spec.js's
           // labelled fan-in within 8px of each other, and two words run together is the worse failure.
           if (!onLine && rival < 2 * LABEL_GAP_PX) { penalty += 40; harm += 40; }
+          // A BESIDE plate facing a sibling's line (`facesSibling`). 1, the smallest step the score
+          // has: it orders two clean BESIDE seats and never outbids a real harm. At 10, as a harm,
+          // it took b20's two answers off the gap and also put plates ON their lines with another
+          // stroke inside the gap -- a clean seat facing a sibling cost 18 against 10: render.spec.js's
+          // mask-distance check failed on `four-way decision` TD and BT, and those two and `long
+          // back edge LR` warned label-crowded. A plate 4px off a different line is the worse of the
+          // two, so the facing seat stays the cheaper.
+          //
+          // The other half is in `placeOne`: the drawing-wide BESIDE pass does not keep a seat that
+          // faces a sibling. That pass is what put b20's "가능" there -- three of its four labels were
+          // BESIDE, so it was offered BESIDE too, and its clean ON was given up for the gap.
+          //
+          // Measured over the three reviewed sets and the 292-drawing sweep: decision pairs whose
+          // two plates share the gap 1 -> 0 (b20), with 5 drawings moving, none of them in the sweep.
+          // What it cannot part is a pair whose every seat outside the gap is a real harm: the
+          // sweep's `opposed answers beside a skip` sends a third line into each answer's target
+          // 16px off it, so ON is 4px from a stroke and the far side is on it. That is two lines
+          // arriving one pitch apart, and the layout's to widen.
+          var faces = !onLine && facesSibling(rect, seg, side, own, edge, ctx);
+          if (faces) penalty += 1;
           if (best === null || penalty < best.penalty) {
-            best = { x: cx, y: cy, rect: rect, penalty: penalty, onLine: onLine, crowded: harm > 0 };
+            best = { x: cx, y: cy, rect: rect, penalty: penalty, onLine: onLine, crowded: harm > 0, faces: faces };
             if (penalty === 0) return best;
           }
         }
@@ -10487,7 +10544,12 @@
     ctx.drawn = [];
     for (i = 0; i < routed.length; i += 1) {
       if (!routed[i]) continue;
-      for (var ds = 0; ds + 1 < routed[i].points.length; ds += 1) ctx.drawn.push([routed[i].points[ds], routed[i].points[ds + 1]]);
+      for (var ds = 0; ds + 1 < routed[i].points.length; ds += 1) {
+        // Which edge drew it, for `facesSibling`: the label pass asks whose line a plate faces.
+        var drawnPair = [routed[i].points[ds], routed[i].points[ds + 1]];
+        drawnPair.edge = routed[i].edge;
+        ctx.drawn.push(drawnPair);
+      }
     }
 
     // Between the two passes on purpose: every stroke is drawn by now, which is what the title has
@@ -10597,7 +10659,8 @@
     ctx.bumpRooms = bumpRooms(routed, ctx);
     function placeOne(r, besideOnly) {
       var placed = besideOnly ? placeEdgeLabel(r.edge, r.points, ctx, r.transit, true) : null;
-      if (!placed || placed.crowded) placed = placeEdgeLabel(r.edge, r.points, ctx, r.transit);
+      // A BESIDE seat facing a sibling is not the clean seat that pass is for; see `facesSibling`.
+      if (!placed || placed.crowded || placed.faces) placed = placeEdgeLabel(r.edge, r.points, ctx, r.transit);
       return placed;
     }
     function platesBut(a, b) {

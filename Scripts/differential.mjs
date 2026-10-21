@@ -4,10 +4,20 @@
 //
 // This deliberately reads the emitted SVG rather than either engine's internal model. The unit is
 // therefore what a reader receives: masks, strokes, turns, and the final viewport. Run from any
-// directory with `/opt/homebrew/bin/node Scripts/differential.mjs`.
+// directory with `/opt/homebrew/bin/node Scripts/differential.mjs [--ruler=face|shipped|budget]`.
+//
+// The ruler is the text measurement each engine lays out with, and it decides label widths and so the
+// room both layouts reserve. `face` (the default) hands BOTH engines `measureFace`, the per-character
+// table of what WebKit's getBBox gives the editorial stack, so every metric compares like with like.
+// `shipped` gives ours the same table but leaves Pele its own no-DOM fallback, which matches what Pele
+// measures with in the app: the glue calls `pele.render(source)` with no measurer, so Pele measures with
+// a canvas in the bare `sans-serif` family -- Helvetica, whose advances its fallback table reproduces to
+// 0.0002em for ASCII -- and then paints in `--pele-font`. `budget` is the harness as it was: ours on
+// the flat style-guide budget in measure.js, which reads the corpus a median 19.8% wide.
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
@@ -18,12 +28,32 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 // helpers through data URLs avoids Node's typeless-package warning without changing package.json.
 const importSource = async (path) => import(`data:text/javascript;base64,${Buffer.from(readFileSync(path, 'utf8')).toString('base64')}`);
 const { SWEEP } = await importSource(join(root, 'Tests/JavaScript/flow/corpus.js'));
-const { measureText } = await importSource(join(root, 'Tests/JavaScript/flow/measure.js'));
+const { measureText, measureFace } = await importSource(join(root, 'Tests/JavaScript/flow/measure.js'));
 const flow = require(join(root, 'Sources/FlowPeek/Resources/flowpeek-flow.js'));
 const peleSource = readFileSync(join(root, 'Sources/FlowPeek/Resources/pele.global.js'), 'utf8');
 // Pele's browser bundle declares `var pele` rather than exporting CommonJS. Evaluating the vendored
 // file in an empty context gives it the same no-DOM environment FlowPeek's direct render call uses.
 const pele = vm.runInNewContext(`${peleSource}\n;pele`, { console });
+
+const RULERS = {
+  face: { ours: measureFace, pele: true, note: 'both engines measure with measureFace (WebKit getBBox advances of the painted face)' },
+  shipped: { ours: measureFace, pele: false, note: 'ours on measureFace; Pele on its own fallback table, as it measures in the app (canvas sans-serif)' },
+  budget: { ours: measureText, pele: false, note: 'ours on the flat style-guide budget; Pele on its own fallback table -- two different rulers' },
+};
+const rulerName = (process.argv.find((arg) => arg.startsWith('--ruler='))?.slice(8)) ?? 'face';
+const RULER = RULERS[rulerName];
+if (!RULER) throw new Error(`unknown ruler ${rulerName}; expected one of ${Object.keys(RULERS).join(', ')}`);
+// Pele's measurer protocol: width(text, sizePX, flags), flags 1 bold, 2 italic, 4 mono. Italic is
+// measured upright; the face table has no italic rows and no corpus label is italic.
+const PELE_MEASURER = {
+  width(text, size, flags) {
+    return measureFace(text, {
+      fontFamily: flags & 4 ? 'monospace' : 'sans-serif', fontSizePX: size,
+      fontWeight: flags & 1 ? 700 : 400, letterSpacing: 'normal',
+    }).width;
+  },
+};
+const peleOptions = RULER.pele ? { measurer: PELE_MEASURER } : {};
 
 // Copied from Tests/JavaScript/flow/render.spec.js. This is the payload used by the editorial theme,
 // including the deterministic host text measurer below. Except `diagramPadding`, which follows what
@@ -31,8 +61,9 @@ const pele = vm.runInNewContext(`${peleSource}\n;pele`, { console });
 // part of the drawing area this harness compares.
 const EDITORIAL = {
   dark: false,
-  fontFamily: "'Geist', sans-serif",
-  monoFontFamily: "'Geist', sans-serif",
+  // The stack MacMermaidTheme.swift ships, which is the face measureFace was read from.
+  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif",
+  monoFontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif",
   themeVariables: { fontSize: '12px', lineColor: '#4f5d75', nodeBorder: '#2d3142', mainBkg: '#f5f5f5' },
   themeCSS: '.fp-ladder { --fp-ladder: on; }\n.node rect.basic:not([rx]) { rx: 6px; ry: 6px; }',
   arrangement: {
@@ -250,7 +281,7 @@ function adaptFlowPeek(svg) {
       lines: labelLines(match[4]),
     });
   }
-  return { engine: 'ours', edges, labels, size: dimensions(svg),
+  return { engine: 'ours', edges, labels, size: dimensions(svg), margin: EDITORIAL.arrangement.diagramPadding,
     coverage: {
       rootVocabulary: /<svg\b[^>]*class="flowchart"/.test(svg),
       edgeVocabulary: svg.includes('class="edgePaths"'),
@@ -285,7 +316,8 @@ function adaptPele(svg) {
       lines: labelLines(match[2]),
     });
   }
-  return { engine: 'Pele', edges, labels, size: dimensions(svg),
+  // Pele's `padding` option, default 8, is its outer margin; its viewport is then rounded up to whole px.
+  return { engine: 'Pele', edges, labels, size: dimensions(svg), margin: PELE_MARGIN,
     coverage: {
       rootVocabulary: /<svg\b[^>]*class="pele pele-flowchart"/.test(svg),
       edgeVocabulary: svg.includes('class="pele-edges"'),
@@ -294,6 +326,8 @@ function adaptPele(svg) {
       labelVocabulary: svg.includes('class="pele-edge-labels"'),
     } };
 }
+
+const PELE_MARGIN = 8;
 
 function segments(points) {
   const result = [];
@@ -398,6 +432,7 @@ function measure(model) {
     bendsPerEdge: model.edges.length ? bends / model.edges.length : null,
     strokeLength,
     area: model.size.width * model.size.height,
+    contentArea: Math.max(0, model.size.width - 2 * model.margin) * Math.max(0, model.size.height - 2 * model.margin),
     wrappedLabels: model.labels.filter((label) => label.lines >= 2).length,
     labelLines: model.labels.reduce((sum, label) => sum + label.lines, 0),
     foreignDistances,
@@ -408,7 +443,7 @@ function measure(model) {
 
 function renderOurs(source, index) {
   const output = flow.render({
-    source, renderID: `diff-${index}`, diagramType: 'flowchart-v2', theme: EDITORIAL, measureText,
+    source, renderID: `diff-${index}`, diagramType: 'flowchart-v2', theme: EDITORIAL, measureText: RULER.ours,
   });
   if (output.reason) throw new Error(output.reason);
   return output.svg;
@@ -430,7 +465,7 @@ for (let index = 0; index < DRAWINGS.length; index += 1) {
   const drawing = DRAWINGS[index];
   try {
     const ours = measure(adaptFlowPeek(renderOurs(drawing.source, index)));
-    const theirs = measure(adaptPele(pele.render(drawing.source).svg));
+    const theirs = measure(adaptPele(pele.render(drawing.source, peleOptions).svg));
     results.push({ ...drawing, ours, theirs, error: null });
   } catch (error) {
     results.push({ ...drawing, ours: null, theirs: null, error: error instanceof Error ? error.message : String(error) });
@@ -448,13 +483,13 @@ const aggregate = {
   ours: {
     maskMask: sum('ours', 'maskMask'), maskForeignStroke: sum('ours', 'maskForeignStroke'),
     crossings: sum('ours', 'crossings'), bends: sum('ours', 'bends'), strokeLength: sum('ours', 'strokeLength'),
-    area: sum('ours', 'area'), wrappedLabels: sum('ours', 'wrappedLabels'), labelLines: sum('ours', 'labelLines'),
+    area: sum('ours', 'area'), contentArea: sum('ours', 'contentArea'), wrappedLabels: sum('ours', 'wrappedLabels'), labelLines: sum('ours', 'labelLines'),
     nearestForeignMean: average(pooledDistances('ours')), nearestForeignMin: minimum(pooledDistances('ours')),
   },
   theirs: {
     maskMask: sum('theirs', 'maskMask'), maskForeignStroke: sum('theirs', 'maskForeignStroke'),
     crossings: sum('theirs', 'crossings'), bends: sum('theirs', 'bends'), strokeLength: sum('theirs', 'strokeLength'),
-    area: sum('theirs', 'area'), wrappedLabels: sum('theirs', 'wrappedLabels'), labelLines: sum('theirs', 'labelLines'),
+    area: sum('theirs', 'area'), contentArea: sum('theirs', 'contentArea'), wrappedLabels: sum('theirs', 'wrappedLabels'), labelLines: sum('theirs', 'labelLines'),
     nearestForeignMean: average(pooledDistances('theirs')), nearestForeignMin: minimum(pooledDistances('theirs')),
   },
 };
@@ -469,6 +504,7 @@ const metrics = [
   ['Mean bends per edge', 'bendsPerEdge', 'lower', 3],
   ['Total stroke length (px)', 'strokeLength', 'lower', 2],
   ['Total drawing area (px²)', 'area', 'lower', 0],
+  ['Content area, outer margins removed (px²)', 'contentArea', 'lower', 0],
   ['Labels wrapped to 2+ lines', 'wrappedLabels', 'lower', 0],
   ['All edge-label lines', 'labelLines', 'lower', 0],
   ['Mean nearest foreign-stroke distance (px)', 'nearestForeignMean', 'higher', 2],
@@ -498,23 +534,41 @@ function cause(item) {
   if (item.key === 'bends' || item.key === 'bendsPerEdge') return 'Pele reaches the endpoints with fewer direction changes.';
   if (item.key === 'strokeLength') return 'Pele uses a shorter connector network.';
   if (item.key === 'area') return 'Pele packs the same source into a smaller viewport.';
+  if (item.key === 'contentArea') return 'Pele packs the same content into less room inside its margin.';
   if (item.key === 'wrappedLabels') return 'Pele keeps more edge labels on one line.';
   if (item.key === 'labelLines') return 'Pele emits fewer edge-label text lines overall.';
   return 'Pele leaves edge-label plates farther from their nearest unrelated connector.';
+}
+
+// What a delta in each row can be read as, under the ruler this run used. Every row is downstream of
+// label widths, because a label's box is room the layout reserves; the rows differ in what else
+// separates the two engines once the ruler is shared.
+function comparability(key) {
+  if (rulerName === 'budget') {
+    return 'No: ours measured on the flat budget (median 19.8% wide), Pele on Helvetica advances';
+  }
+  const pele = rulerName === 'face' ? 'same ruler' : 'Pele on its own (Helvetica) ruler, as in the app';
+  if (key === 'area') return `Yes, ${pele}; includes each theme's margin (ours 20, Pele 8)`;
+  if (key === 'contentArea') return `Yes, ${pele}; layout only, margins removed`;
+  if (key === 'wrappedLabels' || key === 'labelLines') {
+    return `Yes, ${pele}; engines differ in type size (ours 12px, Pele 14px edge labels) and wrapping width (160 vs 200)`;
+  }
+  return `Yes, ${pele}`;
 }
 
 const lines = [];
 lines.push('# FlowPeek vs Pele differential measurement');
 lines.push('');
 lines.push(`Measured ${successful.length} of ${DRAWINGS.length} drawings (${SWEEP.length} SWEEP + ${REPORTED.length} reader-reported).`);
+lines.push(`Ruler: \`${rulerName}\` -- ${RULER.note}.`);
 lines.push('Pele’s editorial CSS variables are paint-only and were therefore documented in the harness but not injected into geometry.');
 lines.push('');
 lines.push('## Aggregate metric table');
 lines.push('');
-lines.push('| Metric | Ours | Pele | Delta (Pele − ours) | Better |');
-lines.push('|---|---:|---:|---:|:---:|');
+lines.push('| Metric | Ours | Pele | Delta (Pele − ours) | Better | Like for like? |');
+lines.push('|---|---:|---:|---:|:---:|---|');
 for (const [label, key, better, digits] of metrics) {
-  lines.push(`| ${label} | ${fmt(aggregate.ours[key], digits)} | ${fmt(aggregate.theirs[key], digits)} | ${delta(aggregate.ours[key], aggregate.theirs[key], digits)} | ${better} |`);
+  lines.push(`| ${label} | ${fmt(aggregate.ours[key], digits)} | ${fmt(aggregate.theirs[key], digits)} | ${delta(aggregate.ours[key], aggregate.theirs[key], digits)} | ${better} | ${comparability(key)} |`);
 }
 lines.push('');
 lines.push('Distances are measured from the edge-label backing rectangle to the nearest stroke with a different data-id; drawings without both a label and a foreign stroke are unavailable for that distance rather than counted as zero. Crossings exclude shared endpoints. Rounded quadratic corners are sampled for physical length/intersections and counted once at their logical control-point turn.');
@@ -559,7 +613,7 @@ if (failed.length) {
 }
 
 const report = `${lines.join('\n')}\n`;
-const reportPath = '/private/tmp/claude-501/-Users-tim-Projects-personal-flowpeek/4189cc37-2f53-4348-9f23-270e9bf01d86/scratchpad/diff-report.md';
+const reportPath = join(tmpdir(), `flowpeek-differential-${rulerName}.md`);
 mkdirSync(dirname(reportPath), { recursive: true });
 writeFileSync(reportPath, report);
 process.stdout.write(report);

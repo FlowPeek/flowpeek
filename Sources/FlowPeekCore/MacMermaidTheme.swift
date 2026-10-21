@@ -448,14 +448,12 @@ public struct MacMermaidTheme: Equatable, Sendable {
            attribute is the one shape cue separating `[rect]` from `(round)`. */
         .node rect.basic:not([rx]) { rx: 6px; ry: 6px; }
         .node rect, .node polygon, .node path, .node circle, .node ellipse { stroke-width: \(strokeWidth); }
-        /* A zone takes the wash of its depth. `fp-depth-N` is written by flowpeek-flow.js; a zone
-           drawn by mermaid carries no depth and takes the first rung. The last rule is depth 3 and
-           everything under it, written as "has a depth class and is not 0-2" so the renderer does
-           not have to know how many rungs there are. */
+        /* A zone takes the wash of its depth's tone (`zoneTone`). `fp-depth-N` is written by
+           flowpeek-flow.js; a zone drawn by mermaid carries no depth and takes the first tone. */
         .cluster rect { fill: \(zones[0]); stroke: \(rule); stroke-width: 0.8px; rx: 8px; ry: 8px; }
-        .cluster.fp-depth-1 rect { fill: \(zones[1]); }
-        .cluster.fp-depth-2 rect { fill: \(zones[2]); }
-        .cluster[class*="fp-depth-"]:not(.fp-depth-0):not(.fp-depth-1):not(.fp-depth-2) rect { fill: \(zones[3]); }
+        \((1..<zones.count).map { tone in
+            Self.byTone(".cluster", "fp-depth-", tone, part: "rect") + " { fill: \(zones[tone]); }"
+        }.joined(separator: "\n"))
         /* 600 on the name, 400 everywhere else: the source carries hierarchy in weight and colour
            rather than in size, which is what lets every label sit on the 12px Hangul floor. */
         .node .label text, .node .nodeLabel, .nodeLabel { font-weight: 600; }
@@ -844,21 +842,47 @@ public struct MacMermaidTheme: Equatable, Sendable {
         .node.fp-\(rung.token) g.outer-path path:nth-child(2) {
             fill: none; stroke: \(rung.stroke); stroke-width: \(rung.width);\(dash)
         }
-        """ + rung.onZones.enumerated().compactMap { depth, fill -> String? in
-            // Every depth or none: the selectors do not cascade into one another, so a depth left
-            // out would fall back to the paper fill, not to the depth above it.
+        """ + rung.onZones.enumerated().compactMap { tone, fill -> String? in
+            // Every tone or none: the selectors do not cascade into one another, so a tone left out
+            // would fall back to the paper fill, not to the tone above it.
             guard rung.onZones.contains(where: { $0 != rung.fill }) else { return nil }
             // `fp-on-depth-N` is written on a node by flowpeek-flow.js (and as 0 by the glue, whose
-            // zones all take the first rung); the last depth matches as "has one and is not 0..N-1",
-            // the same uncapped form the zone rules use.
-            let on = depth < rung.onZones.count - 1
-                ? ".fp-on-depth-\(depth)"
-                : "[class*=\"fp-on-depth-\"]" + (0..<depth).map { ":not(.fp-on-depth-\($0))" }.joined()
-            let node = ".node.fp-\(rung.token)\(on)"
-            return "\n\(node) rect.basic, \(node) circle.basic, \(node) polygon.label-container, "
-                + "\(node) path.basic.label-container, \(node) g.label-container circle, "
-                + "\(node) g.outer-path path:nth-child(1) { fill: \(fill); }"
+            // zones all take the first tone), and folded onto a tone exactly as the zone rules fold
+            // `fp-depth-N`, so a node is always composited over the ground it is actually on.
+            let compound = ".node.fp-\(rung.token)"
+            let parts = ["rect.basic", "circle.basic", "polygon.label-container", "path.basic.label-container",
+                         "g.label-container circle", "g.outer-path path:nth-child(1)"]
+            return "\n" + parts.map { Self.byTone(compound, "fp-on-depth-", tone, part: $0) }.joined(separator: ", ")
+                + " { fill: \(fill); }"
         }.joined()
+    }
+
+    /// The zone tone of a nesting depth, by its last digit: `zoneTone[depth % 10]`.
+    ///
+    /// The wash runs out at the fourth tone, ink @ 0.08, because that is the deepest ground the
+    /// `soft` entry outline still clears 3:1 on (3.02:1; 0.09 is 2.96:1) -- see `zones`. It used to
+    /// stop there, so every depth from 3 down shared one fill, and the held-out review's five-level
+    /// drawing showed a namespace that could not be told from its cluster. Past the last tone the
+    /// ramp now turns back and runs between the second and fourth tones, so EVERY zone is one step
+    /// from the zone it sits in and from the zones inside it, at any depth. What runs out is the
+    /// absolute depth: from depth 4 on, a tone says "one level in from its parent", not "four levels
+    /// down" -- depth 4 is depth 2's grey. The outermost tone is held back for depth 0 (and 10, 20…).
+    ///
+    /// Read off the last digit because a stylesheet cannot do arithmetic on a class name, and the
+    /// renderer draws every depth the parser accepts (to 99). Rejected: a rule per depth, which
+    /// for 100 depths, the zone and four rungs' on-zone fills, measured 141,250 bytes of CSS before
+    /// scoping, in every SVG; and
+    /// the renderer writing the tone itself, which would make it know how many washes this theme has.
+    /// A period of 10 lets the fold sit on the digit, and the sequence is chosen so 9 to 10 also
+    /// steps (1 to 0). It relies on the depth class being the LAST token of the class attribute,
+    /// which flowpeek-flow.js writes and render.spec.js pins.
+    static let zoneTone = [0, 1, 2, 3, 2, 1, 2, 3, 2, 1]
+
+    /// Every depth of `tone`, as selectors of `part` inside `compound` carrying a `prefix`N class.
+    private static func byTone(_ compound: String, _ prefix: String, _ tone: Int, part: String) -> String {
+        zoneTone.indices.filter { zoneTone[$0] == tone }
+            .map { "\(compound)[class*=\"\(prefix)\"][class$=\"\($0)\"] \(part)" }
+            .joined(separator: ", ")
     }
 
     /// `colour`'s step away from `from`, taken from `base` instead, as an opaque hex.

@@ -1360,7 +1360,10 @@ describe('[Render] the classes the editorial stylesheet paints', () => {
     const zones = [...svg.matchAll(/<g class="cluster fp-depth-(\d+)" id="fp-0-([^"]*)">/g)]
       .map((m) => [m[2], Number(m[1])]);
     expect(zones).toEqual([['A', 0], ['E', 0], ['B', 1], ['C', 2], ['D', 3]]);
-    expect(THEME_SWIFT).toContain('.cluster.fp-depth-1 rect');
+    // The theme folds a depth onto a wash by the class attribute's LAST character
+    // (`[class$="4"]`, MacMermaidTheme.swift `zoneTone`), so the depth class has to end the
+    // attribute -- which the regex above, closing on `" id=`, also holds.
+    expect(THEME_SWIFT).toContain('byTone(".cluster", "fp-depth-"');
   });
 
   it('tells a node which zone depth it sits on, and says nothing for a node in none', () => {
@@ -1371,7 +1374,8 @@ describe('[Render] the classes the editorial stylesheet paints', () => {
     const on = Object.fromEntries([...svg.matchAll(/<g class="node default fp-[a-z]+((?: fp-on-depth-\d+)?)" id="fp-0-flowchart-(\w+)-/g)]
       .map((m) => [m[2], m[1].trim()]));
     expect(on).toEqual({ v: '', w: 'fp-on-depth-0', x: 'fp-on-depth-1', y: 'fp-on-depth-1' });
-    expect(THEME_SWIFT).toContain('.fp-on-depth-');
+    // Last in the attribute, for the same reason as the zone's depth class above.
+    expect(THEME_SWIFT).toContain('Self.byTone(compound, "fp-on-depth-"');
   });
 });
 

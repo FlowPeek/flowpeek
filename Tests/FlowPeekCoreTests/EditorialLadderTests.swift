@@ -257,6 +257,108 @@ final class EditorialLadderTests: XCTestCase {
         }
     }
 
+    // MARK: - Zone depth
+
+    /// The deepest zone the parser will hand the renderer: flowpeek-flow.js fails a source at
+    /// `maxDepth (100)` statements of nesting, and the renderer draws every depth below that
+    /// (probed: 100 nested subgraphs draw, the innermost tagged `fp-depth-99`).
+    private static let depths = 0..<100
+
+    /// A zone can be told from the zone it sits in, however deep. The wash used to stop at depth 3
+    /// -- the depth of the tuned nested drawing -- so depth 3 and 4 shared one fill, and the held-out
+    /// review's five-level h14 drew "EKS prod-blue" and its namespace as one grey.
+    func testEveryZoneDiffersFromTheZoneItSitsIn() {
+        for appearance in [MacMermaidTheme.Appearance.light, .dark] {
+            for contrast in [false, true] {
+                let css = theme(appearance, contrast: contrast).css
+                for depth in Self.depths.dropFirst() {
+                    let inner = Self.fill(css, classes: "cluster fp-depth-\(depth)", part: "rect")
+                    let outer = Self.fill(css, classes: "cluster fp-depth-\(depth - 1)", part: "rect")
+                    XCTAssertGreaterThanOrEqual(
+                        Self.contrast(inner, outer), 1.03,
+                        "\(appearance) contrast=\(contrast): depth \(depth) (\(inner)) is not told from depth \(depth - 1) (\(outer))"
+                    )
+                }
+            }
+        }
+    }
+
+    /// And a node keeps its wash over whatever zone it is in: the zone rule and the node rule fold
+    /// depth the same way, so a node never lands on the paper-based fill its rung has outside a zone,
+    /// which is 1.000:1 against some zone (the second review's ghosted NAT Gateway).
+    func testANodeIsCompositedOverItsZoneAtEveryDepth() {
+        for appearance in [MacMermaidTheme.Appearance.light, .dark] {
+            for contrast in [false, true] {
+                let css = theme(appearance, contrast: contrast).css
+                for token in Self.rungs where token != "backend" || appearance == .dark {
+                    var byGround: [String: String] = [:]
+                    for depth in Self.depths {
+                        let ground = Self.fill(css, classes: "cluster fp-depth-\(depth)", part: "rect")
+                        let node = Self.fill(css, classes: "node default fp-\(token) fp-on-depth-\(depth)", part: "rect.basic")
+                        XCTAssertGreaterThanOrEqual(
+                            Self.contrast(node, ground), 1.03,
+                            "\(appearance) contrast=\(contrast): \(token) at depth \(depth) sinks into its zone"
+                        )
+                        XCTAssertEqual(
+                            byGround[ground, default: node], node,
+                            "\(appearance) contrast=\(contrast): \(token) at depth \(depth) is not the wash over \(ground)"
+                        )
+                        byGround[ground] = node
+                    }
+                }
+            }
+        }
+    }
+
+    /// The `fill` the stylesheet gives `part` inside an element with this class attribute, by the
+    /// cascade: of the rules whose selector matches, the most specific, then the latest. It reads
+    /// the few selector forms the theme writes -- `.class`, `[class*="…"]`, `[class$="…"]` and
+    /// `:not(.class)` -- and fails the test on any other, rather than guessing.
+    private static func fill(_ css: String, classes: String, part: String) -> String {
+        let tokens = Set(classes.split(separator: " ").map(String.init))
+        var best: (specificity: Int, fill: String)?
+        for block in css.components(separatedBy: "}") {
+            guard let brace = block.firstIndex(of: "{") else { continue }
+            let body = block[block.index(after: brace)...]
+            guard let range = body.range(of: "fill: ") else { continue }
+            let tail = body[range.upperBound...]
+            let value = String(tail[..<(tail.firstIndex(of: ";") ?? tail.endIndex)])
+            guard value.hasPrefix("#") else { continue }
+            for raw in block[..<brace].split(separator: ",") {
+                let selector = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                let pieces = selector.components(separatedBy: " ").filter { !$0.isEmpty }
+                guard pieces.count == 2, pieces[1] == part else { continue }
+                guard let specificity = match(pieces[0], tokens: tokens, attribute: classes) else { continue }
+                if best == nil || specificity >= best!.specificity { best = (specificity, value) }
+            }
+        }
+        return best?.fill ?? "none"
+    }
+
+    private static func match(_ compound: String, tokens: Set<String>, attribute: String) -> Int? {
+        let pattern = try! NSRegularExpression(
+            pattern: #"\.([\w-]+)|\[class([*$])="([^"]*)"\]|:not\(\.([\w-]+)\)"#
+        )
+        let text = compound as NSString
+        var consumed = 0, specificity = 0
+        for found in pattern.matches(in: compound, range: NSRange(location: 0, length: text.length)) {
+            guard found.range.location == consumed else { XCTFail("unread selector \(compound)"); return nil }
+            consumed += found.range.length
+            specificity += 1
+            func group(_ i: Int) -> String? {
+                found.range(at: i).location == NSNotFound ? nil : text.substring(with: found.range(at: i))
+            }
+            if let name = group(1), !tokens.contains(name) { return nil }
+            if let op = group(2), let value = group(3) {
+                if op == "*" && !attribute.contains(value) { return nil }
+                if op == "$" && !attribute.hasSuffix(value) { return nil }
+            }
+            if let name = group(4), tokens.contains(name) { return nil }
+        }
+        guard consumed == text.length else { XCTFail("unread selector \(compound)"); return nil }
+        return specificity
+    }
+
     // MARK: - Reading the stylesheet
 
     private struct ParsedRung {

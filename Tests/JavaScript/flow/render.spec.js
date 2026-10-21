@@ -892,8 +892,8 @@ describe('[Render] what reaches the markup', () => {
   });
 
   it('paints an author colour inline, where both live passes can read it', () => {
-    // Not as a class: the focal-abstention rule and the label-contrast pass both detect author
-    // intent by reading `style="fill:…"` off the shape (flowpeek-glue.js:702, :260-265).
+    // Not as a class: the label-contrast pass detects author intent by reading `style="fill:…"`
+    // off the shape (flowpeek-glue.js:260-265).
     const out = drawn('flowchart TD\n  A --> B\n  style A fill:#ff0000,stroke:#000\n  classDef hot fill:#00ff00\n  class B hot');
     expect(out.svg).toContain('style="fill:#ff0000 !important;stroke:#000 !important"');
     expect(out.svg).toContain('fill:#00ff00 !important');
@@ -915,7 +915,7 @@ describe('[Render] what reaches the markup', () => {
   });
 
   it('never lets a source name itself into the ladder', () => {
-    // A classDef called `fp-focal` would take the theme's one accent from the node that earned it.
+    // A classDef called `fp-focal` would paint a rung the renderer deliberately no longer awards.
     const out = drawn('flowchart TD\n  A --> B --> C --> D\n  classDef fp-focal fill:#123456\n  class A fp-focal');
     expect(out.svg).not.toContain('class="node default fp-focal"');
   });
@@ -956,37 +956,39 @@ describe('[Render] the classes the editorial stylesheet paints', () => {
     expect(drawn('flowchart TD\n  A([pill]) --> B').svg).toMatch(/<g class="basic label-container outer-path"/);
   });
 
-  it('writes the rung ladder the theme defines, and at most one focal', () => {
+  it('writes the rung ladder the theme defines, and never a focal', () => {
     for (const source of SWEEP_SOURCES) {
       const out = drawn(source);
       const rungs = (out.svg.match(/class="node default fp-([a-z]+)"/g) || [])
         .map((s) => /fp-([a-z]+)/.exec(s)[1]);
       for (const rung of rungs) expect(THEME_SWIFT).toContain(`.node.fp-\\(rung.token)`);
-      expect(rungs.filter((r) => r === 'focal').length).toBeLessThanOrEqual(1);
+      // Was "at most one": the sweep promoted the busiest node to `fp-focal` on 8 of these 172
+      // drawings, every one a fan hub the geometry already centres. See flowpeek-flow.js tagLadder.
+      expect(rungs.filter((r) => r === 'focal').length).toBe(0);
       const total = Object.keys(out.counts.rungs)
-        .filter((k) => k !== 'accent' && k !== 'cross')
+        .filter((k) => k !== 'cross')
         .reduce((sum, k) => sum + out.counts.rungs[k], 0);
       expect(rungs.length).toBe(total);
     }
   });
 
-  it('gives an accent edge its own arrowhead, dropping mermaid\'s marker class', () => {
-    // Per-edge arrowhead colour is the one thing CSS cannot do when every arrow shares one marker.
+  it('invents no accent edge, even into an unrivalled hub', () => {
+    // This used to assert the accent edge's own arrowhead. The edge was chosen as the one into the
+    // busiest node whose source had the highest out-degree -- arithmetic, not the author -- and in
+    // the review's state machine it singled out "user retries" only because Failed has two exits
+    // to every other source's one. An accent nobody asked for is a meaning nobody gave.
     const source = [
       'flowchart TD',
       '  A --> Hub', '  B --> Hub', '  C --> Hub', '  D --> Hub',
       '  Hub --> E', '  A --> B', '  A --> C',
     ].join('\n');
     const out = drawn(source);
-    if (out.counts.rungs.accent > 0) {
-      expect(out.svg).toContain('id="fp-0-fp-accent-head" class="fp-marker fp-marker-accent"');
-      expect(out.svg).toContain('marker-end="url(#fp-0-fp-accent-head)"');
-      expect(THEME_SWIFT).toContain('marker.fp-marker-accent path');
-    }
-    expect(out.counts.rungs.focal).toBeLessThanOrEqual(1);
+    expect(out.svg).not.toContain('fp-accent');
+    expect(out.svg).not.toContain('fp-focal');
+    expect(THEME_SWIFT).not.toContain('fp-marker-accent');
   });
 
-  it('gives a zone-crossing edge its own arrowhead too', () => {
+  it('gives a zone-crossing edge its own arrowhead', () => {
     const out = drawn(CORPUS[CORPUS.length - 1]);
     expect(out.counts.rungs.cross).toBe(2);
     expect(out.svg).toContain('flowchart-link fp-cross"');

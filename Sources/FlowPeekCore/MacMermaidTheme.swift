@@ -159,12 +159,6 @@ public struct MacMermaidTheme: Equatable, Sendable {
         let rule = increaseContrast ? (dark ? "#BFC0C0" : "#4F5D75")
                                     : (dark ? "rgba(245,245,245,0.12)" : "rgba(45,49,66,0.12)")
         let accent = dark ? "#F08A59" : "#EB6C36"
-        // Accent text, for the one small label that carries the accent off its node. The stroke hue
-        // itself measures 2.86:1 on paper -- fine for a graphical object at 2px, under the app's own
-        // 4.5:1 readable ratio for 12px words, and the label-contrast pass cannot rescue an edge
-        // label (its mask rect is a sibling of the text, so `paperUnder` finds nothing behind it).
-        // So the words get a darker mix of the same hue: 5.9:1 light, 5.2:1 dark.
-        let accentText = dark ? accent : "#A33F13"
         // The second chromatic family, and the only one legible enough to carry meaning on its own:
         // 6.1:1 on light paper. Edges only -- the source never puts it on a node body.
         let link = dark ? "#6A95D8" : "#2E5AA8"
@@ -188,7 +182,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         // Increase Contrast reaches all of it -- it is the one accessibility control a reader has,
         // and the first cut of this ladder routed around it. The washes deepen by 1.6, the quiet
         // stroke goes from 3.2:1 to 4.5:1 (and stays below `muted`, so the ramp keeps its order),
-        // every outline widens to 1.25px and the focal one to 2.4px. Five rungs either way, each one
+        // every outline widens to 1.25px. Five rungs either way, each one
         // further from its neighbours.
         let wash = increaseContrast ? 1.6 : 1.0
         let inkWash = { (alpha: Double) in Self.blend(ink, alpha * wash, over: paper) }
@@ -208,10 +202,6 @@ public struct MacMermaidTheme: Equatable, Sendable {
         // not a boundary on a screen -- it gets away with it because it always ships a legend.
         let quietStroke = Self.blend(ink, increaseContrast ? 0.68 : 0.55, over: paper)
         let strokeWidth = increaseContrast ? "1.25px" : "1px"
-        // type-line.md: "focus is carried by stroke weight, not tone -- 2.4px focal against 1.2px".
-        // Twice the ladder's weight, taken literally, because the hue cannot carry it alone.
-        let focalWidth = increaseContrast ? "2.4px" : "2px"
-        let accentEdgeWidth = increaseContrast ? "2.4px" : "2px"
 
         let ladder: [Rung] = [
             // The workhorse, and what a decision diamond gets too: the source's own legend draws
@@ -229,8 +219,10 @@ public struct MacMermaidTheme: Equatable, Sendable {
             // Reached only by `-.->`: the author saying "conditional". Same stroke as terminal, so
             // the dash is what tells them apart, and it survives greyscale.
             Rung(token: "optional", fill: optionalFill, stroke: quietStroke, width: strokeWidth, dash: "4,3"),
-            // At most one per diagram, and usually none. Its label stays ink.
-            Rung(token: "focal", fill: focalFill, stroke: accent, width: focalWidth, dash: nil),
+            // No focal rung. The source spends its one coral on the node its author chose; a
+            // flowchart names none, and the renderers picked one by degree instead -- measured, 8
+            // of 172 sweep drawings and 6 of the review's 16 sources, five of which a reader took
+            // as a claim the source never made. flowpeek-flow.js `tagLadder` has the numbers.
         ]
 
         // Three families, because the source says the three-way contrast is load-bearing -- and its
@@ -366,7 +358,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
         variables.merge(sections) { current, _ in current }
 
         // What the variables cannot say. Every colour here is a token above; the structural class
-        // tokens (`fp-backend` … `fp-focal`, `fp-accent`, `fp-cross`) are written by
+        // tokens (`fp-backend` … `fp-optional`, `fp-cross`) are written by
         // flowpeek-glue.js from the graph's own shape, and every decision about what they look like
         // is here. Specificity is (0,2,1) against mermaid's own (0,1,1), so no `!important` is
         // needed -- and an author's `classDef`, which mermaid emits after this stylesheet with
@@ -415,14 +407,7 @@ public struct MacMermaidTheme: Equatable, Sendable {
            outline path and double-paint the shape. */
         \(ladder.map(Self.rungCSS).joined(separator: "\n"))
 
-        /* The accent edge: its stroke, its own arrowhead -- cloned by the glue so every other arrow
-           keeps the shared marker -- and its label, which is the part usually forgotten and the part
-           that carries the accent off the node and along the flow. */
-        .flowchart-link.fp-accent, .edgePath path.fp-accent { stroke: \(accent); stroke-width: \(accentEdgeWidth); }
-        marker.fp-marker-accent path, marker.fp-marker-accent polygon { fill: \(accent); stroke: \(accent); }
-        .edgeLabels g.label.fp-accent text, .edgeLabels g.label.fp-accent tspan { fill: \(accentText); }
-
-        /* The second edge class, for a path that leaves one zone and enters another -- the source's
+        /* The edge class, for a path that leaves one zone and enters another -- the source's
            own trigger for it. The dash is not decoration: hue alone would be the only carrier, and
            link-blue against muted is 1.003:1 in greyscale. Never on a node body. */
         .flowchart-link.fp-cross, .edgePath path.fp-cross { stroke: \(link); stroke-dasharray: 6,3; }

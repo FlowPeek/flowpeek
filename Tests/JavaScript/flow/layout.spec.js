@@ -740,10 +740,11 @@ describe('[Layout] the ladder', () => {
     expect(byId(out, 'C').rung).toBe('optional');
   });
 
-  it('abstains from an accent unless one node is genuinely the busiest', () => {
-    const chain = draw('flowchart TD\n  A --> B --> C --> D --> E');
-    expect(chain.counts.rungs.focal).toBe(0);
-
+  it('promotes no node to an accent, not even the one every line reaches', () => {
+    // This used to assert that H became `focal`. The renderer chose that node by degree, not by
+    // anything the source said, and a reader-facing review of 16 sources read five of the six such
+    // picks as a claim the source never made; on a hub like this one the geometry already shows
+    // the centre, so the coral added nothing but a wrong reading. H keeps its structural rung.
     const hub = draw([
       'flowchart TD',
       '  A --> H',
@@ -752,8 +753,8 @@ describe('[Layout] the ladder', () => {
       '  H --> D',
       '  H --> E',
     ].join('\n'));
-    expect(hub.counts.rungs.focal).toBe(1);
-    expect(byId(hub, 'H').rung).toBe('focal');
+    expect(hub.counts.rungs.focal).toBeUndefined();
+    expect(byId(hub, 'H').rung).toBe('backend');
   });
 
   it('says nothing at all about a diagram with no edges', () => {

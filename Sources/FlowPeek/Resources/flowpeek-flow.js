@@ -5309,18 +5309,8 @@
   // neither of them has a second copy to drift from.
   // ===========================================================================
 
-  function authoredFill(db, vertex) {
-    var decls = (vertex.styles || []).slice();
-    var classes = ["default", "node"].concat(vertex.classes || []);
-    decls = decls.concat(db.getCompiledStyles(classes));
-    for (var i = 0; i < decls.length; i += 1) {
-      if (/^\s*fill\s*:/i.test(String(decls[i]))) return true;
-    }
-    return false;
-  }
-
-  function tagLadder(db, model) {
-    var counts = { backend: 0, store: 0, entry: 0, terminal: 0, optional: 0, focal: 0, accent: 0, cross: 0 };
+  function tagLadder(model) {
+    var counts = { backend: 0, store: 0, entry: 0, terminal: 0, optional: 0, cross: 0 };
     var nodes = model.nodes;
     var edges = [];
     var i;
@@ -5341,41 +5331,29 @@
       counts[rung] += 1;
     }
 
-    // One focal node, or none, and none is the common answer. A rule that fired on "the last node"
-    // would fire on every linear chain, which is how an editorial accent turns into "this is where
-    // the arrows stop" -- SKILL.md §1 calls coral-on-everything the anti-pattern that erases the
-    // signal, and an accent that always fires is the same erasure by a slower route.
-    var focal = null;
-    if (nodes.length >= 4) {
-      var top = null;
-      var ties = 0;
-      for (i = 0; i < nodes.length; i += 1) {
-        var degree = nodes[i].inDeg + nodes[i].outDeg;
-        if (!top || degree > top.degree) { top = { node: nodes[i], degree: degree }; ties = 1; }
-        else if (degree === top.degree) ties += 1;
-      }
-      if (top && ties === 1 && top.degree >= 4) focal = top.node;
-      if (focal && authoredFill(db, focal.vertex)) focal = null;
-    }
-
-    if (focal) {
-      counts[focal.rung] -= 1;
-      focal.rung = "focal";
-      counts.focal = 1;
-      // Derived from the focal node, never chosen: the one edge into it whose source is busiest. It
-      // abstains on a tie for the same reason the focal node does -- two alike edges, one of them
-      // coral, asks the reader to find a difference that is not there.
-      var best = null;
-      var tied = false;
-      for (i = 0; i < focal.incoming.length; i += 1) {
-        var candidate = focal.incoming[i];
-        var source = model.nodeById.get(candidate.from);
-        var outDeg = source ? source.outDeg : -1;
-        if (!best || outDeg > best.outDeg) { best = { edge: candidate, outDeg: outDeg }; tied = false; }
-        else if (outDeg === best.outDeg) { tied = true; }
-      }
-      if (best && !tied) { best.edge.kind = "accent"; counts.accent = 1; }
-    }
+    // No focal node and no accent edge. This sweep used to promote the node of strictly highest
+    // degree (four or more, among four or more nodes) to `fp-focal` -- coral outline, coral wash --
+    // and the incoming edge whose source had the highest out-degree to `fp-accent`. Measured before
+    // it was removed: 8 of the corpus's 172 sweep drawings and 6 of the 16 sources of the
+    // reader-facing review fired, and the review named five of those six, plus both accent edges, as
+    // colour that "signals meaning that isn't in the source". None of the 188 sources wrote a
+    // `style`, `classDef`, `linkStyle`, `class` or `:::`, so there was never an author choice to
+    // yield to: every coral node on those pages was arithmetic.
+    //
+    // Narrowing it was tried on paper first, by the winning margin, and the numbers rule it out.
+    // Where the margin is thin the pick is an artefact -- the lineage drawing's "Revenue by user"
+    // won 4 to 3, the state machine's "Connecting" 6 to 4, and its "user retries" edge was chosen
+    // only because Failed has out-degree 2 against 1 for each other source. Where the margin is wide
+    // (every fan-in and fan-out hub: 4 to 1 up to 11 to 1) the hub is already the one box every line
+    // reaches, so the coral says nothing the geometry does not, and the reader still decoded it as
+    // "this is the critical path". It also cost meaning the author had given: on the fan-in source
+    // the hub is a `[( )]` cylinder, and promoting it took its `fp-store` rung away. No threshold
+    // keeps a firing that is both right and informative.
+    //
+    // The theme's one-accent restraint is kept rather than spent: an author who wants emphasis
+    // already has it -- `style`/`classDef` arrive inline and outrank the theme, and `==>` is the
+    // weight the stylesheet carries -- which is the same deference the zone-crossing dash makes
+    // below. The author's meaning outranks the renderer's, and here the renderer had none to add.
 
     // A path that leaves one zone and enters another. Membership is read off the parse tree here,
     // where the glue has to infer it from overlapping rects, so "innermost" is simply the parent.
@@ -5408,7 +5386,7 @@
       var crossing = [];
       for (i = 0; i < model.edges.length; i += 1) {
         var e = model.edges[i];
-        if (e.kind === "accent" || e.pattern === "dotted" || e.pattern === "invisible") continue;
+        if (e.pattern === "dotted" || e.pattern === "invisible") continue;
         var a = model.nodeById.get(e.from);
         var b = model.nodeById.get(e.to);
         if (!a || !b) continue;
@@ -6492,7 +6470,7 @@
     place("", marginU, marginU);
 
     assignPorts(model);
-    var counts = tagLadder(db, model);
+    var counts = tagLadder(model);
 
     var widthU = root.contentW + 2 * marginU;
     var heightU = root.contentH + 2 * marginU;
@@ -7973,10 +7951,10 @@
       var d = splitDeclaration(declarations[i]);
       if (!d) continue;
       if (allowed.indexOf(d.prop) === -1) continue;
-      // `!important` is not decoration here: mermaid writes author styles that way and both the
-      // focal-abstention rule and the live label-contrast pass read `style="fill:…"` off the shape
-      // to learn that a person chose it (flowpeek-glue.js:702, :260-265). A class would make both
-      // blind, which is why RENDERER-SPEC.md §4.2 puts author colour inline.
+      // `!important` is not decoration here: mermaid writes author styles that way and the live
+      // label-contrast pass reads `style="fill:…"` off the shape to learn that a person chose it
+      // (flowpeek-glue.js:260-265). A class would make it blind, which is why RENDERER-SPEC.md §4.2
+      // puts author colour inline.
       kept.push((rename && rename[d.prop] ? rename[d.prop] : d.prop) + ":" + d.value + " !important");
     }
     return kept.length ? ' style="' + esc(kept.join(";")) + '"' : "";
@@ -8484,8 +8462,8 @@
       var textStyle = styleAttribute(decls, STYLE_TEXT_PROPS, { color: "fill" });
       // Only `node default` and the rung. A source's own classDef names are deliberately NOT
       // written here: this file emits no classDef stylesheet, so they would style nothing -- and a
-      // source that named itself `fp-focal` would take the theme's one accent away from the node
-      // that earned it. The author's declarations still arrive, inline and validated, above.
+      // source that named itself `fp-store` would claim a rung its structure never earned. The
+      // author's declarations still arrive, inline and validated, above.
       var classes = "node default" + (n.rung ? " fp-" + n.rung : "");
       nodes.push('<g class="' + classes + '" id="' + esc(renderID + "-" + n.domId)
         + '" transform="translate(' + n.cx + "," + n.cy + ')">'
@@ -8509,9 +8487,6 @@
     // every arrow shares a marker, which is why the glue clones at run time; here it is emitted
     // from the start. mermaid's own `marker` class is dropped so that only the theme's `fp-` rule
     // paints it.
-    if (markers.has("fp-accent")) {
-      defs.push(markerMarkup(renderID + "-fp-accent-head", "pointEnd", "fp-marker fp-marker-accent"));
-    }
     if (markers.has("fp-cross")) {
       defs.push(markerMarkup(renderID + "-fp-cross-head", "pointEnd", "fp-marker fp-marker-cross"));
     }

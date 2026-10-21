@@ -15,32 +15,31 @@ final class EditorialLadderTests: XCTestCase {
         )
     }
 
-    private static let rungs = ["backend", "store", "entry", "terminal", "optional", "focal"]
+    private static let rungs = ["backend", "store", "entry", "terminal", "optional"]
 
     // MARK: - The bug that shipped
 
     /// The one that would have caught it. The accent existed as a token, was handed to the settings
-    /// tile, and was never drawn on a diagram: the stylesheet did not mention it once.
+    /// tile, and was never drawn on a diagram: nothing the theme set reached a drawn element.
+    ///
+    /// This used to also demand a focal rung and an accent edge in the stylesheet, and that half no
+    /// longer describes what the renderer should do. Both were spent on a node and an edge the
+    /// renderer picked by degree, not on anything the source named; measured, they fired on 8 of the
+    /// 172 sweep drawings and 6 of the reader review's 16 sources, and the reviewer read five of the
+    /// six as a claim ("this is the critical path") the source never made. So the accent is now
+    /// asserted where an element the source itself declares carries it -- gantt's today line -- and
+    /// asserted absent from the two flowchart classes the renderer used to invent.
     func testTheAccentIsActuallyDrawnOnTheDiagram() {
         for appearance in [MacMermaidTheme.Appearance.light, .dark] {
             let built = theme(appearance)
-            let css = built.css
-            XCTAssertTrue(
-                css.contains(built.accent),
-                "\(appearance): the accent never appears in the stylesheet, so nothing is ever drawn in it"
+            XCTAssertEqual(
+                built.variables["todayLineColor"], built.accent,
+                "\(appearance): the accent reaches no drawn element, so nothing is ever drawn in it"
             )
-            XCTAssertNotNil(
-                rung("focal", css)?.stroke,
-                "\(appearance): there is no focal rung for the accent to land on"
-            )
-            XCTAssertEqual(rung("focal", css)?.stroke, built.accent)
-            XCTAssertTrue(
-                css.contains(".flowchart-link.fp-accent"),
-                "\(appearance): the focal node's own edge never takes the accent"
-            )
-            XCTAssertTrue(
-                css.contains("marker.fp-marker-accent"),
-                "\(appearance): the accent edge would keep the shared grey arrowhead"
+            XCTAssertNil(rung("focal", built.css), "\(appearance): a renderer-chosen focal node is painted again")
+            XCTAssertFalse(
+                built.css.contains("fp-accent"),
+                "\(appearance): a renderer-chosen accent edge is painted again"
             )
         }
     }
@@ -135,29 +134,13 @@ final class EditorialLadderTests: XCTestCase {
             for contrast in [false, true] {
                 let built = theme(appearance, contrast: contrast)
                 let paper = built.variables["background"]!
-                for token in Self.rungs where token != "focal" {
+                for token in Self.rungs {
                     let stroke = rung(token, built.css)!.stroke
                     XCTAssertGreaterThanOrEqual(
                         Self.contrast(stroke, paper), 3.0,
                         "\(appearance) contrast=\(contrast): the \(token) outline \(stroke) is invisible on paper"
                     )
                 }
-            }
-        }
-    }
-
-    /// The accent is the one stroke that cannot clear 3:1 -- 2.86:1 on light paper, measured -- so
-    /// it is not allowed to carry the focal signal on its own. type-line.md: "focus is carried by
-    /// stroke weight, not tone", at twice the ladder's weight.
-    func testTheFocalNodeCarriesItsEmphasisInWeightAsWellAsHue() {
-        for appearance in [MacMermaidTheme.Appearance.light, .dark] {
-            for contrast in [false, true] {
-                let css = theme(appearance, contrast: contrast).css
-                let focal = rung("focal", css)!, backend = rung("backend", css)!
-                XCTAssertGreaterThanOrEqual(
-                    Self.points(focal.width), Self.points(backend.width) * 1.9,
-                    "\(appearance) contrast=\(contrast): the focal outline is not twice the ladder's weight"
-                )
             }
         }
     }

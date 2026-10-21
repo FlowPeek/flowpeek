@@ -431,8 +431,8 @@
   // A theme can say what a node type looks like; it cannot say what a node IS, because mermaid
   // emits no node type, no shape name and no degree. This pass reads the graph's own shape out of
   // the markup -- in-degree, out-degree, declared cylinders, subgraph membership -- and writes
-  // class tokens: `fp-backend` / `fp-store` / `fp-entry` / `fp-terminal` / `fp-optional` /
-  // `fp-focal` on nodes, `fp-accent` and `fp-cross` on edges and their labels. Not one colour
+  // class tokens: `fp-backend` / `fp-store` / `fp-entry` / `fp-terminal` / `fp-optional` on
+  // nodes, `fp-cross` on edges and their labels. Not one colour
   // value appears in this file; the theme's stylesheet decides what each token looks like.
   //
   // Three things follow from that, and all three are why it is done this way:
@@ -450,9 +450,9 @@
   //   same walk asking for a bounding box, which is also why it can run on the detached node
   //   before anything is attached.
   //
-  // What it deliberately does not do is guess. A diagram with no single busiest node gets no
-  // accent at all, which is what the source itself asks for: leave it unaccented rather than
-  // promoting an arbitrary node.
+  // What it deliberately does not do is invent emphasis. It used to promote the single busiest node
+  // to `fp-focal` and one edge into it to `fp-accent`; flowpeek-flow.js's `tagLadder` records the
+  // measurement that removed both, from this sweep and from that one together.
   // ---------------------------------------------------------------------------
 
   // The theme's opt-in. Read from the payload's CSS as a plain string, before mermaid compiles it.
@@ -703,15 +703,8 @@
       return !!shape && shape.tagName.toLowerCase() === "path" && shape.classList.contains("outer-path");
     }
 
-    // `style X fill:#900` and `classDef` reach the shape as an inline fill -- the same fact
-    // `paperUnder` already reads. "The author chose this" is readable, not guessable.
-    function authored(rec) {
-      var shape = rec.el.firstElementChild;
-      return !!shape && /(^|;)\s*fill\s*:/i.test(shape.getAttribute("style") || "");
-    }
-
     var counts = {
-      backend: 0, store: 0, entry: 0, terminal: 0, optional: 0, focal: 0, accent: 0, cross: 0
+      backend: 0, store: 0, entry: 0, terminal: 0, optional: 0, cross: 0
     };
     nodes.forEach(function (n) {
       var rung = isCylinder(n) ? "store"
@@ -724,28 +717,6 @@
       n.el.classList.add("fp-" + rung);
       counts[rung]++;
     });
-
-    // ------------------------------------------------------------------------
-    // The focal node: one, or none, and none is the common answer.
-    //
-    // The only structure that names a single thing to look at without inventing a story is a node
-    // that is busier than everything else on the page -- the API-gateway case. A rule that fired on
-    // "the last node" would fire on every linear chain the app previews, which is how an editorial
-    // accent turns into "this is where the arrows stop", the one thing the source calls an
-    // anti-pattern. So: strictly one node at the top, and genuinely busy, or nothing.
-    // ------------------------------------------------------------------------
-    var focal = null;
-    if (nodes.length >= 4) {
-      var top = null, ties = 0;
-      for (var i = 0; i < nodes.length; i++) {
-        var degree = nodes[i].inDeg + nodes[i].outDeg;
-        if (!top || degree > top.degree) { top = { rec: nodes[i], degree: degree }; ties = 1; }
-        else if (degree === top.degree) ties++;
-      }
-      if (top && ties === 1 && top.degree >= 4) focal = top.rec;
-      // The author has already said where to look.
-      if (focal && authored(focal)) focal = null;
-    }
 
     // One cloned arrowhead per kind. Every arrow in a flowchart points at the same shared marker,
     // so a per-edge head is the one thing CSS cannot do -- and mermaid clones markers for
@@ -785,35 +756,7 @@
       counts[kind]++;
     }
 
-    if (focal) {
-      focal.el.classList.remove("fp-" + focal.rung);
-      counts[focal.rung]--;
-      focal.el.classList.add("fp-focal");
-      counts.focal = 1;
-      // The accent edge is derived from the focal node, never chosen: the one edge into it, with
-      // its arrowhead and its label, which is the part that carries the accent off the node and
-      // along the flow.
-      //
-      // It abstains on a tie, the same way the focal node itself does. Breaking the tie on DOM
-      // order is deterministic but not defensible on the page: two entry nodes that are alike in
-      // every way, one of whose edges is coral, asks the reader to find a difference that is not
-      // there. Rendered and looked at, that is exactly how it read. No edge is better than an
-      // arbitrary one -- the node still carries the accent.
-      var best = null;
-      var tied = false;
-      for (var e = 0; e < focal.incoming.length; e++) {
-        var candidate = focal.incoming[e];
-        if (!best || candidate.from.outDeg > best.from.outDeg) {
-          best = candidate;
-          tied = false;
-        } else if (candidate.from.outDeg === best.from.outDeg) {
-          tied = true;
-        }
-      }
-      if (best && !tied) tagEdge(best, "accent");
-    }
-
-    // The second edge class: a path that leaves one zone and enters another, which is the source's
+    // The edge class: a path that leaves one zone and enters another, which is the source's
     // own trigger for it. Both ends have to be IN a zone -- an edge to a node that is in no
     // subgraph has not crossed a boundary, and counting it as one made every edge in a
     // half-grouped diagram "crossing". Capped so it stays a category rather than becoming the
@@ -823,7 +766,7 @@
       var crossing = [];
       for (var k = 0; k < edges.length; k++) {
         var edge = edges[k];
-        if (edge.patterned || edge.path.classList.contains("fp-accent")) continue;
+        if (edge.patterned) continue;
         var from = zoneOf(edge.from), to = zoneOf(edge.to);
         if (from && to && from !== to) crossing.push(edge);
       }

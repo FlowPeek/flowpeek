@@ -56,34 +56,19 @@ final class EditorialStructureTests: XCTestCase {
         XCTAssertEqual(occurrences("fp-entry", in: markup), 2, "the two in-degree-0 nodes")
         XCTAssertEqual(occurrences("fp-store", in: markup), 1, "the declared cylinder")
         XCTAssertEqual(occurrences("fp-terminal", in: markup), 1, "the one out-degree-0 node")
-        XCTAssertEqual(occurrences("fp-backend", in: markup), 2, "auth and orders")
+        XCTAssertEqual(occurrences("fp-backend", in: markup), 3, "auth, orders and the gateway")
     }
 
-    /// One accent on one node, and nothing arbitrary carried off it.
+    /// No node and no edge is promoted to the accent by its degree.
     ///
-    /// The hub here is reached from two entry nodes that are alike in every way, so there is no
-    /// edge that deserves the accent more than the other and none gets it. Rendered and looked at,
-    /// the alternative -- breaking the tie on document order -- put coral on one of two identical
-    /// arrows and asked the reader to find a difference that was not there.
-    func testTheBusiestNodeIsAccentedAndATiedEdgeIsLeftAlone() async throws {
-        let markup = drawing(try await render(Self.hub, .editorial).svg)
-        XCTAssertEqual(occurrences("fp-focal", in: markup), 1, "the accent is on exactly one node")
-        XCTAssertEqual(
-            occurrences("fp-accent\"", in: markup), 0,
-            "two equal sources: neither edge has earned the accent"
-        )
-    }
-
-    /// And where one source plainly is the busiest, the accent does travel: the edge, its label and
-    /// an arrowhead of its own -- the last of which is the one thing a stylesheet cannot do, because
-    /// every arrow in a flowchart points at the same shared marker.
-    func testAnUnambiguousEdgeCarriesTheAccentAndItsOwnArrowhead() async throws {
-        // `web` has two edges out, `mob` one, so the flow into the gateway has a clear main source.
-        // That edge carries a word, and it has to: the assertion below is that the accent reaches
-        // the label as well as the path, and an unlabelled edge cannot prove it. mermaid emits an
-        // empty label container for every edge regardless, so an unlabelled edge still counted two
-        // -- the second of them an element with nothing in it to paint.
-        let source = """
+    /// These used to assert the opposite: the gateway, busiest at degree four, came out `fp-focal`,
+    /// and with `web` given a second exit its edge into the gateway came out `fp-accent` with an
+    /// arrowhead of its own. That no longer describes what the renderer should do. The pick was
+    /// arithmetic -- nothing in either source asks for it -- and a reader-facing review of 16 sources
+    /// read five of the six such picks as a claim the source never made, "this is the critical
+    /// path" among them. flowpeek-flow.js `tagLadder` records the measurement.
+    func testNeitherTheBusiestNodeNorAnEdgeIntoItIsAccented() async throws {
+        let labelled = """
         flowchart TD
             web[Web App] -->|traffic| gw{{API Gateway}}
             mob[Mobile App] --> gw
@@ -93,35 +78,18 @@ final class EditorialStructureTests: XCTestCase {
             auth --> deny([Denied])
             web --> cdn[CDN]
         """
-        let markup = drawing(try await render(source, .editorial).svg)
-        XCTAssertEqual(occurrences("fp-focal", in: markup), 1)
-        // Counted in class attributes only. The raw token also appears in the cloned marker's id
-        // and in the `marker-end` that points at it, which the next assertion requires to exist, so
-        // counting the string would be counting the same success twice and calling it a failure.
-        XCTAssertEqual(
-            occurrences("fp-accent\"", in: markup), 2,
-            "the accent belongs on the edge and its label, and nowhere else"
-        )
-        XCTAssertTrue(
-            markup.contains("-fp-accent-head\""),
-            "the accent edge needs an arrowhead of its own: the shared one is every other arrow's too"
-        )
+        for source in [Self.hub, labelled] {
+            let markup = drawing(try await render(source, .editorial).svg)
+            XCTAssertEqual(occurrences("fp-focal", in: markup), 0, "a node was accented by its degree")
+            XCTAssertFalse(markup.contains("fp-accent"), "an edge was accented by its source's degree")
+            XCTAssertTrue(markup.contains("fp-entry"), "the ladder itself still ran")
+        }
     }
 
-    /// The abstention is the part that keeps this an editorial accent rather than a signalling
-    /// system. A chain has no busiest node, so it gets no accent -- and most previews are chains.
-    func testADiagramWithNoBusiestNodeIsLeftUnaccented() async throws {
-        let markup = drawing(try await render("flowchart TD\n  A --> B\n  B --> C\n  C --> D", .editorial).svg)
-        XCTAssertEqual(occurrences("fp-focal", in: markup), 0, "a linear chain was given a focal node")
-        XCTAssertTrue(markup.contains("fp-entry"), "the ladder itself still ran")
-        XCTAssertTrue(markup.contains("fp-terminal"))
-    }
-
-    /// An author who has painted a node has already said where to look.
-    func testANodeTheAuthorPaintedIsNeverMadeFocal() async throws {
+    /// The emphasis an author does ask for still arrives, and it is theirs rather than the theme's.
+    func testANodeTheAuthorPaintedKeepsTheAuthorsFill() async throws {
         let source = Self.hub + "\n    style gw fill:#ff0000"
         let markup = drawing(try await render(source, .editorial).svg)
-        XCTAssertEqual(occurrences("fp-focal", in: markup), 0)
         XCTAssertTrue(markup.contains("fill:#ff0000"), "the author's own fill has to survive")
     }
 

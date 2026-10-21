@@ -2479,6 +2479,39 @@ describe('[Render] which connector a label belongs to', () => {
     expect(covered).toEqual([]);
   });
 
+  it('never leaves two plates flush against each other', () => {
+    // Two labelled lines leave Alpha state for Beta side by side, 12px apart. "LTK ok" took the
+    // free seat first and "yes", whose every seat cost something, sat with its plate's edge on
+    // LTK ok's: one strip of grey with two words in it. The held-out review's h04 did the same with
+    // "supervision timeout" and "DFU request". A plate placed later may now ask an earlier one
+    // near its route to move, so every pair keeps rule 2's gap between them.
+    const svg = drawn([
+      'flowchart LR',
+      '  N0[Alpha state] -->|LTK ok| N1[Beta]',
+      '  N1[Beta] -->|CRC error| N2[Gamma step]',
+      '  N2[Gamma step] -->|timeout| N3[Delta]',
+      '  N3[Delta] -->|DFU request| N4[Epsilon long name]',
+      '  N4[Epsilon long name] -->|CRC error| N5[Zeta]',
+      '  N3 -->|idle 3 min| N5',
+      '  N0 -->|yes| N1',
+      '  N2 -->|yes| N0',
+    ].join('\n')).svg;
+    const found = masks(svg);
+    expect(found.length).toBe(8);
+    const flush = [];
+    for (let i = 0; i < found.length; i += 1) {
+      for (let j = i + 1; j < found.length; j += 1) {
+        const a = found[i], b = found[j];
+        const gap = Math.max(
+          Math.max(a.x, b.x) - Math.min(a.x + a.width, b.x + b.width),
+          Math.max(a.y, b.y) - Math.min(a.y + a.height, b.y + b.height),
+        );
+        if (gap < 8) flush.push(`${a.id} / ${b.id}: ${gap}px`);
+      }
+    }
+    expect(flush).toEqual([]);
+  });
+
   it('never lays another line along the edge of a plate from end to end', () => {
     // A plate is opaque and painted over the strokes, so a stroke lying ON its edge loses half its
     // width for the plate's whole length and reads as the plate's border: the line looks broken,

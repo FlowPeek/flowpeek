@@ -9075,6 +9075,13 @@
       && a.y < b.y + b.height && b.y < a.y + a.height;
   }
 
+  // Overlapping, or sharing a stretch of edge. A corner-to-corner touch counts too; it is a point,
+  // and the plates either side of it still read as one shape.
+  function rectsMeet(a, b) {
+    return a.x <= b.x + b.width && b.x <= a.x + a.width
+      && a.y <= b.y + b.height && b.y <= a.y + a.height;
+  }
+
   // How far a mask's PLATE is from a stroke: positive outside it, negative under it.
   //
   // The plate and not the plate's centre, and the change is the whole of the reader's complaint.
@@ -9272,8 +9279,13 @@
       if (rectsOverlap(rect, ctx.boxes[i])) penalty += 400;
       else if (rectsOverlap(near, ctx.boxes[i])) penalty += 100;
     }
+    // A mask that MEETS another along an edge is charged as one on it, not as one near it. Both
+    // plates are the same fill, so with no white between them they print as one strip and the two
+    // labels read as one: the fifth held-out review found h04's "supervision timeout" and "DFU
+    // request" exactly so, 0px apart, and `rectsOverlap` -- strict, as it has to be for strokes and
+    // boxes -- scored that meeting 50, the same as a plate 7px off.
     for (i = 0; i < ctx.labelRects.length; i += 1) {
-      if (rectsOverlap(rect, ctx.labelRects[i])) penalty += 200;
+      if (rectsMeet(rect, ctx.labelRects[i])) penalty += 200;
       else if (rectsOverlap(near, ctx.labelRects[i])) penalty += 50;
     }
     // A mask that leaves a crossing no bump (see `bumpRooms`). 10, a foreign stroke within the
@@ -10205,17 +10217,101 @@
     // one of three plates off its line and left the picture exactly as mixed. Measured: 43/44 and 39/40 unchanged, drawings mixing 4 -> 2 and 7 -> 3, on-line
     // 33 -> 30 of 44 and 16 -> 8 of 40. The two review drawings still mixing are 12 and 16, each one
     // BESIDE among ON labels, whose ON would cost 30 and 10.
+    //
+    // And then one repair the greedy order does need: a label whose every seat costs something may
+    // ask an EARLIER plate near its route to move. The order is source order, so the earlier label
+    // took the best seat it saw without knowing a later one had no other. In h04 "supervision
+    // timeout" sat ON the one vertical leg between its exits, which was free, and left "DFU request"
+    // -- whose run lies 12px under a sibling on each side -- three seats: flush against that plate
+    // (50), flush against OTA update's box (100), or ON with "CRC error"'s line along its edge, which
+    // `parallelUnder` charges 40 of a 60. It took the 50 and the two plates printed as one strip.
+    // Placed the other way round, "DFU request" stands clear above its line (8) and "supervision
+    // timeout" sits ON its last run (10): 18 against 58. So each such pair is placed again in the
+    // other order, against every other plate, and kept only if the two together cost less.
+    //
+    // Pairs, not the whole drawing again: the full second pass the note above measured cost 56% of
+    // the render time to move nothing. A pair is tried only for a label that scored above zero, only
+    // if the seat it would take with the earlier plates near its route lifted out is cheaper than
+    // the one it has, and only with a plate that stands in that seat or within a gap of it. "Near"
+    // is the label's own extent and two gaps from the route, as far as any of its seats can reach.
+    // Measured: the 216-drawing sweep and the held-out twenty render in 174ms a pass against 152,
+    // and change in h04 and h02 alone -- h02's "rotated refresh token" gets its line back the same
+    // way, from the plate of "Bearer header" above it. Over 600 random labelled state machines,
+    // drawings with two plates within 4px went 40 -> 16 with `rectsMeet` and this together.
+    // Rejected: charging a meeting at 200 alone. It is the right price, but in h04 it only hands
+    // "DFU request" its 60 -- the plate back over the CRC line that `9e12b12` took it off.
     var titleRects = ctx.labelRects.slice();
     ctx.bumpRooms = bumpRooms(routed, ctx);
+    function placeOne(r, besideOnly) {
+      var placed = besideOnly ? placeEdgeLabel(r.edge, r.points, ctx, r.transit, true) : null;
+      if (!placed || placed.crowded) placed = placeEdgeLabel(r.edge, r.points, ctx, r.transit);
+      return placed;
+    }
+    function platesBut(a, b) {
+      var out = titleRects.slice();
+      for (var k = 0; k < routed.length; k += 1) {
+        if (k === a || k === b || !routed[k] || !routed[k].label) continue;
+        out.push(routed[k].label.rect);
+      }
+      return out;
+    }
+    function reorderPairs(besideOnly) {
+      for (var li = 0; li < routed.length; li += 1) {
+        var late = routed[li] && routed[li].label;
+        if (!late || late.penalty === 0) continue;
+        var pts = routed[li].points;
+        var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (var pi = 0; pi < pts.length; pi += 1) {
+          x0 = Math.min(x0, pts[pi].x); y0 = Math.min(y0, pts[pi].y);
+          x1 = Math.max(x1, pts[pi].x); y1 = Math.max(y1, pts[pi].y);
+        }
+        var reach = Math.max(late.rect.width, late.rect.height) + 2 * LABEL_GAP_PX;
+        var around = { x: x0 - reach, y: y0 - reach, width: x1 - x0 + 2 * reach, height: y1 - y0 + 2 * reach };
+        // The seat it would take with no earlier plate near its route. No better, and nothing an
+        // earlier plate could give up would help, so no pair is tried.
+        ctx.labelRects = titleRects.slice();
+        for (var oi = 0; oi < routed.length; oi += 1) {
+          var other = oi !== li && routed[oi] && routed[oi].label;
+          if (other && (oi > li || !rectsOverlap(around, other.rect))) ctx.labelRects.push(other.rect);
+        }
+        var free = placeOne(routed[li], besideOnly);
+        if (!free || free.penalty >= late.penalty) continue;
+        var wanted = {
+          x: free.rect.x - LABEL_GAP_PX, y: free.rect.y - LABEL_GAP_PX,
+          width: free.rect.width + 2 * LABEL_GAP_PX, height: free.rect.height + 2 * LABEL_GAP_PX
+        };
+        for (var ei = 0; ei < li; ei += 1) {
+          var early = routed[ei] && routed[ei].label;
+          if (!early || !rectsOverlap(around, early.rect) || !rectsOverlap(wanted, early.rect)) continue;
+          ctx.labelRects = platesBut(li, ei);
+          var lateNew = placeOne(routed[li], besideOnly);
+          if (!lateNew) continue;
+          ctx.labelRects.push(lateNew.rect);
+          var earlyNew = placeOne(routed[ei], besideOnly);
+          // The plate that was there first moves only to a seat no worse than its own or than a
+          // clean one -- a stroke within the gap or a head at the plate's end, the 10 that the
+          // cheapest real harm costs. Summed alone, the trade took render.spec.js's "found" off
+          // a box (108) by putting "record missing" ON its drop with ok's line under it (38 ->
+          // 60): cheaper by the weights, and the one placement that test says is never taken.
+          if (earlyNew && earlyNew.penalty <= Math.max(early.penalty, 10)
+            && lateNew.penalty + earlyNew.penalty < late.penalty + early.penalty) {
+            routed[li].label = lateNew;
+            routed[ei].label = earlyNew;
+            break;
+          }
+        }
+      }
+      ctx.labelRects = platesBut(-1, -1);
+    }
     function placeLabels(besideOnly) {
       ctx.labelRects = titleRects.slice();
       for (i = 0; i < routed.length; i += 1) {
         if (!routed[i]) continue;
-        var placed = besideOnly ? placeEdgeLabel(routed[i].edge, routed[i].points, ctx, routed[i].transit, true) : null;
-        if (!placed || placed.crowded) placed = placeEdgeLabel(routed[i].edge, routed[i].points, ctx, routed[i].transit);
+        var placed = placeOne(routed[i], besideOnly);
         routed[i].label = placed;
         if (placed) ctx.labelRects.push(placed.rect);
       }
+      reorderPairs(besideOnly);
     }
     function countOn() {
       var on = 0, all = 0;

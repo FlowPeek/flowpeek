@@ -4875,6 +4875,20 @@
       seg.forkBack = segBack;
       seg.forkOff = (seg.forkAt < 0) ? 0
         : ((seg.forkAt === seg.u ? cv : cu) - centreOf(seg.forkAt));
+      // The same information at the other end: several direct edges arriving at one node are a
+      // fan-in. It cannot reuse the fork's lane order. For a forward fork the outer pair turns
+      // nearest the low/source face; for a forward fan-in that is exactly the order that crosses,
+      // because an outer arm's cross-line cuts the inner arm before the latter has turned. The
+      // fan-in must therefore ladder towards its high/target face, inner pair first. Sorting all
+      // segments nearest-first was rejected: it has no notion of a shared face and can reorder an
+      // unrelated edge ahead of a fork; pairing only the arms that share this target preserves the
+      // first-fit order everywhere else.
+      seg.mergeAt = (segEdge.chain.length > 2) ? -1
+        : ((!segBack && seg.gap + 1 === segEdge.highRank) ? seg.v
+          : ((segBack && seg.gap === segEdge.lowRank) ? seg.u : -1));
+      seg.mergeBack = segBack;
+      seg.mergeOff = (seg.mergeAt < 0) ? 0
+        : ((seg.mergeAt === seg.u ? cv : cu) - centreOf(seg.mergeAt));
       var lbl = seg.edge.labelBox;
       if (lbl) {
         var along = vertical ? lbl.h : lbl.w;
@@ -4975,6 +4989,14 @@
       if (!forks.has(fkey)) forks.set(fkey, []);
       forks.get(fkey).push(fs);
     }
+    var merges = new Map();
+    for (i = 0; i < segments.length; i += 1) {
+      var ms = segments[i];
+      if (ms.gap >= maxRank || ms.mergeAt < 0) continue;
+      var mkey = ms.gap + "|" + ms.mergeAt + "|" + (ms.mergeBack ? "b" : "f");
+      if (!merges.has(mkey)) merges.set(mkey, []);
+      merges.get(mkey).push(ms);
+    }
     // A lane is claimed by a UNIT: one mirror pair of a fork, or one segment on its own. Units go in
     // the order their edges were DECLARED, which is the order the counter used, so a gap that holds
     // no fork comes out of this exactly as it went in. Two orders that read as more principled were
@@ -5030,19 +5052,50 @@
         units.push(fork.tiers[t4]);
       }
     });
+    merges.forEach(function (arms) {
+      // A segment cannot be scheduled twice. A source fork owns the lane shape when both ends fan;
+      // the merge then orders only the arms left over, if it still has a pair to order.
+      arms = arms.filter(function (arm) { return !arm.inFork; });
+      if (arms.length < 2) return;
+      arms.sort(function (p, q) { return (p.mergeOff - q.mergeOff) || (p.edge.index - q.edge.index); });
+      for (var a4 = 0; a4 < arms.length; a4 += 1) arms[a4].inMerge = true;
+      var tiers = [];
+      for (var k2 = 0; k2 < arms.length; k2 += 1) {
+        var t5 = Math.min(k2, arms.length - 1 - k2);
+        if (!tiers[t5]) tiers[t5] = [];
+        tiers[t5].push(arms[k2]);
+      }
+      var mergeIndex = arms[0].edge.index;
+      for (var a5 = 1; a5 < arms.length; a5 += 1) mergeIndex = Math.min(mergeIndex, arms[a5].edge.index);
+      var merge = { tiers: [], back: arms[0].mergeBack };
+      for (var t6 = 0; t6 < tiers.length; t6 += 1) {
+        var mergeTier = tiers[t6];
+        if (!mergeTier) continue;
+        if (mergeTier.length === 1 && mergeTier[0].lo === mergeTier[0].hi) continue;
+        merge.tiers.push({ segs: mergeTier, index: mergeIndex, merge: merge });
+      }
+      // Lane zero is nearest the low face. A forward merge arrives at the high face, so its outer
+      // pair goes last; a back merge arrives at the low face and keeps the outer pair first.
+      if (!merge.back) merge.tiers.reverse();
+      for (var t7 = 0; t7 < merge.tiers.length; t7 += 1) {
+        merge.tiers[t7].step = t7;
+        units.push(merge.tiers[t7]);
+      }
+    });
     for (i = 0; i < segments.length; i += 1) {
       var rest = segments[i];
       if (rest.gap >= maxRank || rest.lo === rest.hi) continue;
-      if (rest.inFork) continue;
-      units.push({ segs: [rest], index: rest.edge.index, fork: null, step: 0 });
+      if (rest.inFork || rest.inMerge) continue;
+      units.push({ segs: [rest], index: rest.edge.index, fork: null, merge: null, step: 0 });
     }
     units.sort(function (p, q) { return (p.index - q.index) || (p.step - q.step); });
     for (i = 0; i < units.length; i += 1) {
       var unit = units[i];
-      var floorL = unit.fork ? (unit.fork.floor || 0) : 0;
+      var family = unit.fork || unit.merge;
+      var floorL = family ? (family.floor || 0) : 0;
       var got = takeLane(unit.segs[0].gap, unit.segs, floorL);
-      // A fork's pairs ladder outwards, one lane apart at least, whatever else claims the gap first.
-      if (unit.fork) unit.fork.floor = got + 1;
+      // A fork or merge's pairs ladder one lane apart at least, whatever else claims the gap first.
+      if (family) family.floor = got + 1;
     }
 
     // --- how far apart the lanes sit -------------------------------------

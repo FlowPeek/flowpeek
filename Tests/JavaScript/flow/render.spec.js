@@ -534,7 +534,7 @@ describe('[Render] bridges at crossings', () => {
     const body = (first, second) => [
       'flowchart TD', `  A ${first} Z`, `  B ${second} Z`, '  C --> Z', '  D --> Z',
     ].join('\n');
-    const AT = '204,88';
+    const AT = '204,100';
 
     // Nothing separates two solid edges, so the tie goes to the one declared later and the first
     // one written stays whole. A tie-break, not a judgement; the four below are the judgement.
@@ -562,6 +562,23 @@ describe('[Render] bridges at crossings', () => {
 
 describe('[Render] fanning a face', () => {
   const fanIn = (n) => ['flowchart TD', ...Array.from({ length: n }, (_, i) => `  N${i} --> Z[Sink]`)].join('\n');
+
+  it('does not cross the five edges of a fan-in in any rank direction', () => {
+    // Before the merge-end lane order existed, the outer arm turned nearer the sources than the
+    // inner arm and cut its stub: one crossing edge-pair in TD and one in LR, despite all five
+    // sources and all five target ports already standing in the same order.
+    for (const dir of ['TD', 'LR', 'BT', 'RL']) {
+      const source = ['flowchart ' + dir, ...Array.from({ length: 5 }, (_, i) => `  N${i} --> Z[Sink]`)].join('\n');
+      const paths = edgePaths(drawn(source).svg);
+      let pairs = 0;
+      for (let i = 0; i < paths.length; i += 1) {
+        for (let j = i + 1; j < paths.length; j += 1) {
+          if (crossings(paths[i].d, paths[j].d).length > 0) pairs += 1;
+        }
+      }
+      expect(pairs, `${dir} crossing edge-pairs`).toBe(0);
+    }
+  });
 
   it('keeps SKILL.md rule 4\'s 12px between adjacent attach points', () => {
     for (const source of [...SWEEP_SOURCES, ...[3, 5, 7, 9, 12, 16, 24].map(fanIn)]) {

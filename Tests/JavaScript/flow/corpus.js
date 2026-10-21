@@ -132,6 +132,13 @@ const FAMILIES = {
     '  I -->|scan| C[Scanning]', '  W -->|done| I', '  Y -->|synced| I', '  C -->|nothing found| I',
     '  W --> F[Finish]',
   ].join('\n'),
+  // A fork one of whose arms comes back. Two edges then join the same two boxes, one each way, and
+  // the fork's own face carries both beside the other arm. Every two-way pair above is between
+  // boxes with nothing else on the shared face, or rides a corridor; the held-out review's h04 had
+  // this at Advertising and Deep sleep, and the two lines crossed beside the fork.
+  'fork with a returning arm': (dir) => [
+    `flowchart ${dir}`, '  A[Idle] -->|connect| B[Busy]', '  A -->|sleep| C[Paused]', '  C -->|wake| A',
+  ].join('\n'),
   'long forward edge': (dir) => [
     `flowchart ${dir}`, '  A[Start] --> B[One] --> C[Two] --> D[Three] --> E[End]',
     '  A --> P[Wide parallel step] --> Q[Another one] --> E', '  A -->|skip| E',

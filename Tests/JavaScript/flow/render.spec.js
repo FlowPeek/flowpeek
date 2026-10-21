@@ -799,6 +799,33 @@ describe('[Render] fanning a face', () => {
     }
   });
 
+  it('crosses no two edges that share a node, over the sweep and on both rulers', () => {
+    // The test above on three drawings, carried to every one. The held-out review found three more
+    // knots beside a node that the order above did not reach: h03's 예 exit left 재시도's tip to the
+    // left of the arrow coming in, because a vertex's ports were still sorted by the far box's
+    // centre and not by the corridor the edge is headed down; and h04's Advertising sent its edge to
+    // Deep sleep above the one coming back, because the two tied on Advertising's face and were
+    // split by declaration order there while `mirrorForks` had split them the other way at Deep
+    // sleep. `long back edge` TD and BT drew the first, and `fork with a returning arm` is the
+    // second with nothing else of h04 kept.
+    const ends = (id) => /^L_(.+)_(.+)_\d+$/.exec(id).slice(1, 3);
+    const crossed = [];
+    for (const ruler of [measureText, measureFace]) {
+      for (const { name, source } of SWEEP) {
+        const paths = edgePaths(drawn(source, { measureText: ruler }).svg);
+        for (let i = 0; i < paths.length; i += 1) {
+          for (let j = i + 1; j < paths.length; j += 1) {
+            if (!ends(paths[i].id).some((n) => ends(paths[j].id).includes(n))) continue;
+            if (crossings(paths[i].d, paths[j].d).length > 0) {
+              crossed.push(`${ruler === measureFace ? 'face' : 'budget'} ${name}: ${paths[i].id} x ${paths[j].id}`);
+            }
+          }
+        }
+      }
+    }
+    expect(crossed).toEqual([]);
+  });
+
   it('slots an end that must pass a box on the side of that box it passes', () => {
     // The review's mesh source, the one drawing all four reviews gave to Pele. Worker West A's right
     // face carries three ends: Router West's edge in, and the two `replicate` edges to and from

@@ -5947,6 +5947,14 @@
         if (segments[j].edge === pe3 && segments[j].gap === startGap) { startSeg = segments[j]; break; }
       }
       pe3.laneLocal = startSeg ? startSeg.laneLocal : null;
+      // And the lane in the gap it ARRIVES through, which the router takes only where the edge lands
+      // on a vertex; see `joinStations`.
+      var endGap = backwards ? rank[pe3.b.slot] : rank[pe3.b.slot] - 1;
+      var endSeg = null;
+      for (j = 0; j < segments.length; j += 1) {
+        if (segments[j].edge === pe3 && segments[j].gap === endGap) { endSeg = segments[j]; break; }
+      }
+      pe3.endLaneLocal = (endSeg && endSeg !== startSeg && endSeg.lane >= 0) ? endSeg.laneLocal : null;
       pe3.laneAxis = startSeg ? startSeg.laneAxis : null;
     }
 
@@ -6537,12 +6545,19 @@
     // Fixed faces first, in the order the far ends stand along this face -- the fan's own order,
     // since a fixed face has no desires to sort by and two ports crossing before they have left the
     // box is the thing the order exists to prevent.
+    //
+    // "Where the far end stands" is `headingOf`, the same key the free faces break ties by, and not
+    // the far box's centre, which is what this sorted by until the held-out review's h03: an answer
+    // sent back up a corridor leaves the vertex towards that corridor, wherever its far box is.
+    // 재시도's 예 went back to 결제 요청 생성, left of the tip, down a corridor on the far right, so
+    // by box centre it took the tip's left port and crossed the arrow coming in from 결제 실패 처리
+    // on its way right. `long back edge` TD and BT drew the same knot under Check.
     for (i = 0; i < faces.length; i += 1) {
       var fx = faces[i];
       if (!fx.fixed) continue;
       fx.group.sort(function (p, q) {
-        var pk = fx.alongX ? centreX(p.other) : centreY(p.other);
-        var qk = fx.alongX ? centreX(q.other) : centreY(q.other);
+        var pk = headingOf(fx, p, model);
+        var qk = headingOf(fx, q, model);
         if (pk !== qk) return pk - qk;
         if (p.edge.index !== q.edge.index) return p.edge.index - q.edge.index;
         return p.end - q.end;
@@ -6603,6 +6618,16 @@
   // Where an end goes after it leaves its face, along that face: the corridor it was handed, or the
   // far box when it reaches that directly.
   //
+  // Directly, the far PORT where the far face runs along the same axis: where that end has asked to
+  // land, which `mirrorForks` has already settled by the time any face is sorted. The far box's
+  // centre cannot tell two edges between the same two boxes apart, so on one face they tied and
+  // fell to declaration order while the far face, where their desires differ, put them the other
+  // way round -- and they crossed between the two. The held-out review's h04 did that at Advertising
+  // and Pairing: Advertising's fork mirrored "central connects"'s landing one unit below where
+  // "passkey wrong x3" leaves Pairing at the two boxes' meeting point, and on Advertising's face the
+  // two tied at that meeting point. Only for a face on the same axis: a far face across this one
+  // stands at one coordinate whatever the desire, and its box's centre is as good an answer there.
+  //
   // A far box behind a zone that holds neither end is not where the route heads first: the route
   // goes round that zone (no connector enters a foreign zone), and round the side nearer this face.
   // In 08, once App Server 2 stood left of App Server 1, its edges to Primary and to S3 Bucket tied
@@ -6626,7 +6651,9 @@
     var via = att.edge.via || [];
     var level = model.levels.get(att.edge.level);
     if (via.length > 0 && level) return viaAlong(face, level, att.end === 0 ? via[0] : via[via.length - 1]);
+    var farAtt = att.end === 0 ? att.edge.endAtt : att.edge.startAtt;
     var far = face.alongX ? centreX(att.other) : centreY(att.other);
+    if (farAtt && farAtt.face && farAtt.face.alongX === face.alongX && farAtt.face !== face) far = farAtt.face.base + farAtt.desire;
     var box = face.box;
     var other = att.other;
     var mine = ancestry(att.edge.from, model.parentOf).concat(ancestry(att.edge.to, model.parentOf));
@@ -7549,6 +7576,12 @@
         var base = (e2.laneAxis === "y") ? level2.originY : level2.originX;
         channel = { axis: e2.laneAxis, value: px(base + e2.laneLocal) };
       }
+      // Only onto a face the shape fixed, a vertex: see `joinStations` for why, and for the wider rule
+      // that was measured and rejected.
+      var endChannel = null;
+      if (e2.laneAxis && level2 && e2.endLaneLocal !== null && e2.endLaneLocal !== undefined && e2.endFace && e2.endFace.fixed) {
+        endChannel = { axis: e2.laneAxis, value: px(((e2.laneAxis === "y") ? level2.originY : level2.originX) + e2.endLaneLocal) };
+      }
       outEdges.push({
         id: e2.id,
         index: e2.index,
@@ -7566,6 +7599,7 @@
         start: { x: px(e2.startPoint.x), y: px(e2.startPoint.y), side: e2.startSide, inset: px(e2.startInset), pitch: px(e2.startPitch || MIN_PITCH) },
         end: { x: px(e2.endPoint.x), y: px(e2.endPoint.y), side: e2.endSide, inset: px(e2.endInset), pitch: px(e2.endPitch || MIN_PITCH) },
         channel: channel,
+        endChannel: endChannel,
         via: via,
         label: e2.raw.text,
         labelType: e2.raw.labelType,
@@ -8563,7 +8597,19 @@
     for (var i = 0; i + 1 < stations.length; i += 1) {
       // Only the first leg gets the reserved lane: it is the lane in the gap the edge has to leave
       // its SOURCE by, which is the one place two edges out of one rank would otherwise stack.
+      //
+      // And the last leg, where it lands on a vertex (`endChannel`). A vertex hands out its ports
+      // along its slopes, one step apart (`slopesOf`), so a corridor arriving there comes in beside
+      // the vertex's own answers -- and once the answers took the order their corridors run in,
+      // `long back edge`'s retry landed on Check's right slope 20px from the "right" answer, turned
+      // 36px above Right's face instead of at the lane the layout reserved 56px above it, and left
+      // the answer's plate 4px of room: a crowded label and a mask inside rule 2's gap, TD and BT.
+      // The layout had already sized that gap for the plate; the router was not using the plan.
+      // Rejected: the last leg's lane for every corridor. It moved 42 of the 212 sweep drawings for
+      // no change in bends or crossings outside these two, and in the bridge-weight fixture it
+      // slid A1 --> B2's jog onto the stretch its bump needed.
       var pref = (i === 0 && edge.channel && edge.channel.axis === travel) ? edge.channel.value : null;
+      if (i > 0 && i + 2 === stations.length && edge.endChannel && edge.endChannel.axis === travel) pref = edge.endChannel.value;
       var mid = connect(stations[i], stations[i + 1], travel, pref, ctx, strict, edge);
       if (mid === null) mid = connect(stations[i], stations[i + 1], other, null, ctx, strict, edge);
       if (mid === null) return null;

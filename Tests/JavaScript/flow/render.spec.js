@@ -1986,11 +1986,16 @@ describe('[Render] which connector a label belongs to', () => {
     // review's sixteen, 110 touched no stroke at all before this, and Pele, which sits every label
     // on its line, has 0.
     //
-    // 48 of 168 here sat on their own line before; 115 do now. The rest are where ON would harm
+    // 48 of 168 here sat on their own line before; 103 do now. The rest are where ON would harm
     // something -- a run too short for the plate, a sibling exit 16px away under it, a node --
     // and the plain drawing below is one of them: both branches leave the rhombus 16px apart and
     // turn within 44px, so a plate on either first leg covers the other and the last legs are too
     // short to carry it.
+    //
+    // It was 111 and a bound of 0.65 until a drawing at least half BESIDE was made all BESIDE
+    // where that is free (flowpeek-flow.js, the label loop): one convention per picture. That
+    // took 8 plates off their lines in four drawings here -- the 8-line TD, the RL labelled fork
+    // and the two reported nego/cand drawings -- and none of them gained a harm.
     let on = 0;
     let total = 0;
     for (const source of ALL) {
@@ -2004,7 +2009,7 @@ describe('[Render] which connector a label belongs to', () => {
       }
     }
     expect(total).toBeGreaterThanOrEqual(168);
-    expect(on / total).toBeGreaterThan(0.65);
+    expect(on / total).toBeGreaterThan(0.6);
 
     const plain = drawn('flowchart TD\n  A[Start] --> B{Is it ready?}\n  B -->|yes| C[(Store)]\n  B -->|no| D((Retry))');
     const plainPaths = edgePaths(plain.svg);

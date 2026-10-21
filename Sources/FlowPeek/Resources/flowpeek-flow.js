@@ -7835,7 +7835,9 @@
   // ON is offered only where the run is longer than the mask plus a visible tail of stroke at each
   // end. A mask longer than the segment it sits on swallows the whole connector, and then rule 2's
   // harm is real: there is nothing left to trace.
-  function placeEdgeLabel(edge, points, ctx, preferEarly) {
+  //
+  // `besideOnly` withholds ON, for the drawing-wide pass at the label loop; see there.
+  function placeEdgeLabel(edge, points, ctx, preferEarly, besideOnly) {
     if (!(edge.labelWidth > 0) || !(edge.labelHeight > 0)) return null;
     var halfW = half4(edge.labelWidth);
     var halfH = half4(edge.labelHeight);
@@ -7874,7 +7876,7 @@
       if (seg.at === points.length - 2 && ARROW_MARKERS[edge.arrowEnd]) tips.push(seg.horizontal ? seg.q.x : seg.q.y);
       for (var m = 0; m < 3; m += 1) {
         var onLine = (m === 2);
-        if (onLine && !onFits) continue;
+        if (onLine && (!onFits || besideOnly)) continue;
         // Above a horizontal run and to the right of a vertical one, which is where the style guide
         // puts an arrow label; the other side is the second try, not a different rule. On the line
         // there is no side.
@@ -8624,13 +8626,57 @@
     // flat 40 for "a rival is at least as near" -- the repair pass DID move masks, and nego.mmd
     // needed it: "negotiate(adjustRate, self)" came out of the greedy pass 8px from its own
     // connector and flush against a different one. The gradient is what removed the need for it.
+    //
+    // Then one convention per drawing where that is free. The placer chooses ON or BESIDE label by
+    // label, and a reader does not: the second visual review read 01 as two conventions in one
+    // picture -- Valid?'s two labels interrupting their lines while In stock?'s hung in the gutter
+    // -- and 09 as two under ONE diamond. Measured over the review's 16 sources (44 labels) and
+    // differential.mjs's 175 drawings (40 labels), 4 and 7 drawings mixed the two.
+    //
+    // Rejected: all ON wherever any is. Every label that came out BESIDE did so because ON harmed
+    // something -- BESIDE pays 8 and any harm on ON costs 10 or more -- so forcing them on costs
+    // exactly that harm, and placements with none fell from 43 to 36 of 44 and from 39 to 23 of 40.
+    // Also rejected: all BESIDE wherever any is. It holds 43 and 39, but it is f5e4b8e taken back on
+    // every drawing that has a single crowded label: on-line 33 -> 22 of 44, and 16 and 12, whose
+    // labels the same review found sitting on their lines, would float again for one exception each.
+    //
+    // So the drawing follows its majority, and only in the direction that is free. Where at least
+    // half the labels are already BESIDE, the rest are offered BESIDE too and take it if it is
+    // clean, keeping ON otherwise; where most are ON, the exceptions stay exceptions, since moving
+    // them is the harm above. And the second pass is kept only if it leaves no label ON: one that
+    // still has to stay ON means the picture mixes anyway, and the plates it moved were spent on
+    // nothing -- the first cut kept such a pass, and on render.spec.js's 7-line LR drawing it took
+    // one of three plates off its line and left the picture exactly as mixed. Measured: 43/44 and 39/40 unchanged, drawings mixing 4 -> 2 and 7 -> 3, on-line
+    // 33 -> 30 of 44 and 16 -> 8 of 40. The two review drawings still mixing are 12 and 16, each one
+    // BESIDE among ON labels, whose ON would cost 30 and 10.
+    var titleRects = ctx.labelRects.slice();
+    function placeLabels(besideOnly) {
+      ctx.labelRects = titleRects.slice();
+      for (i = 0; i < routed.length; i += 1) {
+        if (!routed[i]) continue;
+        var placed = besideOnly ? placeEdgeLabel(routed[i].edge, routed[i].points, ctx, routed[i].transit, true) : null;
+        if (!placed || placed.crowded) placed = placeEdgeLabel(routed[i].edge, routed[i].points, ctx, routed[i].transit);
+        routed[i].label = placed;
+        if (placed) ctx.labelRects.push(placed.rect);
+      }
+    }
+    function countOn() {
+      var on = 0, all = 0;
+      for (i = 0; i < routed.length; i += 1) {
+        if (!routed[i] || !routed[i].label) continue;
+        all += 1;
+        if (routed[i].label.onLine) on += 1;
+      }
+      return { on: on, all: all };
+    }
+    placeLabels(false);
+    var first = countOn();
+    if (first.on > 0 && 2 * first.on <= first.all) {
+      placeLabels(true);
+      if (countOn().on > 0) placeLabels(false);
+    }
     for (i = 0; i < routed.length; i += 1) {
-      if (!routed[i]) continue;
-      var placed = placeEdgeLabel(routed[i].edge, routed[i].points, ctx, routed[i].transit);
-      if (!placed) continue;
-      if (placed.crowded) noteWarning(warnings, "label-crowded");
-      routed[i].label = placed;
-      ctx.labelRects.push(placed.rect);
+      if (routed[i] && routed[i].label && routed[i].label.crowded) noteWarning(warnings, "label-crowded");
     }
 
     // After the labels, not before: a bridge may not land under a mask, and where the masks are is

@@ -4974,12 +4974,50 @@
     // One label between two neighbours needs a gap from its stroke and a gap from the neighbour, so
     // `room + 2 * LABEL_GAP`. Two -- one hanging back off the later neighbour, one hanging forward
     // off the earlier -- need a third gap between the two masks.
+    //
+    // Plus LABEL_MARGIN_PX where the label stands between two labelled COLUMNS: `a` and `b` each
+    // carry a labelled run across the same gap, to two different nodes that are themselves
+    // neighbours on the far rank. Those two runs are parallel for the whole gap, so a plate beside
+    // the first has the second exactly one gap off its far edge and no slide along the run gets it
+    // clear. In the app's widths nego.mmd's C2 -> N2 and C3 -> N3 stand 192px apart with a 176px
+    // plate, 8 + 176 + 8: an ownership margin of 0, which the placer prices above ON, so those
+    // two went ON while the other four went BESIDE and the picture carried both conventions. With
+    // the margin the same two take a clean BESIDE and nego is uniform, 6 of 6, 24px wider.
+    // `leavingRoom` already holds this pitch -- it is its "one more" -- so it is added only where
+    // the in-level claim is the one that decided.
+    //
+    // Rejected: the margin on every forward claim. It made nego uniform too, and moved six of the
+    // review's eighteen drawings to do it: cand.mmd went 696 -> 720px wide with 3 of its 9 labels
+    // ON, because there the room was `leavingRoom`'s and the pitch was paid twice; 03, 07, 13 and
+    // 16 moved; and the three-way labelled fan and its fan-in, TD and BT, came out with 4 masks
+    // tied 8px from their own line and 8px from a sibling's. A fan's long runs are its lanes, not
+    // its columns, so the extra room only rearranged which of its plates sat on a lane. Rejected
+    // too: the same rule counting ghost corridors as columns, which still moved 03 (848 -> 888px)
+    // and 07 (284 -> 288px) for no label of theirs.
+    var facingColumns = function (a, b) {
+      if (items[a].dummy || items[b].dummy) return false;
+      for (var p = 0; p < segments.length; p += 1) {
+        var sa = segments[p];
+        if ((sa.u !== a && sa.v !== a) || !sa.edge.labelBox) continue;
+        var pa = sa.u === a ? sa.v : sa.u;
+        if (items[pa].dummy) continue;
+        for (var q = 0; q < segments.length; q += 1) {
+          var sb = segments[q];
+          if ((sb.u !== b && sb.v !== b) || sb.gap !== sa.gap || !sb.edge.labelBox) continue;
+          var pb = sb.u === b ? sb.v : sb.u;
+          if (pa !== pb && !items[pb].dummy && items[pa].order + 1 === items[pb].order) return true;
+        }
+      }
+      return false;
+    };
     var centreSep = function (a, b) {
       var plain = (items[a].oSize + items[b].oSize) / 2 + env.spaceU;
-      var forward = Math.max(labelAfter ? labelRoom[a] : labelRoomBack[a], leavingRoom[a]);
+      var own = labelAfter ? labelRoom[a] : labelRoomBack[a];
+      var forward = Math.max(own, leavingRoom[a]);
       var backward = labelAfter ? labelRoomBack[b] : labelRoom[b];
       var need = 0;
       if (forward > 0) need += forward + LABEL_GAP;
+      if (own > leavingRoom[a] && facingColumns(a, b)) need += MIN_PITCH;
       if (backward > 0) need += backward + LABEL_GAP;
       if (need > 0) need += LABEL_GAP;
       return Math.max(plain, need);

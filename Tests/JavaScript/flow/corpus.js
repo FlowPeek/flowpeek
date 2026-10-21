@@ -228,13 +228,8 @@ export const ALIGNED_PAIRS = 188;
 // reviewer graded the drawing's remaining width a defensible difference, not a defect: do not
 // chase it.
 //
-// MIXED LABEL CONVENTION IN ONE DRAWING. `f5e4b8e` puts a label on its own line where that is
-// clean and `e0f3a2d` makes a drawing that is mostly BESIDE go uniformly BESIDE. One reported
-// source sits between: two labels ON and four BESIDE, with no label ambiguous, so the cost is
-// tidiness rather than meaning. Every uniform alternative was measured and each is worse. Forcing
-// all ON costs 10 + 10 + 20 + 200 penalty points. Forcing all BESIDE costs 145 on one edge whose
-// columns stand 192px apart against a 176px plate, which leaves no ownership margin at all.
-// Reserving a 12px margin did make it uniform, and regressed a different reported source and broke
-// an ownership assertion on the three-way labelled fan. The mirror of `e0f3a2d` does nothing by
-// construction, because a label only goes BESIDE when its ON placement already costs more than 8.
-// What this needs is a reserve that does not disturb the labelled fan, which nobody has found.
+// ONE PLATE ON ITS OWN ELBOW. The reported drawing that mixed ON and BESIDE is now all BESIDE: the
+// layout keeps a margin between two labelled columns side by side (`facingColumns`). One plate in
+// it, "negotiate(adjustRate, self)", is placed beside its first leg and still lies over its own
+// elbow, as it did before; the placer charges it 18 for that leg. It covers its own line, not
+// another's, and render.spec.js names it in an exact set.

@@ -2211,6 +2211,30 @@ describe('[Render] which connector a label belongs to', () => {
     }
   });
 
+  it('gives two labelled columns side by side the room to keep the reported nego one convention', () => {
+    // nego.mmd in the app: C2 -> N2 and C3 -> N3 are two labelled runs straight down, side by
+    // side, and their columns stood exactly one plate and two gaps apart. A plate beside the first
+    // was then 8px from its own line and 8px from the second -- an ownership margin of 0 -- so both
+    // went ON while the drawing's four other labels went BESIDE, and the review read it as two
+    // conventions in one picture. The stand-in measurer here wraps "negotiate(adjustRate,
+    // original)" and so never reaches that width; "negotiate(adjust, orig)" is one line and does,
+    // which is the reported drawing with the reported fault. The layout now reserves the margin
+    // between two such columns (flowpeek-flow.js, `facingColumns`).
+    //
+    // An exact set, not an empty one. "negotiate(adjustRate, self)" is placed BESIDE its first leg
+    // and its plate still lies over its own elbow, as it did before this change. It is its own
+    // line under it, not another's, so it is named here rather than excused -- a third plate on a
+    // line fails, and so does the day this one comes off its elbow.
+    const ELBOW = ['L_OP_N1_0'];
+    const source = NEGO.replaceAll('negotiate(adjustRate, original)', 'negotiate(adjust, orig)');
+    const svg = drawn(source).svg;
+    const paths = edgePaths(svg);
+    const found = masks(svg);
+    expect(found.length).toBe(6);
+    const on = found.filter((mask) => sitsOn(mask, paths.find((p) => p.id === mask.id).d)).map((m) => m.id);
+    expect(on).toEqual(ELBOW);
+  });
+
   it('puts every label of the reviewed state machine on its own line and on no other', () => {
     // The review's source 03, drawn by this renderer and by Pele side by side. In ours "timeout",
     // "backoff elapsed", "heartbeat lost", "give up", "drained", "user logout" and "auth error"

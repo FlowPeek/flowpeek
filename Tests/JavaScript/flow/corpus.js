@@ -280,6 +280,19 @@ const HORIZONTAL_FAMILIES = {
     `flowchart ${dir}`, '  app[Mini app] -->|send the login code| srv[Server]', '  srv -->|session token| app',
     '  app -->|call with the token| srv',
   ].join('\n'),
+  // A two-way pair whose port trade is blocked by another route's lane. Every two-way pair above
+  // untwists by trading ports or swapping runs, so nothing asked what happens when the run a trade
+  // moves would lie along a third route's: the held-out set's b11 did once 14a73f8 spread its faces,
+  // Resume's run onto Playing landing on Boss defeated's level. Found by rendering 3,000 random
+  // graphs of five to twelve nodes with a two-way pair: 56 drew that pair crossing itself at
+  // 14a73f8 and 15 once a slide is offered with the trade, and this is one with no warning in any
+  // direction. Horizontal only, because TD and BT draw the pair nested at 14a73f8 too.
+  // At 14a73f8 Recovering <-> Checking crosses itself twice LR and RL.
+  'two-way pair past a held lane': (dir) => [
+    `flowchart ${dir}`, '  idle[Idle] -->|fail| rec[Recovering]', '  idle --> logs[Logs]', '  idle --> queue[Queued]',
+    '  queue --> work[Working]', '  rec -->|ok| check[Checking]', '  check -->|pause| held[Held]', '  queue --> idle',
+    '  rec -->|resume| queue', '  check -->|retry| rec',
+  ].join('\n'),
 };
 
 /**
@@ -436,7 +449,8 @@ export const TIGHT_MASKS = [];
  * 408 until `two-way pairs in a state machine` added 8, one segment before the port trade as after,
  * and 416 until `turn onto a lane` added 16, one segment before its tangent bump as after
  * (`trade before nesting` adds none), and 432 until `labelled links between one pair` added 6,
- * one segment before `seatPitch` spread its face as after.
+ * one segment before `seatPitch` spread its face as after, and 438 until `two-way pair past a held
+ * lane` added 4, one segment before the slide `uncrossPairs` offers as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -447,7 +461,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 438;
+export const ALIGNED_PAIRS = 442;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

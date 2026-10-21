@@ -8451,24 +8451,161 @@
               if (single[u][0] !== single[v][0] && single[u][1] !== single[v][1]) offers.push([single[u], single[v]]);
             }
           }
+          var taken = false;
           for (var f = 0; f < offers.length; f += 1) {
             var next = exchanged(P, Q, offers[f]);
-            if (!next) continue;
-            var after = tally(next[0], next[1], P, Q);
-            if (after.n > before.n || after.knots > before.knots || after.kin > before.kin) continue;
-            if (after.n === before.n && after.knots === before.knots && after.kin === before.kin) continue;
-            if (!stubsAndBodyClear(next[0], ctx, P.edge) || !stubsAndBodyClear(next[1], ctx, Q.edge)) continue;
-            if (!clearWith(next[0], P.edge, P, Q, next[1]) || !clearWith(next[1], Q.edge, P, Q, next[0])) continue;
-            if (foreignPassages(next[0], ctx, P.edge) > foreignPassages(P.points, ctx, P.edge)) continue;
-            if (foreignPassages(next[1], ctx, Q.edge) > foreignPassages(Q.points, ctx, Q.edge)) continue;
+            if (!next || !keeps(next, P, Q, before)) continue;
             P.points = next[0];
             Q.points = next[1];
-            moved = true;
+            moved = taken = true;
             break;
           }
+          if (taken || !sameEnds(P.edge, Q.edge)) continue;
+          var slid = slideApart(P, Q, offers, mutual, before);
+          if (!slid) continue;
+          P.points = slid[0];
+          Q.points = slid[1];
+          moved = true;
         }
       }
       if (!moved) break;
+    }
+    // A trade is kept when no count rises and one falls, when both routes stay clear of every box
+    // and stroke, and when neither enters a foreign zone it did not already.
+    function keeps(next, P, Q, before) {
+      var after = tally(next[0], next[1], P, Q);
+      if (after.n > before.n || after.knots > before.knots || after.kin > before.kin) return false;
+      if (after.n === before.n && after.knots === before.knots && after.kin === before.kin) return false;
+      if (!stubsAndBodyClear(next[0], ctx, P.edge) || !stubsAndBodyClear(next[1], ctx, Q.edge)) return false;
+      if (!clearWith(next[0], P.edge, P, Q, next[1]) || !clearWith(next[1], Q.edge, P, Q, next[0])) return false;
+      if (foreignPassages(next[0], ctx, P.edge) > foreignPassages(P.points, ctx, P.edge)) return false;
+      if (foreignPassages(next[1], ctx, Q.edge) > foreignPassages(Q.points, ctx, Q.edge)) return false;
+      return true;
+    }
+    // A two-way pair every trade left crossing: each trade again, or none, with one run of either
+    // route slid to a lane nobody holds, nearest first.
+    //
+    // 14a73f8 spread a face's labelled ends 32px apart, and two pairs a09c1af had untwisted crossed
+    // again in the third held-out set -- not because the pass ran before the spread (ports are laid
+    // out before any route exists, and this pass runs on the finished routes), but because every
+    // trade it offered was refused. In b11 trading Esc's and Resume's ports at Playing put Resume's
+    // last run on y 276, which Boss defeated's run into Stage clear holds over 80px: at a 32px pitch
+    // the two boxes' ports now stand on one level. In b14 the pair runs over the top between two
+    // faces where each route's arrival needs an outer riser, so whichever way the ports stand, one
+    // route's top run passes the other's riser. Each untwists once a riser stands past the run it
+    // was blocked by: Resume's beyond Boss defeated's, MES -> PLC's beyond PLC -> MES's.
+    //
+    // Same terms as a trade, plus no run laid nearer a parallel stroke than SKILL.md §6 rule 3's 12px,
+    // across or along, that was not already (`nearRuns`), and the pair must cross less. `besideCount`
+    // alone was the first cut and let b11's Resume take x 496, 4px past Boss defeated's riser at 492:
+    // the two risers met end to end at y 276, and the export read as one vertical line with Resume
+    // branching off it -- a join, which is worse than the twist it removed.
+    //
+    // Only for a two-way pair, the one this pass promises never crosses: offered to every knot, it
+    // would move lanes in drawings no reader flagged, and the goldens record them.
+    //
+    // Rejected: re-spacing the faces back below the plates' height where a trade needs it. That is
+    // 14a73f8 taken back on exactly the faces that carry the most labels.
+    function slideApart(P, Q, offers, mutual, before) {
+      var others = live.filter(function (o) { return o !== P && o !== Q; });
+      function near(pair) {
+        return nearRuns(pair[0], others.concat([{ points: pair[1] }])) + nearRuns(pair[1], others);
+      }
+      var extent = { x: { lo: Infinity, hi: -Infinity }, y: { lo: Infinity, hi: -Infinity } };
+      ctx.boxes.forEach(function (b) {
+        extent.x.lo = Math.min(extent.x.lo, b.x); extent.x.hi = Math.max(extent.x.hi, b.x + b.width);
+        extent.y.lo = Math.min(extent.y.lo, b.y); extent.y.hi = Math.max(extent.y.hi, b.y + b.height);
+      });
+      live.forEach(function (r) {
+        r.points.forEach(function (q) {
+          extent.x.lo = Math.min(extent.x.lo, q.x); extent.x.hi = Math.max(extent.x.hi, q.x);
+          extent.y.lo = Math.min(extent.y.lo, q.y); extent.y.hi = Math.max(extent.y.hi, q.y);
+        });
+      });
+      var bases = [[]].concat(offers).map(function (o) {
+        return o.length ? exchanged(P, Q, o) : [P.points, Q.points];
+      }).filter(Boolean);
+      var untwisted = slideOne(bases, near([P.points, Q.points]), function (next) {
+        return crossingsBetween(next[0], next[1]) < mutual;
+      });
+      if (!untwisted) return null;
+      // Then once more, only to part the pair: in b14 the router had laid the two top runs 4px apart
+      // over 928px, and the crossing `roomForBridges` lifted one of them clear for is the one just
+      // removed -- the pair untwisted read as one doubled line, both plates pushed off it. Parted by
+      // 12px it still had no seat: a 24px plate centred on either run covered the other, and both
+      // floated off. So a labelled pair's runs are parted by the seat `seatPitch` gives a face's
+      // labelled ends, the plate's extent across the run plus LABEL_GAP.
+      var crossed = crossingsBetween(untwisted.next[0], untwisted.next[1]);
+      var cramp = crampOf(untwisted.next);
+      var parted = cramp > 0 && slideOne([untwisted.next], untwisted.near, function (next) {
+        return crossingsBetween(next[0], next[1]) <= crossed && crampOf(next) < cramp;
+      });
+      return (parted || untwisted).next;
+      // Parallel runs of the pair, overlapping along their axis, closer across it than a seat.
+      function crampOf(pair) {
+        var n = 0;
+        for (var i = 0; i + 1 < pair[0].length; i += 1) {
+          var a = pair[0][i], b = pair[0][i + 1];
+          var h = a.y === b.y;
+          var need = Math.max(PASS_CLEAR_PX, seatOf(P.edge, h), seatOf(Q.edge, h));
+          for (var j = 0; j + 1 < pair[1].length; j += 1) {
+            var c = pair[1][j], d = pair[1][j + 1];
+            if (h !== (c.y === d.y)) continue;
+            var gap = h ? Math.abs(a.y - c.y) : Math.abs(a.x - c.x);
+            var lo = h ? Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x)) : Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
+            var hi = h ? Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x)) : Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+            if (gap < need && hi > lo) n += 1;
+          }
+        }
+        return n;
+      }
+      // What a plate on a run of this edge needs across it, where it is shorter across than along.
+      function seatOf(edge, horizontal) {
+        if (!(edge.labelWidth > 0) || !(edge.labelHeight > 0)) return 0;
+        var across = horizontal ? edge.labelHeight : edge.labelWidth;
+        var along = horizontal ? edge.labelWidth : edge.labelHeight;
+        return across < along ? across + LABEL_GAP_PX : 0;
+      }
+      // Every one-run slide of either route in `bases`, a lane at a time between the runs either side
+      // of it (which `shiftRun` would refuse to pass anyway), that `wanted` accepts, lays no more
+      // than `allowed` runs near a parallel stroke, and is kept on a trade's terms: the fewest such
+      // runs, then the shortest slide.
+      function slideOne(bases, allowed, wanted) {
+        var best = null;
+        for (var f = 0; f < bases.length; f += 1) {
+          for (var side = 0; side < 2; side += 1) {
+            var pts = bases[f][side];
+            var edge = side === 0 ? P.edge : Q.edge;
+            for (var k = 1; k + 2 < pts.length; k += 1) {
+              var axis = pts[k].y === pts[k + 1].y ? "y" : "x";
+              var at = pts[k][axis];
+              var lo = Math.min(pts[k - 1][axis], pts[k + 2][axis]);
+              var hi = Math.max(pts[k - 1][axis], pts[k + 2][axis]);
+              // A run outside both its neighbours -- the top of a U -- can only move further out: as
+              // far as the drawing already reaches, or as far as `roomForBridges` slides a run, a rank
+              // gap's worth. b14's pair is the outermost thing in its drawing, and at 14a73f8 that
+              // pass lifted MES -> PLC's top from y 56 to 32, 20px past that edge, to bump the twist.
+              var from = lo + 2 * GRID, to = hi - 2 * GRID;
+              if (at < lo) { from = Math.min(extent[axis].lo, at - SLIDE_STEPS * GRID); to = lo - 2 * GRID; }
+              else if (at > hi) { from = hi + 2 * GRID; to = Math.max(extent[axis].hi, at + SLIDE_STEPS * GRID); }
+              for (var v = from; v <= to; v += 2 * GRID) {
+                if (v === at) continue;
+                var moved = shiftRun(pts, k, v, edge);
+                if (!moved) continue;
+                var next = side === 0 ? [moved, bases[f][1]] : [bases[f][0], moved];
+                if (!wanted(next)) continue;
+                var cost = Math.abs(v - at);
+                var close = near(next);
+                if (close > allowed) continue;
+                if (best && (best.near < close || (best.near === close && best.cost <= cost))) continue;
+                if (!keeps(next, P, Q, before)) continue;
+                best = { next: next, cost: cost, near: close };
+              }
+            }
+          }
+        }
+        return best;
+      }
     }
   }
 
@@ -8731,6 +8868,30 @@
           var lo = aH ? Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x)) : Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
           var hi = aH ? Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x)) : Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
           if (hi > lo) n += 1;
+        }
+      }
+    }
+    return n;
+  }
+
+  // Parallel runs of two connectors within PASS_CLEAR_PX of each other across their axis whose spans
+  // overlap or end within PASS_CLEAR_PX of each other along it -- `besideCount`'s doubled line, plus
+  // two runs that meet end to end, which read as one line that branches.
+  function nearRuns(points, others) {
+    var n = 0;
+    for (var o = 0; o < others.length; o += 1) {
+      var q = others[o].points;
+      for (var i = 0; i + 1 < points.length; i += 1) {
+        var a = points[i], b = points[i + 1];
+        var aH = a.y === b.y;
+        for (var j = 0; j + 1 < q.length; j += 1) {
+          var c = q[j], d = q[j + 1];
+          if (aH !== (c.y === d.y)) continue;
+          var gap = aH ? Math.abs(a.y - c.y) : Math.abs(a.x - c.x);
+          if (gap >= PASS_CLEAR_PX) continue;
+          var lo = aH ? Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x)) : Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
+          var hi = aH ? Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x)) : Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+          if (hi - lo > -PASS_CLEAR_PX) n += 1;
         }
       }
     }

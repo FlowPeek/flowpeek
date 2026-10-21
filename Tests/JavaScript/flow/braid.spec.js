@@ -288,4 +288,14 @@ describe('[Braid] two links between one pair of nodes do not cross each other', 
     const found = SWEEP.flatMap(({ name, source }) => selfCrossingPairs(source).map((b) => `${name}: ${b}`));
     expect(found).toEqual([]);
   });
+
+  // Every trade `uncrossPairs` offers this pair moves a run onto a lane another route holds, so the
+  // trade only holds with one of the pair's runs slid to a lane nobody does. At 14a73f8 Recovering
+  // <-> Checking crosses itself twice LR and RL.
+  it('holds where the trade needs a run slid past a held lane, LR and RL', () => {
+    const family = SWEEP.filter(({ name }) => /^two-way pair past a held lane /.test(name));
+    expect(family.length).toBe(2);
+    const found = family.flatMap(({ name, source }) => selfCrossingPairs(source).map((b) => `${name}: ${b}`));
+    expect(found).toEqual([]);
+  });
 });

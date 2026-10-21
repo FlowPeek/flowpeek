@@ -21,13 +21,13 @@ const THEME_SWIFT = readFileSync(join(root, 'Sources/FlowPeekCore/MacMermaidThem
 // What MacMermaidTheme.swift ships, reduced to the keys the projection reads. The stylesheet is a
 // stand-in for the real one in every test except the stylesheet-contract block, which reads the
 // Swift source itself.
-// `monoFontFamily` is among them because the editorial theme paints edge labels in a monospace
-// stack and the renderer measures a label in the face it will be painted in: a theme that sent only
-// the sans sized every backing rect for type nobody sees.
+// `monoFontFamily` is among them because it names the face edge labels are painted in, which the
+// renderer measures a label in. It was a monospace stack and is now the sans; it stays a separate
+// field so a theme can paint the two registers differently without the measurement going wrong.
 const EDITORIAL = {
   dark: false,
   fontFamily: "'Geist', sans-serif",
-  monoFontFamily: "'Geist Mono', ui-monospace, monospace",
+  monoFontFamily: "'Geist', sans-serif",
   themeVariables: { fontSize: '12px', lineColor: '#4f5d75', nodeBorder: '#2d3142', mainBkg: '#f5f5f5' },
   themeCSS: '.fp-ladder { --fp-ladder: on; }\n.node rect.basic:not([rx]) { rx: 6px; ry: 6px; }',
   arrangement: {
@@ -1053,6 +1053,17 @@ describe('[Render] the classes the editorial stylesheet paints', () => {
     expect(at).toEqual([...at].sort((a, b) => a - b));
     expect(at.every((i) => i > 0)).toBe(true);
   });
+
+  it('tags every zone with its depth and paints a parent before what it contains', () => {
+    // The stylesheet fills a zone by depth (`.cluster.fp-depth-N rect`), and the fills are opaque,
+    // so a parent painted after its child would cover it -- `drawing.clusters` is innermost first.
+    const svg = drawn('flowchart TD\n  subgraph A\n    subgraph B\n      subgraph C\n        subgraph D\n'
+      + '          x --> y\n        end\n      end\n    end\n  end\n  subgraph E\n    z\n  end').svg;
+    const zones = [...svg.matchAll(/<g class="cluster fp-depth-(\d+)" id="fp-0-([^"]*)">/g)]
+      .map((m) => [m[2], Number(m[1])]);
+    expect(zones).toEqual([['A', 0], ['E', 0], ['B', 1], ['C', 2], ['D', 3]]);
+    expect(THEME_SWIFT).toContain('.cluster.fp-depth-1 rect');
+  });
 });
 
 describe('[Render] declining', () => {
@@ -1119,7 +1130,7 @@ describe('[Render] the zone eyebrow', () => {
   function eyebrows(svg) {
     const style = { fontFamily: "'Geist', sans-serif", fontSizePX: 12, fontWeight: 600, letterSpacing: '0.06em' };
     const found = [];
-    const re = /<g class="cluster" id="([^"]*)"><rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"\/><g class="cluster-label" transform="translate\((-?\d+),(-?\d+)\)"><text text-anchor="start">(.*?)<\/text>/g;
+    const re = /<g class="cluster fp-depth-\d+" id="([^"]*)"><rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"\/><g class="cluster-label" transform="translate\((-?\d+),(-?\d+)\)"><text text-anchor="start">(.*?)<\/text>/g;
     let m;
     while ((m = re.exec(svg)) !== null) {
       const lines = [...m[8].matchAll(/<tspan[^>]*>(.*?)<\/tspan>/g)].map((t) => t[1]);
@@ -1217,7 +1228,7 @@ describe('[Render] a connector it only passes', () => {
   /** Every zone rect, by the id the emitter wrote. */
   function zones(svg) {
     const found = [];
-    const re = /<g class="cluster" id="([^"]*)"><rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/g;
+    const re = /<g class="cluster fp-depth-\d+" id="([^"]*)"><rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"/g;
     let m;
     while ((m = re.exec(svg)) !== null) {
       found.push({
@@ -1541,7 +1552,7 @@ describe('[Render] which connector a label belongs to', () => {
   function zones(svg) {
     const style = { fontFamily: "'Geist', sans-serif", fontSizePX: 12, fontWeight: 600, letterSpacing: '0.06em' };
     const found = [];
-    const re = /<g class="cluster" id="([^"]*)"><rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"\/>([\s\S]*?)<\/g>/g;
+    const re = /<g class="cluster fp-depth-\d+" id="([^"]*)"><rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)"\/>([\s\S]*?)<\/g>/g;
     let m;
     while ((m = re.exec(svg)) !== null) {
       const zone = { x: Number(m[2]), y: Number(m[3]), width: Number(m[4]), height: Number(m[5]) };

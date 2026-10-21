@@ -3772,11 +3772,10 @@
     return {
       dark: p.dark === true,
       fontFamily: nonEmptyString(p.fontFamily) || nonEmptyString(vars.fontFamily) || "sans-serif",
-      // The theme's stylesheet paints edge labels in a mono face, and the payload carries no name
-      // for it. Reading the field here rather than inventing a stack means the measurement follows
-      // the moment the payload grows one; until then an edge label is measured in the sans and its
-      // width is approximate. That is the one number in this file that is not the thing it
-      // measures, and it is why the backing rect gets a wider pad than the text needs.
+      // The face the theme's stylesheet paints edge labels in, which the payload names separately
+      // because it need not be the node face (MacMermaidTheme.monoFontFamily -- the name is
+      // historical; the editorial theme now sends its sans). A payload without it falls back to the
+      // node face, and an edge label is then measured in a face that may not be the painted one.
       monoFontFamily: nonEmptyString(p.monoFontFamily) || nonEmptyString(p.fontFamily) || "monospace",
       fontSizePX: size,
       variables: vars,
@@ -3866,10 +3865,11 @@
     }
 
     // The three registers the editorial stylesheet actually paints, and they are read off that
-    // stylesheet rather than off the style guide. The guide puts arrow labels at 8px mono; the
-    // theme's `.edgeLabel` rule changes the family, the weight and the tracking and leaves the size
-    // alone (MacMermaidTheme.swift:339-345), so the painted size is the base size. Measuring the
-    // guide's 8px would size every backing rect for type nobody will see.
+    // stylesheet rather than off the style guide. The guide puts arrow labels at 8px tracked mono;
+    // the theme's `.edgeLabel` rule sets the face (carried as `monoFontFamily`, whatever it is) and
+    // the weight, sets no tracking, and leaves the size alone, so the painted size is the base size
+    // and the tracking is normal. Measuring the guide's 8px, or the 0.04em it used to track by,
+    // would size every backing rect for type nobody will see.
     return {
       measure: measure,
       node: {
@@ -3882,7 +3882,7 @@
         fontFamily: theme.monoFontFamily,
         fontSizePX: theme.fontSizePX,
         fontWeight: 400,
-        letterSpacing: "0.04em"
+        letterSpacing: "normal"
       },
       cluster: {
         fontFamily: theme.fontFamily,
@@ -6311,7 +6311,20 @@
   // stroke it cleared at 160. Rejected: going smaller to win that back. It is on that stroke at
   // every setting from 192 to 232, and 208, the cheapest of them at 2,591,040 px², still wraps 20
   // of 44 and stands the plates nearer foreign strokes than 160 did.
-  var EDGE_WRAP_PX = 224;
+  //
+  // Everything above was measured against the MONO face, ui-monospace tracked 0.04em, which is what
+  // the editorial theme painted edge labels in then. A budget in pixels is a budget in that face's
+  // advances, so when the theme moved edge labels to its sans (MacMermaidTheme.swift, `sans`) the
+  // 224 knee stopped being a measurement of anything. Re-derived against the sans with real advances
+  // -- CoreText widths of SF Pro 12 / SF Mono 12, Hangul falling back to Apple SD Gothic Neo -- over
+  // differential.mjs's 175 drawings plus the 16 sources of the editorial-vs-Pele visual review:
+  // mono at 224 put 3 plates on foreign strokes and 8 labels on two or more lines; sans at 224 puts
+  // 3 and 1, and the third plate is new -- review 13's "no, the signature does not match and the
+  // request may be forged" comes off four mono lines onto two 210px sans lines centred between the
+  // diamond's two exits, masking both. Sans at 208 puts 2 and 1, with that label clear of both exits
+  // by 24px. 192 measured the same as 208 on all three; 208 is taken because the wider of two equal
+  // budgets is the one that keeps more labels on one line. 160 wraps 8 again.
+  var EDGE_WRAP_PX = 208;
 
   function layout(db, options) {
     var opts = options || {};
@@ -6401,9 +6414,7 @@
         edge.label = shaped;
         // The backing rect is 8px wider than the text on each side rather than 4. Half of that is
         // SKILL.md §6 rule 2 wanting the mask clear of the stroke; the other half is slack against
-        // the one measurement this file knows is approximate -- the theme paints edge labels in a
-        // mono face whose name the payload does not carry, so the width here is the sans width.
-        // How much slack a real Geist/Geist Mono pair needs has not been measured.
+        // a host whose payload does not name the edge face, which measures the node face instead.
         edge.labelBox = { w: even(shaped.w + 4), h: even(shaped.h + 2) };
       } else {
         edge.label = null;
@@ -8397,9 +8408,16 @@
     markers.set("pointEnd", true);
 
     // --- clusters ---
+    //
+    // Outermost first. `drawing.clusters` is innermost first, the order a container can be sized
+    // in, and painting in it put a parent's rect over its children's. That was invisible while the
+    // editorial stylesheet left zones unfilled; a theme that fills them by depth would have every
+    // parent's wash cover the nested one, which is the depth the fill is there to show. Ties go to
+    // the source index rather than to the sort's stability, as every other sort here does.
+    var paintOrder = drawing.clusters.slice().sort(function (a, b) { return (a.depth - b.depth) || (a.index - b.index); });
     var clusters = [];
-    for (i = 0; i < drawing.clusters.length; i += 1) {
-      var c = drawing.clusters[i];
+    for (i = 0; i < paintOrder.length; i += 1) {
+      var c = paintOrder[i];
       var body = '<rect x="' + c.x + '" y="' + c.y + '" width="' + c.width + '" height="' + c.height + '"/>';
       if (c.titleLines.length) {
         // Left-anchored at the eyebrow's own box rather than centred: the layout reserved that box
@@ -8410,7 +8428,10 @@
           + tspans(c.titleLines, c.lineHeight, 0, baselineIn(c.lineHeight))
           + "</text></g>";
       }
-      clusters.push('<g class="cluster" id="' + esc(renderID + "-" + c.id) + '">' + body + "</g>");
+      // The nesting depth as a class, because it is the one thing a stylesheet cannot work out for
+      // itself: `g.cluster` elements are flat siblings, not nested groups. Uncapped here -- how many
+      // rungs a theme has is the theme's to say, in MacMermaidTheme.swift.
+      clusters.push('<g class="cluster fp-depth-' + c.depth + '" id="' + esc(renderID + "-" + c.id) + '">' + body + "</g>");
     }
 
     // --- edges ---

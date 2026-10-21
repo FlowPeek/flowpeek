@@ -30,7 +30,7 @@ const pele = vm.runInNewContext(`${peleSource}\n;pele`, { console });
 const EDITORIAL = {
   dark: false,
   fontFamily: "'Geist', sans-serif",
-  monoFontFamily: "'Geist Mono', ui-monospace, monospace",
+  monoFontFamily: "'Geist', sans-serif",
   themeVariables: { fontSize: '12px', lineColor: '#4f5d75', nodeBorder: '#2d3142', mainBkg: '#f5f5f5' },
   themeCSS: '.fp-ladder { --fp-ladder: on; }\n.node rect.basic:not([rx]) { rx: 6px; ry: 6px; }',
   arrangement: {

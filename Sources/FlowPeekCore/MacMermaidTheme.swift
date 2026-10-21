@@ -13,12 +13,13 @@ public struct MacMermaidTheme: Equatable, Sendable {
     public let variables: [String: String]
     public let css: String
     public let fontFamily: String
-    /// The face this theme paints EDGE LABELS in, which need not be `fontFamily` and in the
-    /// editorial theme is not: its `.edgeLabel` rule sets a monospace stack. It is carried in the
-    /// payload because the renderer measures a label before it draws it and has to measure the face
-    /// that will be painted -- measuring the sans and painting the mono made every edge label's
-    /// backing rect narrower than the words on it, which is text spilling off both ends of its own
-    /// mask, visible on cand.mmd's two "originalQuoteId" labels at the edges of the drawing.
+    /// The face this theme paints EDGE LABELS in, which need not be `fontFamily`. The name is from
+    /// when the editorial `.edgeLabel` rule set a monospace stack; it now sets the sans, and this
+    /// carries the sans. It is carried in the payload because the renderer measures a label before
+    /// it draws it and has to measure the face that will be painted -- measuring the sans and
+    /// painting the mono made every edge label's backing rect narrower than the words on it, which
+    /// is text spilling off both ends of its own mask, visible on cand.mmd's two "originalQuoteId"
+    /// labels at the edges of the drawing.
     public let monoFontFamily: String
     /// The spacing and edge shape this theme asks mermaid for. `.unset` means "say nothing", which
     /// is what every theme said before themes were plural.
@@ -203,6 +204,33 @@ public struct MacMermaidTheme: Equatable, Sendable {
         let quietStroke = Self.blend(ink, increaseContrast ? 0.68 : 0.55, over: paper)
         let strokeWidth = increaseContrast ? "1.25px" : "1px"
 
+        // Zones: an ink wash per nesting depth, so a reader sees how deep a box sits without counting
+        // frames. The first cut of this theme drew every zone as a 12% hairline with no fill, and
+        // the visual review found the cost: in a four-deep nest the levels looked alike, and a
+        // one-level "Edge" group barely read as a group. Pele's answer is a wash per level -- a
+        // cluster is `--_a` at 0.5 (see the `.pele` notes below), and with `--_a` at ink @ 0.16 that
+        // stacks to ink @ 0.08, 0.12, 0.14 and 0.15 -- deeper than the store rung at 0.10 from the
+        // second level on, so a cylinder there would sink into its zone.
+        //
+        // These stay under it, a fixed 0.02 per level, and the ceiling is set by the strokes, not by
+        // the look. Darkening the ground under a node lowers the contrast of its outline, and the
+        // first outline to go is `soft`, the entry stroke, at 3.48:1 on light paper; 0.08 is the
+        // deepest wash it still clears 3:1 on (3.02:1), 0.09 is not (2.96:1). Measured as built,
+        // light: 1.04:1 from each level to the next, 1.15:1 from paper to the fourth; dark: 1.06:1
+        // and 1.27:1. `muted` eyebrow text stays at 5.29:1 or better on every rung in both.
+        //
+        // What it costs, measured rather than hidden: `quietStroke`, the terminal and optional
+        // outline, is 3.19:1 on light paper and falls to 2.98, 2.87 and 2.77:1 on the second to
+        // fourth rungs, so a terminal node nested two deep or more is under 3:1 at the default
+        // contrast. Holding it would mean a darker quiet stroke, which would pass `soft` and break
+        // the ramp's order; Increase Contrast is the reader's way out, and it holds there (3.92:1 at
+        // the deepest). Dark keeps it everywhere (3.74:1 at the deepest).
+        //
+        // Not deepened by Increase Contrast, unlike the node washes: there the zone outline is
+        // already the solid `rule` (5.29:1 or better against every rung), which is the boundary
+        // that setting asks for, and scaling the washes by 1.6 would take `soft` to 2.69:1.
+        let zones = [0.02, 0.04, 0.06, 0.08].map { Self.blend(ink, $0, over: paper) }
+
         let ladder: [Rung] = [
             // The workhorse, and what a decision diamond gets too: the source's own legend draws
             // DECISION as a plain white diamond.
@@ -225,12 +253,25 @@ public struct MacMermaidTheme: Equatable, Sendable {
             // as a claim the source never made. flowpeek-flow.js `tagLadder` has the numbers.
         ]
 
-        // Three families, because the source says the three-way contrast is load-bearing -- and its
-        // own CSS already falls back to system-ui / serif / ui-monospace, so substituting the faces
-        // is what it expects rather than something invented here. Extended with Apple SD Gothic Neo
-        // per its instruction to widen the stack for Korean rather than swap the skin.
+        // One family, extended with Apple SD Gothic Neo per the source's instruction to widen the
+        // stack for Korean rather than swap the skin.
+        //
+        // The source wants three, and says the three-way contrast is load-bearing; this theme used to
+        // follow it and paint arrow labels in ui-monospace tracked 0.04em. Rejected on what it drew,
+        // not on taste. A connector label here is a phrase the author wrote ("no, the signature does
+        // not match and the request may be forged", "결제 요청 및 영수증 발행"), not an identifier,
+        // and set in mono it read as code. SF Mono's space is a full cell, so with the tracking a
+        // word gap became a hole and a Hangul phrase fell apart into separate tokens; the tracking
+        // also pried each syllable block off the next ("아 니 오"), against how Hangul is set. And
+        // the mono is the wide face -- measured with CoreText at 12px, a space is 7.42px against the
+        // sans's 3.38 and an "a" 7.42 against 6.62, while a Hangul syllable is 10.38 in both because
+        // both fall back to Apple SD Gothic Neo -- so the same words took more of the edge budget:
+        // a 4-line block on the review's 13. That budget was swept against the mono and has been
+        // re-derived against this face (`EDGE_WRAP_PX`, flowpeek-flow.js). The contrast the
+        // source wants between a node name and the words on an arrow is still here, carried the way
+        // the 12px note above says this theme carries hierarchy: weight (600 against 400) and colour
+        // (ink against muted).
         let sans = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif"
-        let mono = "ui-monospace, 'SF Mono', Menlo, 'Apple SD Gothic Neo', monospace"
 
         // A depth ladder for the three types mermaid indexes by depth itself. It alternates ink and
         // muted rather than stepping the ink wash, because `cScaleN` is used as an unstroked node
@@ -265,9 +306,9 @@ public struct MacMermaidTheme: Equatable, Sendable {
             "textColor": ink,
             "titleColor": ink,
             "nodeTextColor": ink,
-            // A zone is a hairline frame, never a filled band: the stylesheet takes its fill to
-            // `none` so no rung can collide with the surface it sits on.
-            "clusterBkg": paper,
+            // What a zone the stylesheet cannot place by depth falls back to. The fills themselves
+            // are in the stylesheet, by depth; see `zones` above.
+            "clusterBkg": zones[0],
             "clusterBorder": rule,
             "edgeLabelBackground": paper,
             "labelColor": ink,
@@ -374,7 +415,14 @@ public struct MacMermaidTheme: Equatable, Sendable {
            attribute is the one shape cue separating `[rect]` from `(round)`. */
         .node rect.basic:not([rx]) { rx: 6px; ry: 6px; }
         .node rect, .node polygon, .node path, .node circle, .node ellipse { stroke-width: \(strokeWidth); }
-        .cluster rect { fill: none; stroke: \(rule); stroke-width: 0.8px; rx: 8px; ry: 8px; }
+        /* A zone takes the wash of its depth. `fp-depth-N` is written by flowpeek-flow.js; a zone
+           drawn by mermaid carries no depth and takes the first rung. The last rule is depth 3 and
+           everything under it, written as "has a depth class and is not 0-2" so the renderer does
+           not have to know how many rungs there are. */
+        .cluster rect { fill: \(zones[0]); stroke: \(rule); stroke-width: 0.8px; rx: 8px; ry: 8px; }
+        .cluster.fp-depth-1 rect { fill: \(zones[1]); }
+        .cluster.fp-depth-2 rect { fill: \(zones[2]); }
+        .cluster[class*="fp-depth-"]:not(.fp-depth-0):not(.fp-depth-1):not(.fp-depth-2) rect { fill: \(zones[3]); }
         /* 600 on the name, 400 everywhere else: the source carries hierarchy in weight and colour
            rather than in size, which is what lets every label sit on the 12px Hangul floor. */
         .node .label text, .node .nodeLabel, .nodeLabel { font-weight: 600; }
@@ -385,10 +433,13 @@ public struct MacMermaidTheme: Equatable, Sendable {
             stroke-width: 1.2px;
         }
         .flowchart-link.edge-thickness-thick, .edgePath path.edge-thickness-thick { stroke-width: 2.4px; }
+        /* The sans, untracked: why not the mono is at `sans` above. `letter-spacing` is said rather
+           than left out because mermaid's own stylesheet is not the only thing that could set it,
+           and the renderer measures this register at `normal` (flowpeek-flow.js `makeMetrics`). */
         .edgeLabel, .edgeLabel .label text, .edgeLabel foreignObject div {
-            font-family: \(mono);
+            font-family: \(sans);
             font-weight: 400;
-            letter-spacing: 0.04em;
+            letter-spacing: normal;
             color: \(muted);
             fill: \(muted);
         }
@@ -447,7 +498,8 @@ public struct MacMermaidTheme: Equatable, Sendable {
             variables: variables,
             css: css,
             fontFamily: sans,
-            monoFontFamily: mono,
+            // The face `.edgeLabel` paints, so the renderer measures what it draws.
+            monoFontFamily: sans,
             // Gaps from the source's own allowed ramp (20/24/32/40/48); 32 and 40 sit between its
             // 24 "standard" and 40 "presentation" figures, and a preview is closer to presentation.
             // `padding` is held here rather than handed to `look: "neo"`, which would replace it

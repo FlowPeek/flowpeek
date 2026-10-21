@@ -15,13 +15,13 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const flow = require(join(root, 'Sources/FlowPeek/Resources/flowpeek-flow.js'));
 
 // What MacMermaidTheme.swift ships, reduced to the keys the projection reads.
-// `monoFontFamily` is among them because the editorial theme paints edge labels in a monospace
-// stack and the renderer measures a label in the face it will be painted in: a theme that sent only
-// the sans sized every backing rect for type nobody sees.
+// `monoFontFamily` is among them because it names the face edge labels are painted in, which the
+// renderer measures a label in. It was a monospace stack and is now the sans; it stays a separate
+// field so a theme can paint the two registers differently without the measurement going wrong.
 const EDITORIAL = {
   dark: false,
   fontFamily: "'Geist', sans-serif",
-  monoFontFamily: "'Geist Mono', ui-monospace, monospace",
+  monoFontFamily: "'Geist', sans-serif",
   themeVariables: { fontSize: '12px' },
   themeCSS: '.fp-ladder { --fp-ladder: on; }',
   arrangement: {

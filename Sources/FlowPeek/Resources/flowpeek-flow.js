@@ -7450,8 +7450,10 @@
         // `renderOrDecline`) takes a lane under the title: deep enough that a first-row node's
         // arrival station, ARRIVE above its face, sits a gap below the title's box rather than in
         // it, so the turn into the zone is made under the words instead of through them.
+        var laneHeader = Math.max(header, even(cluster.label.h + 1 + LABEL_GAP + ARRIVE - padU));
+        cluster.laneU = laneHeader - header;
         var room = opts.titleRoom && opts.titleRoom[cluster.id];
-        if (room && room.lane) header = Math.max(header, even(cluster.label.h + 1 + LABEL_GAP + ARRIVE - padU));
+        if (room && room.lane) header = laneHeader;
       } else {
         cluster.label = null;
       }
@@ -7559,6 +7561,8 @@
         labelWidth: c2.label ? px(c2.label.w) : 0,
         labelHeight: c2.label ? px(c2.label.h) : 0,
         lineHeight: c2.label ? px(c2.label.lineHeight) : 0,
+        // How much deeper the header is with a lane under the title (`titleRoom`).
+        laneDepth: c2.label ? px(c2.laneU || 0) : 0,
         parent: c2.parent,
         depth: c2.depth,
         direction: model.levels.get(c2.id).dir,
@@ -7869,11 +7873,36 @@
   // so a leg deep inside a foreign zone was clear by every test it was given. That is how
   // `app2 --> s3` came to run the full height of the Database Tier in the nested review source and
   // `dlq --> p1` (replay) to climb through Processing in the crowded one.
+  // A leg on the line of a port whose node is inside `zone`, running from that port's station. Such
+  // a leg is where the layout put the port, under the zone's own title or not, and no choice of
+  // lane moves it; the title pass excuses it so that the rest of the route can still be asked to
+  // keep off the title, and the layout is asked for the room (`roomAt`). A port in another zone
+  // is not excused: its line crosses this title only because the route chose to turn onto it here.
+  function onPortLine(p, q, ctx, zone) {
+    var a = ctx.portLines;
+    if (!a) return false;
+    for (var i = 0; i < a.length; i += 1) {
+      var s = a[i];
+      if (!insideZone(s.node, zone.id, ctx)) continue;
+      if (s.x === null ? (p.y === s.y && q.y === s.y) : (p.x === s.x && q.x === s.x)) {
+        if ((p.x === s.at.x && p.y === s.at.y) || (q.x === s.at.x && q.y === s.at.y)) return true;
+      }
+    }
+    return false;
+  }
+
   function legIsClear(p, q, ctx, strict, edge) {
     var i;
     var box;
     for (i = 0; i < ctx.boxes.length; i += 1) {
       if (hitsBox(p, q, ctx.boxes[i])) return false;
+    }
+    // The title pass (`routeEdge`): no leg through a zone title or the gap round it.
+    if (strict >= 5 && ctx.titleRooms) {
+      for (i = 0; i < ctx.titleRooms.length; i += 1) {
+        var room = ctx.titleRooms[i];
+        if (segmentCrossesRect(p, q, room) && !onPortLine(p, q, ctx, room.zone)) return false;
+      }
     }
     if (strict >= 4) {
       var zones = foreignZones(edge, ctx);
@@ -8543,7 +8572,7 @@
     // sent those edges to the midpoint instead. It and the reserve-respecting `laneAt` go together
     // and neither works alone: with either one missing, 7 further pairs of connectors came within
     // 12px of each other over the corpus, and with both, none.
-    var anchor = (preferred !== null && preferred >= lo && preferred <= hi) ? preferred : snap4((lo + hi) / 2);
+    var anchor = (preferred !== null && (ctx.anyAnchor || (preferred >= lo && preferred <= hi))) ? preferred : snap4((lo + hi) / 2);
     var seen = new Map();
     var list = [];
     function add(value) {
@@ -8576,6 +8605,14 @@
         add(b.x - STUB_PX); add(b.x + b.width + STUB_PX);
       }
     }
+    // On the title pass, the two lines that just clear each title: a lane stepping off a title
+    // belongs at its edge, and no box or zone border is there to offer it.
+    if (ctx.anyAnchor) {
+      for (i = 0; i < ctx.titleRooms.length; i += 1) {
+        var t = ctx.titleRooms[i];
+        if (axis === "y") { add(t.y); add(t.y + t.height); } else { add(t.x); add(t.x + t.width); }
+      }
+    }
     list.sort(function (a, b2) {
       var da = Math.abs(a - anchor);
       var db = Math.abs(b2 - anchor);
@@ -8601,7 +8638,7 @@
     return null;
   }
 
-  function joinStations(stations, travel, edge, ctx, strict) {
+  function joinStations(stations, travel, edge, ctx, strict, plan) {
     var pts = [stations[0]];
     var other = (travel === "y") ? "x" : "y";
     for (var i = 0; i + 1 < stations.length; i += 1) {
@@ -8620,9 +8657,16 @@
       // slid A1 --> B2's jog onto the stretch its bump needed.
       var pref = (i === 0 && edge.channel && edge.channel.axis === travel) ? edge.channel.value : null;
       if (i > 0 && i + 2 === stations.length && edge.endChannel && edge.endChannel.axis === travel) pref = edge.endChannel.value;
+      var was = plan && plan.length > i ? plan[i] : null;
+      if (was && was.axis === travel) pref = was.value;
+      var used = travel;
       var mid = connect(stations[i], stations[i + 1], travel, pref, ctx, strict, edge);
-      if (mid === null) mid = connect(stations[i], stations[i + 1], other, null, ctx, strict, edge);
+      if (mid === null) {
+        used = other;
+        mid = connect(stations[i], stations[i + 1], other, was && was.axis === other ? was.value : null, ctx, strict, edge);
+      }
       if (mid === null) return null;
+      if (plan && !was) plan.push({ axis: used, value: mid.length ? mid[0][used] : null });
       pts = pts.concat(mid);
       pts.push(stations[i + 1]);
     }
@@ -8664,6 +8708,51 @@
     return true;
   }
 
+  // Whether the title pass's route only stepped off a title, rather than went another way: it
+  // leaves its first station and reaches its last turning the same way along each face as the
+  // ordinary route -- the side the layout ordered that face's ports for (`assignPorts`) -- and where
+  // the ordinary route crossed a title, it stays inside that title's zone. Either alone was not
+  // enough. In `return across subgraphs` the back edge, kept off Backend's title, went round the
+  // right of Worker instead of the left and crossed Handler's arrival on Worker's face; and in the
+  // crowded two-zone drawing of render.spec.js it left Zone one for a lane 8px outside its wall,
+  // 104px from where it was, with its label astride Zone two's.
+  function steppedAside(route, plain, travel, ctx) {
+    var along = travel === "y" ? "x" : "y";
+    if (firstTurn(route, along, 1) !== firstTurn(plain, along, 1)) return false;
+    if (firstTurn(route, along, -1) !== firstTurn(plain, along, -1)) return false;
+    for (var i = 0; i + 1 < plain.length; i += 1) {
+      for (var t = 0; t < ctx.titleRooms.length; t += 1) {
+        if (!segmentCrossesRect(plain[i], plain[i + 1], ctx.titleRooms[t])) continue;
+        var z = ctx.titleRooms[t].zone;
+        var vertical = plain[i].x === plain[i + 1].x;
+        for (var j = 0; j + 1 < route.length; j += 1) {
+          if ((route[j].x === route[j + 1].x) !== vertical) continue;
+          var at = vertical ? route[j].x : route[j].y;
+          var lo = vertical ? z.x : z.y;
+          var hi = lo + (vertical ? z.width : z.height);
+          var inside = at > lo && at < hi;
+          var spans = vertical
+            ? Math.max(route[j].y, route[j + 1].y) > z.y && Math.min(route[j].y, route[j + 1].y) < z.y + z.height
+            : Math.max(route[j].x, route[j + 1].x) > z.x && Math.min(route[j].x, route[j + 1].x) < z.x + z.width;
+          if (spans && !inside) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // The sign of the first move along `axis` from the start (dir 1) or the end (dir -1) of a route.
+  function firstTurn(points, axis, dir) {
+    var n = points.length;
+    for (var k = 0; k + 1 < n; k += 1) {
+      var a = dir > 0 ? points[k] : points[n - 1 - k];
+      var b = dir > 0 ? points[k + 1] : points[n - 2 - k];
+      var d = sign(b[axis] - a[axis]);
+      if (d !== 0) return d;
+    }
+    return 0;
+  }
+
   function routeEdge(edge, ctx) {
     var S = { x: edge.start.x, y: edge.start.y };
     var E = { x: edge.end.x, y: edge.end.y };
@@ -8696,12 +8785,33 @@
 
     var A = { x: S.x + dS.x * outS, y: S.y + dS.y * outS };
     var B = { x: E.x + dE.x * outE, y: E.y + dE.y * outE };
+    ctx.portLines = [
+      { x: dS.x === 0 ? A.x : null, y: dS.x === 0 ? null : A.y, at: A, node: edge.from },
+      { x: dE.x === 0 ? B.x : null, y: dE.x === 0 ? null : B.y, at: B, node: edge.to }
+    ];
     var stations = [A];
     for (var i = 0; i < edge.via.length; i += 1) stations.push({ x: edge.via[i].x, y: edge.via[i].y });
     stations.push(B);
     var travel = (dS.x === 0) ? "y" : "x";
 
-    var body = joinStations(stations, travel, edge, ctx, 4);
+    // A pass above the four that keeps every leg off the zone titles, taken only where it moves a
+    // lane and nothing else (`steppedAside`). A lane laid down a zone's side lies under its sibling's
+    // title as often as not -- in h14 the route from checkout-api down to Aurora writer ran under
+    // "AZ us-east-1b" and the title slid 36px along its band to let it through -- and the router
+    // had no reason to prefer the lane 36px over, left of the title, which crosses nothing. It is
+    // tried after the ordinary route, from that route's own lanes (`plan`), so the answer is the
+    // nearest lane that clears, not wherever the midpoint search happens to land first.
+    //
+    // Measured and rejected: the titles as part of the third pass's rule, taken by whatever route
+    // satisfies it. It clears the same titles, and sends the back edge of `return across subgraphs`
+    // TD and of the nine-line two-zone specimen round the other side of its source, across the
+    // arrival on that face: 2 stroke crossings in a sweep that has none.
+    var plan = [];
+    var body = joinStations(stations, travel, edge, ctx, 4, plan);
+    ctx.anyAnchor = true;
+    var titled = body === null ? null : joinStations(stations, travel, edge, ctx, 5, plan);
+    ctx.anyAnchor = false;
+    if (titled !== null && steppedAside(titled, body, travel, ctx)) body = titled;
     var crowded = false;
     var transit = false;
     if (body === null) body = joinStations(stations, travel, edge, ctx, 3);
@@ -9652,13 +9762,17 @@
   //
   // The gap is LABEL_GAP_PX, the same 8px rule 2 asks between a mask and a stroke: a connector 2px
   // from a letter reads as touching it.
-  function titleIsClear(x, cl, ctx) {
-    var near = {
+  function titleNear(x, cl) {
+    return {
       x: x - LABEL_GAP_PX,
       y: cl.labelY - LABEL_GAP_PX,
       width: cl.labelWidth + 2 * LABEL_GAP_PX,
       height: cl.labelHeight + 2 * LABEL_GAP_PX
     };
+  }
+
+  function titleIsClear(x, cl, ctx) {
+    var near = titleNear(x, cl);
     for (var i = 0; i < ctx.drawn.length; i += 1) {
       if (segmentCrossesRect(ctx.drawn[i][0], ctx.drawn[i][1], near)) return false;
     }
@@ -9683,6 +9797,53 @@
     // Nothing in the band clears it. The title stays at the eyebrow's home rather than at whichever
     // arbitrary position the search stopped on -- one crossed title in its proper place is easier to
     // read than one crossed title halfway along a band.
+  }
+
+  // What a title at `x` would need from the layout to stand clear of every stroke: a lane under it
+  // for a stroke along its band, or the band widened for one across it, by twice the shortfall,
+  // because the contents stay centred in the band and so move half of what it gains. Null when
+  // nothing crosses. Measured on the gap `titleIsClear` asks, not the bare box: a line in the gap is
+  // one `slideTitle` could not clear, and judged on the box alone it was let stand 0px from the
+  // words -- h07's "DWD 明细层", whose last glyph the review found 1.3pt from `d1 --> s1`'s ink.
+  function roomAt(x, cl, ctx, routed) {
+    var near = titleNear(x, cl);
+    var room = null;
+    for (var r = 0; r < routed.length; r += 1) {
+      if (!routed[r]) continue;
+      var pts = routed[r].points;
+      var last = pts.length - 1;
+      var edge = routed[r].edge;
+      for (var i = 0; i < last; i += 1) {
+        var p = pts[i], q = pts[i + 1];
+        if (!segmentCrossesRect(p, q, near)) continue;
+        room = room || { lane: false, wide: 0, helps: true };
+        // Whether the room moves this line off the title. A lane deepens the header, so it carries
+        // the zone's own first row, and with it a route's turn onto one of their ports, down out of
+        // the title's band; a wider band carries the zone's contents across, and with them a port's
+        // own line. A lane through the band on its way somewhere else, or a turn onto a port in
+        // another zone, stays where it is either way -- the right-to-left drawing of `drop past a
+        // sibling`, whose route into the lower zone runs level with that zone's first row across
+        // the foot of the upper zone's title.
+        var onto = (i + 2 === last && insideZone(edge.to, cl.id, ctx)) || (i === 1 && insideZone(edge.from, cl.id, ctx));
+        var port = (i === 0 && insideZone(edge.from, cl.id, ctx)) || (i + 1 === last && insideZone(edge.to, cl.id, ctx));
+        if (p.y === q.y) {
+          room.lane = true;
+          if (!onto && !port) room.helps = false;
+        } else {
+          room.wide = Math.max(room.wide, 2 * (x + cl.labelWidth + LABEL_GAP_PX - p.x));
+          if (!port) room.helps = false;
+        }
+      }
+    }
+    return room;
+  }
+
+  function insideZone(id, zoneId, ctx) {
+    for (var cur = id, guard = 0; guard < 256 && cur !== undefined && cur !== null; guard += 1) {
+      if (cur === zoneId) return true;
+      cur = ctx.parentOf.get(cur);
+    }
+    return false;
   }
 
   function segmentCrossesRect(p, q, rect) {
@@ -10112,6 +10273,7 @@
       boxById: boxById,
       drawn: [],
       labelRects: [],
+      titleRooms: [],
       bumpRooms: [],
       width: drawing.width,
       height: drawing.height
@@ -10128,6 +10290,9 @@
         var titleRect = { x: cl.labelX, y: cl.labelY, width: cl.labelWidth, height: cl.labelHeight };
         ctx.labelRects.push(titleRect);
         titles.push({ cluster: cl, rect: titleRect });
+        var near = titleNear(cl.labelX, cl);
+        near.zone = cl;
+        ctx.titleRooms.push(near);
       }
     }
 
@@ -10185,25 +10350,39 @@
 
     // Between the two passes on purpose: every stroke is drawn by now, which is what the title has
     // to dodge, and no edge label is placed yet, which is what has to dodge the title.
-    for (i = 0; i < titles.length; i += 1) slideTitle(titles[i].cluster, titles[i].rect, ctx);
-    // Which titles a stroke still crosses once every title has slid as far as its band allows, and
-    // what room would clear it -- the layout's to give, on a second pass (`titleRoom`). A crossing
-    // ALONG the band asks for a lane under the title; one ACROSS it asks for the band to widen
-    // until the title, at home, ends a gap short of the line. Where both happen it is one route's
-    // turn into a first-row node, whose last leg drops across the title's foot, and the lane alone
-    // removes both, so the width is not asked for.
+    for (i = 0; i < titles.length; i += 1) {
+      var home = titles[i].cluster.labelX;
+      slideTitle(titles[i].cluster, titles[i].rect, ctx);
+      titles[i].room = roomAt(home, titles[i].cluster, ctx, routed);
+      // A title slid further than its own inset, where the band could have moved less. A title
+      // carried along its band stops reading as the zone's name and reads as a label floating in
+      // it: the sixth held-out review measured h14's "AZ us-east-1b" inset 52 where its siblings
+      // sit at 16, and h07's "ODS 原始数据层" stood at 80. The room moves the contents instead --
+      // down by a lane's depth under the title, across by half what the band is widened, since
+      // they stay centred in it -- and it is taken when that is the smaller move. Where a line runs
+      // through a long title near its start the slide is: reelect.mmd's 260px title in a 568px
+      // zone, crossed 76px in, would need the drawing 352px wider to stay home.
+      var slid = titles[i].cluster.labelX - home;
+      var r = titles[i].room;
+      var moves = r ? Math.max(r.lane ? titles[i].cluster.laneDepth : 0, r.lane ? 0 : r.wide / 2) : 0;
+      if (slid > home - titles[i].cluster.x && r && r.helps && moves < slid) {
+        titles[i].cluster.labelX = home;
+        titles[i].rect.x = home;
+      }
+    }
+    // Which titles a stroke still crosses once every title has slid as far as it should, and what
+    // room would clear it -- the layout's to give, on a second pass (`titleRoom`). A crossing ALONG
+    // the band asks for a lane under the title; one ACROSS it asks for the band to widen until the
+    // title, at home, ends a gap short of the line. Where both happen it is one route's turn into a
+    // first-row node, whose last leg drops across the title's foot, and the lane alone removes
+    // both, so the width is not asked for.
     var struck = {};
     for (i = 0; i < titles.length; i += 1) {
       var tc = titles[i].cluster;
-      for (var sd = 0; sd < ctx.drawn.length; sd += 1) {
-        var sp = ctx.drawn[sd][0], sq = ctx.drawn[sd][1];
-        if (!segmentCrossesRect(sp, sq, titles[i].rect)) continue;
-        var mark = struck[tc.id] || (struck[tc.id] = { lane: false, wide: 0 });
-        if (sp.y === sq.y) { mark.lane = true; continue; }
-        // A struck title is at its home: `slideTitle` leaves it there when nothing clears.
-        var home = tc.labelX;
-        mark.wide = Math.max(mark.wide, 2 * (home + tc.labelWidth + LABEL_GAP_PX - sp.x));
-      }
+      // A struck title is at its home: `slideTitle` leaves it there when nothing clears, and the
+      // loop above puts it back there when the band should move instead.
+      if (titleIsClear(tc.labelX, tc, ctx)) continue;
+      struck[tc.id] = { lane: titles[i].room.lane, wide: titles[i].room.wide };
     }
     for (var sz in struck) {
       if (Object.prototype.hasOwnProperty.call(struck, sz) && struck[sz].lane) struck[sz].wide = 0;

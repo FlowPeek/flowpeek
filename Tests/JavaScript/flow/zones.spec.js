@@ -196,26 +196,32 @@ describe('[Zones] a connector stays out of a zone it does not belong to', () => 
 // title that fills the half of the band left of the port.
 //
 // Measured on the title's own box at the position the drawing printed it, after `slideTitle` has
-// moved it wherever the band let it.
-function titleStrikes(source) {
+// moved it wherever the band let it, grown by `gap` on every side.
+function printedTitles(source) {
   const drawing = laidOut(source);
   const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText });
   expect(out.reason || 'ok').toBe('ok');
   const titles = [];
-  const tre = /<g class="cluster[^"]*" id="fp-0-([^"]*)"><rect[^>]*\/><g class="cluster-label" transform="translate\((-?\d+),(-?\d+)\)"/g;
+  const tre = /<g class="cluster[^"]*" id="fp-0-([^"]*)"><rect x="(-?\d+)"[^>]*\/><g class="cluster-label" transform="translate\((-?\d+),(-?\d+)\)"/g;
   for (const m of out.svg.matchAll(tre)) {
     const zone = drawing.clusters.find((c) => c.id === m[1]);
     if (!zone || !(zone.labelWidth > 0)) continue;
-    titles.push({ id: zone.id, x: Number(m[2]), y: Number(m[3]), width: zone.labelWidth, height: zone.labelHeight });
+    titles.push({ id: zone.id, inset: Number(m[3]) - Number(m[2]), x: Number(m[3]), y: Number(m[4]), width: zone.labelWidth, height: zone.labelHeight });
   }
   expect(titles.length).toBe(drawing.clusters.filter((c) => c.labelWidth > 0).length);
+  return { out, titles };
+}
+
+function titleStrikes(source, gap = 0) {
+  const { out, titles } = printedTitles(source);
   const re = /<path class="[^"]*flowchart-link[^"]*" data-id="([^"]*)" d="([^"]*)"/g;
   const found = [];
   for (const [, id, d] of out.svg.matchAll(re)) {
     const points = skeleton(d);
     for (const title of titles) {
+      const box = { x: title.x - gap, y: title.y - gap, width: title.width + 2 * gap, height: title.height + 2 * gap };
       for (let i = 0; i + 1 < points.length; i += 1) {
-        if (crossesInterior(points[i], points[i + 1], title)) { found.push(`${id} through ${title.id}'s title`); break; }
+        if (crossesInterior(points[i], points[i + 1], box)) { found.push(`${id} through ${title.id}'s title`); break; }
       }
     }
   }
@@ -229,6 +235,62 @@ describe('[Zones] a connector stays off a zone title', () => {
       ...titleStrikes(NESTED).map((f) => `nested: ${f}`),
       ...titleStrikes(CROWDED).map((f) => `crowded: ${f}`),
       ...withZones.flatMap(({ name, source }) => titleStrikes(source).map((f) => `${name}: ${f}`)),
+    ];
+    expect(found).toEqual([]);
+  });
+});
+
+// A zone title keeps its corner, and a line keeps its distance from it.
+//
+// The sixth held-out review, on e5d9490: the pass above cleared every strike, partly by sliding
+// titles along their bands -- h14's "AZ us-east-1b" ended 52px in from its frame where every
+// sibling sits at 16, and read as a label floating in the zone rather than as its name -- and it
+// judged clear a line 0px from the end of a title, which h07 painted 1.3pt from the last glyph.
+// The slide is still allowed one inset, the zone padding, and beyond that only where the band
+// would have to move further than the title (`renderOrDecline`'s room); the gap is the 8px §6 rule
+// 2 asks between a stroke and text it passes, the same one `titleIsClear` asks.
+const PADDING = EDITORIAL.arrangement.padding;
+const GAP = 8;
+
+// A route out of one zone that has to pass a member of it before it can drop into a sibling
+// zone's first row, in all four directions. No SWEEP family has it -- every zone family there
+// enters a zone straight from outside -- and it is the shape behind h14's slid title: the lane
+// down past the member lies under the sibling's title, or, drawn right to left, the turn into the
+// sibling's first row runs level with the foot of the upper zone's title. At e5d9490 these slid
+// the upper title 116 to 244px in RL and widened TD by 144 to 200px for the title's room.
+//
+// Kept here rather than in corpus.js's SWEEP: in TD and BT, `A --> B` comes out with a jog at
+// e5d9490 and before -- the zone and A's second edge leaving it push Worker's lone top port off
+// Service's line -- and STEPPED_PAIRS is an exact, empty record. That is a port-placement defect
+// of its own, not this file's, and is left recorded by these drawings rather than hidden.
+const PAST_A_SIBLING = ['TD', 'LR', 'BT', 'RL'].flatMap((dir) => [
+  { name: `drop past a sibling ${dir}`, source: [`flowchart ${dir}`, '  subgraph top[Upper zone]', '    A[Service] --> B[Worker]', '  end',
+    '  subgraph low[Lower zone title]', '    C[(Primary)]', '    D[(Replica)]', '  end', '  A --> C', '  B --> D'].join('\n') },
+  { name: `drop past a sibling, nested ${dir}`, source: [`flowchart ${dir}`, '  subgraph region[Region one]', '  subgraph top[Upper zone]',
+    '    A[Service] --> B[Worker]', '  end', '  subgraph low[Lower zone title]', '    C[(Primary)]', '    D[(Replica)]', '  end', '  end',
+    '  A --> C', '  B --> D'].join('\n') },
+  { name: `drop past two ${dir}`, source: [`flowchart ${dir}`, '  subgraph top[Upper zone]', '    A[Service] --> B[Worker] --> E[Cleaner]', '  end',
+    '  subgraph low[Storage zone title]', '    C[(Primary)]', '    D[(Replica)]', '  end', '  A --> C', '  E --> D'].join('\n') },
+]);
+
+describe('[Zones] a zone title stays at its corner, a gap clear of every line', () => {
+  const withZones = [...SWEEP.filter(({ source }) => /\bsubgraph\b/.test(source)), ...PAST_A_SIBLING];
+
+  it('stands no more than one inset from its home on every SWEEP source with a zone, and past a sibling', () => {
+    const far = [];
+    for (const { name, source } of [{ name: 'nested', source: NESTED }, { name: 'crowded', source: CROWDED }, ...withZones]) {
+      for (const title of printedTitles(source).titles) {
+        if (title.inset > 2 * PADDING) far.push(`${name}: ${title.id} at ${title.inset}`);
+      }
+    }
+    expect(far).toEqual([]);
+  });
+
+  it('leaves the gap between every title and every line', () => {
+    const found = [
+      ...titleStrikes(NESTED, GAP).map((f) => `nested: ${f}`),
+      ...titleStrikes(CROWDED, GAP).map((f) => `crowded: ${f}`),
+      ...withZones.flatMap(({ name, source }) => titleStrikes(source, GAP).map((f) => `${name}: ${f}`)),
     ];
     expect(found).toEqual([]);
   });

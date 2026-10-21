@@ -5631,11 +5631,50 @@
     };
     // Where each lane of a gap sits, measured from the first one. Lane L's label sits between lane
     // L and its neighbour on the label side, so that neighbour is the one that has to move over.
+    //
+    // And a bump's room where the first lane passes under a box whose stubs turn at the second.
+    // That lane crosses the box's own stubs a lane above where they turn, and a hop needs HOP_R of
+    // straight stroke on each side of the crossing: on the stub, the bump reaches HOP_R down from
+    // the crossing and the stub's own corner, two units of radius, starts that far above the next
+    // lane, so the two lanes have to stand 2 * HOP_R apart where LANE_GAP sets them 12px. In 11
+    // C -> E ran under D across D -> G's and D -> H's stubs with its lane 4px above D -> H's corner,
+    // the router drew it 12px off D's face instead, and both bumps there came out with their crests
+    // 4px from the border -- what the reviews called face-pressed. With the pitch, C -> E
+    // keeps its lane 20px below D and both crests stand 12px clear: two of the drawing's three
+    // pressed hops, for 8px of height. `8b0420d` measured that no slide inside the old gap could.
+    //
+    // "Passes under" is the box's CENTRE inside the lane's span. Its whole face overlapping the span
+    // was tried first and moved eight sweep drawings -- every fan-in and both-ways crossing, in four
+    // directions -- each 4px larger with no hop in it before or after: a merge ladders its outer arm
+    // deepest, so the first lane's span only grazes its neighbours' faces and crosses nothing. And
+    // only stubs that turn at the SECOND lane: one that turns deeper already runs two pitches, 24px,
+    // straight below the first, and charging those too gave K3,3 in render.spec.js a crossing it
+    // did not have, 11 hops to 12, with no pressed hop in it to cure.
+    //
+    // Left: K's one pressed hop. K -> N drops straight, so nothing here claims room under K, and
+    // I -> M runs 12px off K's face. A deeper floor as well was swept, 5 and 6 units against
+    // pitches of 4, 5 and 6: K cleared at two of the six settings and not at their neighbours, each
+    // one adding a hop and 16 to 24px more height, which is a lucky setting rather than a rule.
+    var crossesStubs = [];
+    for (i = 0; i < maxRank; i += 1) crossesStubs.push(false);
+    for (i = 0; i < segments.length; i += 1) {
+      var fs = segments[i];
+      if (fs.gap >= maxRank || fs.lane !== 0 || fs.lo === fs.hi) continue;
+      for (j = 0; j < segments.length; j += 1) {
+        var ft = segments[j];
+        if (ft.gap !== fs.gap || ft.lane !== 1) continue;
+        var fx = ft.u;
+        if (fx === fs.u || fx === fs.v || items[fx].dummy) continue;
+        if (centreOf(fx) > fs.lo && centreOf(fx) < fs.hi) crossesStubs[fs.gap] = true;
+      }
+    }
     var laneOff = [];
     for (i = 0; i < maxRank; i += 1) {
       var offs = [0];
       for (j = 1; j < gapLanes[i]; j += 1) {
-        offs.push(offs[j - 1] + Math.max(LANE_GAP, laneRoom(i, laneLabelLo ? j : j - 1)));
+        var pitch = Math.max(LANE_GAP, laneRoom(i, laneLabelLo ? j : j - 1));
+        if (j === 1 && crossesStubs[i]) pitch = Math.max(pitch, 2 * HOP_R / GRID);
+        offs.push(offs[j - 1] + pitch);
       }
       laneOff.push(offs);
       // The outermost lane's label has no next lane to take its room from; the gap's own face is

@@ -220,13 +220,13 @@ export const ALIGNED_PAIRS = 188;
 //
 // FACE-PRESSED HOPS IN A DENSE DAG. A crossing that lands hard against a box face has nowhere for
 // its bump to sit: a hop needs 16px of straight run on each side and may not lie under a node.
-// `1e55424` moves such a crossing off an elbow and `8b0420d` slides it off a face where two
-// connectors can both move, which took the dense review drawing from five face-pressed hops to
-// three. The three that remain are capped by an arrival run -- one edge's 24px arrival fixes its
-// elbow, and no slide inside that gap clears the box -- so the next move is a deeper rank gap when
-// a lane crosses a face's own stubs, which is a layout change rather than a routing one. The
-// reviewer graded the drawing's remaining width a defensible difference, not a defect: do not
-// chase it.
+// `1e55424` moves such a crossing off an elbow, `8b0420d` slides it off a face where two
+// connectors can both move, and the layout now stands a first lane that passes under a box two
+// bumps' radii from the second where that box's stubs turn (`crossesStubs`), which together took
+// the dense review drawing from five face-pressed hops to one. The one left is under K: K -> N
+// drops straight, I -> M runs 12px below K across it, and a deeper floor cleared it only at two
+// isolated settings of six, each adding a hop. The reviewer graded the drawing's remaining width a
+// defensible difference, not a defect: do not chase it.
 //
 // ONE PLATE ON ITS OWN ELBOW. The reported drawing that mixed ON and BESIDE is now all BESIDE: the
 // layout keeps a margin between two labelled columns side by side (`facingColumns`). One plate in

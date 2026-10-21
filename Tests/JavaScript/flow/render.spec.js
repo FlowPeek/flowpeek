@@ -623,9 +623,10 @@ describe('[Render] bridges at crossings', () => {
     // run in the lane nearest a box's face across that box's own leaving stubs, the bumps' crests
     // 8px from L's face and 4px from D's. Every one was bridged, so the elbow pass never saw them.
     // A pressed crossing now offers one run of each of its two connectors a slide together; under
-    // L that leaves both bumps on A -> M, 12px clear of the face. Under D and K no slide exists in
-    // the gap the layout gave (see FACE_AIR), and those three are kept as an exact set, so that
-    // losing one, or gaining one anywhere, fails.
+    // L that leaves both bumps on A -> M, 12px clear of the face. Under D no slide existed in the
+    // gap the layout gave (see FACE_AIR); the layout now stands a first lane that passes under a box
+    // two bumps' radii from the next (flowpeek-flow.js, `crossesStubs`), and D's two are gone. K's
+    // one is left, and kept as an exact set, so that losing it, or gaining one anywhere, fails.
     const dense = [
       'flowchart TD',
       '    A --> B & C & D', '    B --> E & F', '    C --> E & G', '    D --> F & G & H',
@@ -648,7 +649,7 @@ describe('[Render] bridges at crossings', () => {
         if (near) pressed.push(`${id} at ${near.id}`);
       }
     }
-    expect(pressed.sort()).toEqual(['L_C_E_0 at D', 'L_D_G_0 at D', 'L_K_N_0 at K']);
+    expect(pressed.sort()).toEqual(['L_K_N_0 at K']);
   });
 });
 

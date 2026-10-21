@@ -168,3 +168,48 @@ describe('[Braid] two connectors do not cross each other twice', () => {
     expect(found).toEqual([]);
   });
 });
+
+// The lanes into one face nest in the order of the face's ports.
+//
+// Ports have been ordered by where each end lands since 028efde; the lanes in the gap before a face
+// were not, so two routes arriving from one side could turn onto the face in the wrong order and
+// cross twice there -- the held-out review's h20, two hops at Closed. Two SWEEP families and the
+// fixture below bring several routes into one face from sources at different depths, and at
+// e5d9490 they drew 2 to 6 hops each; this asks that no two routes ending on one node cross.
+function sharedEndCrossings(source) {
+  const all = routes(source);
+  const found = [];
+  const ends = (id) => id.replace(/^L_/, '').replace(/_\d+$/, '').split('_').pop();
+  for (let i = 0; i < all.length; i += 1) {
+    for (let j = i + 1; j < all.length; j += 1) {
+      if (ends(all[i].id) !== ends(all[j].id)) continue;
+      let n = 0;
+      for (const a of all[i].legs) for (const b of all[j].legs) if (crosses(a, b)) n += 1;
+      if (n > 0) found.push(`${all[i].id} x ${all[j].id} (${n})`);
+    }
+  }
+  return found;
+}
+
+// Three arms on one side of the face with the nearest source between them, in all four directions.
+// A pair swap moves the middle arm's run across the outer arm's last leg, so the three have to take
+// each other's lanes at once; at e5d9490 it draws 4 to 6 hops in every direction. Kept out of
+// SWEEP: with its crossings gone it shows two defects of its own, there at e5d9490 too -- a 4px
+// jog on Article's route that the bridge pass had been widening to 8 only because a bump needed
+// the room (render.spec's square corners), and Second line's six-corner route LR and RL
+// (straight.spec's four-corner cap) -- which are not the lanes' to fix.
+const ROUND_A_FAN = ['TD', 'LR', 'BT', 'RL'].map((dir) => ({
+  name: `returns round a fan ${dir}`,
+  source: [`flowchart ${dir}`, '  a[Intake] --> s[Review queue] --> d[Review team] --> c([Done])', '  b[Article] --> c',
+    '  r[Triage] --> e[Second line]', '  f[Approval] --> c', '  e --> c', '  e --> j[Ticket] --> n[Notify owner] --> c',
+    '  e --> m[Escalation] --> c'].join('\n'),
+}));
+
+describe('[Braid] routes into one face take their lanes in the order of its ports', () => {
+  it('holds where arms come in past a nearer source, in pairs and in threes', () => {
+    const families = [...SWEEP.filter(({ name }) => /^returns past /.test(name)), ...ROUND_A_FAN];
+    expect(families.length).toBe(12);
+    const found = families.flatMap(({ name, source }) => sharedEndCrossings(source).map((b) => `${name}: ${b}`));
+    expect(found).toEqual([]);
+  });
+});

@@ -8212,6 +8212,130 @@
     }
   }
 
+  // The order of the lanes into one face.
+  //
+  // Ports are ordered by where each end lands (`assignPorts`), so the ends on a face stand in the
+  // order their routes arrive from. The LANES those routes take in the gap before the face were
+  // never ordered: each route takes the cross-line `connect` finds first for it alone, so two
+  // routes that come in from the same side can turn onto the face in the wrong order and cross
+  // twice inside the corridor -- once where the outer one's run passes the inner one's last leg,
+  // once where its own last leg passes the inner one's run. Nested, they cross nowhere. The
+  // held-out review named it: h20's Closed, where Finance approval's and Notify customer's routes
+  // into the bottom face took two hops.
+  //
+  // So for every face, the routes arriving from one side are given the lanes they already hold,
+  // reassigned in the order their ports stand: the route whose port it reaches first, travelling
+  // along the face, takes the lane nearest the face, the next the next, and so on outward. The
+  // same for the routes leaving a face, mirrored. It moves no port and adds no bend -- `shiftRun`
+  // slides each run along its normal and refuses anything that turns a leg round -- and a new
+  // order is kept only when it leaves strictly fewer crossings in the drawing and every moved
+  // route passes the checks `uncrossPairs` asks of a swap.
+  //
+  // `uncrossPairs` already swaps the runs of two routes that cross twice, and it is not enough here:
+  // swapping Finance's and Notify's runs in h20 takes their two crossings away and puts two back,
+  // Finance's leg past the Suggest KB route's run and onto its last leg, so the swap is refused
+  // (2 before, 2 after). The three have to take each other's lanes at once, and the face's order
+  // says which way round. Its leftovers: where two of a face's routes hold one lane between them,
+  // end to end, the lanes they hold are too few to nest them, and the order is not attempted --
+  // a labelled variant of braid.spec.js's three-arm fan keeps 2 hops so, in all four directions.
+  function orderCorridors(routed, ctx) {
+    var live = [];
+    for (var i = 0; i < routed.length; i += 1) {
+      if (routed[i] && !routed[i].edge.selfLoop && !routed[i].transit) live.push(routed[i]);
+    }
+    var groups = new Map();
+    function enter(r, arriving) {
+      var pts = r.points;
+      var n = pts.length;
+      if (n < 4) return;
+      // The leg on the port, the run across the face before it, and the leg before that.
+      var port = arriving ? pts[n - 1] : pts[0];
+      var near = arriving ? pts[n - 2] : pts[1];
+      var turn = arriving ? pts[n - 3] : pts[2];
+      var faceAlongX = near.y !== port.y || near.x === port.x;
+      if (faceAlongX ? turn.y !== near.y : turn.x !== near.x) return;
+      var axis = faceAlongX ? "x" : "y";
+      var normal = faceAlongX ? "y" : "x";
+      var travel = arriving ? sign(near[axis] - turn[axis]) : sign(turn[axis] - near[axis]);
+      if (travel === 0) return;
+      var key = (arriving ? "in|" + r.edge.to : "out|" + r.edge.from) + "|" + axis + "|" + sign(port[normal] - near[normal]) + "|" + travel;
+      var g = groups.get(key);
+      if (!g) groups.set(key, (g = []));
+      g.push({
+        r: r, k: arriving ? n - 3 : 1, at: port[axis], level: near[normal], face: port[normal], travel: travel, arriving: arriving,
+        lo: Math.min(turn[axis], port[axis]), hi: Math.max(turn[axis], port[axis])
+      });
+    }
+    for (i = 0; i < live.length; i += 1) { enter(live[i], true); enter(live[i], false); }
+    function crossingsOfAll() {
+      var n = 0;
+      for (var a = 0; a < live.length; a += 1) {
+        for (var b = a + 1; b < live.length; b += 1) n += crossingsBetween(live[a].points, live[b].points);
+      }
+      return n;
+    }
+    // Only routes whose runs share some of the face's length can be in each other's way, so a face's
+    // routes are reordered in runs of overlapping spans: in h20 a short jog onto Closed from
+    // Account manager, clear of the three routes the knot is made of, would otherwise be handed
+    // a lane 40px further from the face, and four routes on three lanes were refused as a group.
+    var parts = [];
+    groups.forEach(function (g) {
+      g.sort(function (p, q) { return (p.lo - q.lo) || (p.hi - q.hi); });
+      var part = [];
+      var reach = -Infinity;
+      for (var e = 0; e < g.length; e += 1) {
+        if (part.length && g[e].lo >= reach) { parts.push(part); part = []; }
+        part.push(g[e]);
+        reach = part.length === 1 ? g[e].hi : Math.max(reach, g[e].hi);
+      }
+      if (part.length) parts.push(part);
+    });
+    parts.forEach(function (g) {
+      if (g.length < 2) return;
+      // Nearest the face first: arriving, the port the route reaches first along its travel;
+      // leaving, the port the others' runs would have to pass.
+      var order = g.slice().sort(function (p, q) {
+        var pk = p.arriving ? p.travel * p.at : -p.travel * p.at;
+        var qk = q.arriving ? q.travel * q.at : -q.travel * q.at;
+        return (pk - qk) || (p.r.edge.index - q.r.edge.index);
+      });
+      var levels = g.map(function (e) { return e.level; }).sort(function (a, b) {
+        return Math.abs(a - g[0].face) - Math.abs(b - g[0].face);
+      });
+      var moved = [];
+      for (var m = 0; m < order.length; m += 1) {
+        var e = order[m];
+        if (e.level === levels[m]) continue;
+        var next = shiftRun(e.r.points, e.k, levels[m], e.r.edge);
+        if (!next) return;
+        moved.push({ e: e, points: next, was: e.r.points });
+      }
+      if (moved.length === 0) return;
+      var before = crossingsOfAll();
+      for (m = 0; m < moved.length; m += 1) moved[m].e.r.points = moved[m].points;
+      var ok = crossingsOfAll() < before;
+      for (m = 0; ok && m < moved.length; m += 1) {
+        var r = moved[m].e.r;
+        if (!stubsAndBodyClear(r.points, ctx, r.edge)) ok = false;
+        else if (foreignPassages(r.points, ctx, r.edge) > foreignPassages(moved[m].was, ctx, r.edge)) ok = false;
+        else {
+          var drawn = [];
+          for (var o = 0; o < live.length; o += 1) {
+            if (live[o] === r) continue;
+            for (var s = 0; s + 1 < live[o].points.length; s += 1) drawn.push([live[o].points[s], live[o].points[s + 1]]);
+          }
+          var saved = ctx.drawn;
+          ctx.drawn = drawn;
+          // The legs between the two stubs: a port that has sunk into a rounded outline starts inside
+          // its own box's rectangle, which `stubsAndBodyClear` above already excuses and this would not.
+          if (!routeIsClear(r.points.slice(1, r.points.length - 1), ctx, 2, r.edge)) ok = false;
+          ctx.drawn = saved;
+        }
+      }
+      if (!ok) for (m = 0; m < moved.length; m += 1) moved[m].e.r.points = moved[m].was;
+    });
+  }
+
   // A crossing drawn where neither connector can carry a bump.
   //
   // `bridgeCrossings` bridges a crossing only on a straight stretch with a bump's width and a grid
@@ -10341,6 +10465,7 @@
     // is rebuilt from the result: the label pass tells a route's own legs from a rival's by the
     // identity of the point objects, so it has to hold the arrays the routes now carry.
     uncrossPairs(routed, ctx);
+    orderCorridors(routed, ctx);
     roomForBridges(routed, ctx);
     ctx.drawn = [];
     for (i = 0; i < routed.length; i += 1) {

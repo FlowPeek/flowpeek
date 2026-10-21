@@ -160,6 +160,20 @@ const FAMILIES = {
     '  subgraph region[us-east-1]', '    subgraph az[AZ us-east-1a]', '      I --> P[API pod]', '    end',
     '    subgraph db[AZ us-east-1b]', '      J --> Q[API pod]', '    end', '  end',
   ].join('\n'),
+  // Several routes into one face from the same side, from sources at different depths, one of
+  // them nearer the face than the lanes of the others. Every fan-in family above brings its arms
+  // in from ranks that line up, so the lanes they are given already nest; none brings a route in
+  // past a chain that ends next to the face, which is what tied h20's Closed into two hops in the
+  // held-out review. At e5d9490 both draw 2 hops in TD and BT.
+  'returns past a chain': (dir) => [
+    `flowchart ${dir}`, '  s[Start] --> a[Agent]', '  a --> f[Finance]',
+    '  a --> e[Engineer] --> j[Jira] --> n[Notify] --> z([Closed])', '  f --> z', '  s --> k[KB] --> z', '  a --> z',
+  ].join('\n'),
+  'returns past a queue': (dir) => [
+    `flowchart ${dir}`, '  a[Agent] --> f[Finance approval] --> z([Closed])',
+    '  a --> e[Engineer] --> j[Jira bug] --> n[Notify] --> z', '  q[Queue] --> a', '  q --> k[Suggest article] --> z',
+    '  e --> z',
+  ].join('\n'),
   'long forward edge': (dir) => [
     `flowchart ${dir}`, '  A[Start] --> B[One] --> C[Two] --> D[Three] --> E[End]',
     '  A --> P[Wide parallel step] --> Q[Another one] --> E', '  A -->|skip| E',
@@ -294,7 +308,8 @@ export const TIGHT_MASKS = [];
  * the three link-form families went in; their 14 pairs are all one segment, and 202 until the three
  * long-edge families added 10 more, which were one segment before their fix as well as after, and
  * 212 until the two labelled-decision families added 10, 222 until the two busy labelled-face
- * families added 20, and 242 until the three zone-title families added 20.
+ * families added 20, 242 until the three zone-title families added 20, and 262 until the two
+ * return-past families added 8.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -305,7 +320,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 262;
+export const ALIGNED_PAIRS = 270;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

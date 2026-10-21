@@ -205,3 +205,36 @@ export const TIGHT_MASKS = [];
 export const STEPPED_PAIRS = [];
 
 export const ALIGNED_PAIRS = 188;
+
+// --- what six visual reviews left ------------------------------------------------------------
+//
+// Separately from the records above, which are properties of the generated space, this renderer
+// was compared against Pele -- the other engine in this app, drawing the same sources under the
+// `.pele` theme -- by six reader-facing reviews of the same eighteen drawings. The per-source
+// verdict, "which would a reader rather have", moved PELE 9 : OURS 3 : TIE 4, then 5:5:6, 3:5:8,
+// 2:5:9 and finally OURS 6 : PELE 1 : TIE 9 over sixteen sources, and OURS 7 : PELE 2 : TIE 9 once
+// the two a reader had actually sent in as broken are counted.
+//
+// Two things are deliberately left, and they are written here rather than in a commit message so
+// that the next person finds them from the test corpus rather than from `git log`.
+//
+// FACE-PRESSED HOPS IN A DENSE DAG. A crossing that lands hard against a box face has nowhere for
+// its bump to sit: a hop needs 16px of straight run on each side and may not lie under a node.
+// `1e55424` moves such a crossing off an elbow and `8b0420d` slides it off a face where two
+// connectors can both move, which took the dense review drawing from five face-pressed hops to
+// three. The three that remain are capped by an arrival run -- one edge's 24px arrival fixes its
+// elbow, and no slide inside that gap clears the box -- so the next move is a deeper rank gap when
+// a lane crosses a face's own stubs, which is a layout change rather than a routing one. The
+// reviewer graded the drawing's remaining width a defensible difference, not a defect: do not
+// chase it.
+//
+// MIXED LABEL CONVENTION IN ONE DRAWING. `f5e4b8e` puts a label on its own line where that is
+// clean and `e0f3a2d` makes a drawing that is mostly BESIDE go uniformly BESIDE. One reported
+// source sits between: two labels ON and four BESIDE, with no label ambiguous, so the cost is
+// tidiness rather than meaning. Every uniform alternative was measured and each is worse. Forcing
+// all ON costs 10 + 10 + 20 + 200 penalty points. Forcing all BESIDE costs 145 on one edge whose
+// columns stand 192px apart against a 176px plate, which leaves no ownership margin at all.
+// Reserving a 12px margin did make it uniform, and regressed a different reported source and broke
+// an ownership assertion on the three-way labelled fan. The mirror of `e0f3a2d` does nothing by
+// construction, because a label only goes BESIDE when its ON placement already costs more than 8.
+// What this needs is a reserve that does not disturb the labelled fan, which nobody has found.

@@ -218,6 +218,37 @@ const FAMILIES = {
     `flowchart ${dir}`, '  A[A] --> B[B]', '  B --> C[C]', '  A --> D[D]', '  D --> E[E]', '  C --> F[F]',
     '  A --> G[G]', '  C --> B', '  G --> A', '  B --> D', '  D --> B',
   ].join('\n'),
+  // Two routes on one face, to or from different depths, whose lanes stand in the wrong order when
+  // `uncrossPairs` first sees them. Every family above that puts two routes on one face either
+  // has them nested already or has them cross only once -- so `uncrossPairs` never traded their
+  // ports, and nothing showed that a trade judged before `orderCorridors` nests the lanes can
+  // invert ports the lanes would have nested from; the third held-out set's b11 did, Quit to title
+  // and Credits -> Title. Found by rendering 400 random state machines of five to nine nodes: 8
+  // drew two routes sharing a node crossing at a09c1af and not once the corridors are nested first,
+  // and this is one of the 2 that do so in all four directions, with one label dropped: as drawn,
+  // LR set "resume" facing Failed -> Done's line, a plate `answers.spec.js` pins as an exact set.
+  // At a09c1af Queued -> Dropped and Queued -> Done cross once, in every direction.
+  'trade before nesting': (dir) => [
+    `flowchart ${dir}`, '  queued[Queued] -->|claim| fetch[Fetching]', '  queued -->|wake| build[Building]',
+    '  build --> test[Testing]', '  fetch --> done[Done]', '  queued -->|retry| fail[Failed]',
+    '  fetch -->|cached| cache[Cache hit]', '  build --> store[Upload]', '  queued -->|cancel| gone[Dropped]',
+    '  fail --> gone', '  cache --> done', '  fail --> cache', '  fail -->|ignore| done', '  fetch --> build',
+    '  queued --> done',
+  ].join('\n'),
+  // A route that turns across another one's lane exactly where its corner lets go. No family above
+  // puts a corner's tangent point on a foreign line with straight to spare beyond it -- `crossing`
+  // has the tangent, but its turning route runs 4px before its next corner -- so nothing asked that
+  // such a crossing be marked; the third held-out set's b14 drew one as a T, 測定データ across the
+  // camera's turn down to 自動梱包機. Found among 400 random fan-ins to one gateway with a packer
+  // fed from the same sources: it was the one that drew a tangent crossing at a09c1af and, with it
+  // marked, no knot, no crossing between routes sharing a node and no crossing without a bump in
+  // any direction.
+  // At a09c1af Robot arm -> Packer turns down onto the Spot welder's report line RL, with no bump.
+  'turn onto a lane': (dir) => [
+    `flowchart ${dir}`, '  gw[Gateway]', '  scan[Barcode reader] --> sense[Thickness gauge] --> arm[Robot arm]',
+    '  arm -->|report| gw', '  arm --> pack[Packer]', '  probe[Spot welder] -->|report| gw', '  probe --> pack',
+    '  ctl[Control] -->|order| gw', '  gw -->|result| ctl', '  pack --> store[(Store)]',
+  ].join('\n'),
 };
 
 /**
@@ -366,7 +397,9 @@ export const TIGHT_MASKS = [];
  * one segment, as they must be: an author's colour changes no geometry -- and 382 until the two
  * opposed-answer families added 16, one segment before `facesSibling` as well as after, and 398
  * until `fork beside corridors` added 10, one segment before the corridor-aware mirror as after, and
- * 408 until `two-way pairs in a state machine` added 8, one segment before the port trade as after.
+ * 408 until `two-way pairs in a state machine` added 8, one segment before the port trade as after,
+ * and 416 until `turn onto a lane` added 16, one segment before its tangent bump as after
+ * (`trade before nesting` adds none).
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -377,7 +410,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 416;
+export const ALIGNED_PAIRS = 432;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

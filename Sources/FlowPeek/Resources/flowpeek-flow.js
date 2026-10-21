@@ -9276,7 +9276,9 @@
   }
 
   // The bump a crossing at x,y would get on `seg`, or null where the run has no room for it.
-  function hopAt(seg, x, y, existing) {
+  // `side` is +1 only for a crossing on a corner's tangent (`crossingsOf`); otherwise -1.
+  function hopAt(seg, x, y, existing, side) {
+    var flip = side === 1;
     if (seg.horizontal) {
       if (!hopFits(seg.room, x, existing)) return null;
       // The bump goes to -y on a horizontal run and to -x on a vertical one, whichever way the run
@@ -9284,16 +9286,16 @@
       // the increasing-angle direction, which lifts a left-to-right arc upwards and drops a
       // right-to-left one; the sign of the run is what keeps the bump on the same side of both.
       return {
-        at: x, box: { x: x - HOP_R, y: y - HOP_R, width: 2 * HOP_R, height: HOP_R },
+        at: x, box: { x: x - HOP_R, y: flip ? y : y - HOP_R, width: 2 * HOP_R, height: HOP_R },
         from: { x: x - seg.u * HOP_R, y: y }, to: { x: x + seg.u * HOP_R, y: y },
-        sweep: seg.u > 0 ? 1 : 0
+        sweep: (seg.u > 0) !== flip ? 1 : 0
       };
     }
     if (!hopFits(seg.room, y, existing)) return null;
     return {
-      at: y, box: { x: x - HOP_R, y: y - HOP_R, width: HOP_R, height: 2 * HOP_R },
+      at: y, box: { x: flip ? x : x - HOP_R, y: y - HOP_R, width: HOP_R, height: 2 * HOP_R },
       from: { x: x, y: y - seg.u * HOP_R }, to: { x: x, y: y + seg.u * HOP_R },
-      sweep: seg.u > 0 ? 0 : 1
+      sweep: (seg.u > 0) !== flip ? 0 : 1
     };
   }
 
@@ -9314,9 +9316,9 @@
     return true;
   }
 
-  function placeHop(seg, x, y, ctx) {
+  function placeHop(seg, x, y, ctx, side) {
     var existing = seg.owner.hops[seg.index] || [];
-    var hop = hopAt(seg, x, y, existing);
+    var hop = hopAt(seg, x, y, existing, side);
     if (!hop) return false;
     var near = hopAir(hop);
     if (!clearOfBoxes(near, ctx)) return false;
@@ -9363,12 +9365,48 @@
         var x = V.fixed, y = H.fixed;
         // Strictly interior on both, which is what makes it a crossing rather than a T: a route
         // that ends on another one's line shares a point with it and has nothing to hop over.
-        if (!(x > H.run.lo && x < H.run.hi)) continue;
-        if (!(y > V.run.lo && y < V.run.hi)) continue;
-        found.push({ H: H, V: V, x: x, y: y });
+        var inH = x > H.run.lo && x < H.run.hi, inV = y > V.run.lo && y < V.run.hi;
+        if (inH && inV) { found.push({ H: H, V: V, x: x, y: y }); continue; }
+        // Or exactly where one of them lets go of a corner's arc, inside the other's run.
+        var tH = !inH && inV && tangentSide(H, x), tV = inH && !inV && tangentSide(V, y);
+        if (tV) found.push({ H: H, V: V, x: x, y: y, only: H, side: tV });
+        else if (tH) found.push({ H: H, V: V, x: x, y: y, only: V, side: tH });
       }
     }
     return found;
+  }
+
+  // A crossing on a corner's tangent. In the third held-out set's b14, 測定データ ran into PLC
+  // along y 188, exactly where the camera's route to 自動梱包機 finished turning down off y 180:
+  // the drawn straight of that route starts ON the other line, so the strict test above saw a T, no
+  // bump was drawn, and the arc landing on the line read as a branch -- as if 測定データ also fed
+  // 自動梱包機. It is a crossing: the route arrives from one side of the line and leaves on the
+  // other. `roomForBridges` already counts it stranded and offers slides; there, none was legal --
+  // the camera's port stood at its face's last allowed place and PLC's left face held six ports at
+  // one pitch -- and the crossing did not move.
+  //
+  // So it takes a bump on the run it lies inside, on the side the turning route RUNS STRAIGHT from
+  // the crossing, which needs that straight to last the bump's height. On the other side is the
+  // arc, and a bump there would cut through it: the arc and the bump both span the 8px between the
+  // two lanes. Where the straight side is -y (or -x) this is the usual bump; where it is not, the
+  // bump is the usual one mirrored, which is the only exception to one side per drawing and the
+  // price of having a mark at all.
+  //
+  // Rejected: a smaller radius on that corner, so that the turning route shows a stub of straight
+  // above the line. With any radius the crossing stays within a bump's height of the corner, so
+  // neither route could carry a bump; the crossing would be plain and 4px from an elbow, which is
+  // the shape `roomForBridges` was written because readers took for a join.
+  //
+  // Returns +1 or -1, the direction `seg`'s straight run leaves the point `at` along its own axis,
+  // when `at` is where a corner's arc hands over to that run and the run lasts a bump's height;
+  // else 0.
+  function tangentSide(seg, at) {
+    var a = seg.horizontal ? seg.owner.points[seg.index].x : seg.owner.points[seg.index].y;
+    var b = seg.horizontal ? seg.owner.points[seg.index + 1].x : seg.owner.points[seg.index + 1].y;
+    if (seg.run.hi - seg.run.lo < HOP_R) return 0;
+    if (at === seg.run.lo && seg.run.lo !== Math.min(a, b)) return 1;
+    if (at === seg.run.hi && seg.run.hi !== Math.max(a, b)) return -1;
+    return 0;
   }
 
   function bridgeCrossings(routed, ctx) {
@@ -9382,6 +9420,7 @@
     if (crossingsAreCommon(found.length, routed)) return;
     for (i = 0; i < found.length; i += 1) {
       var c = found[i];
+      if (c.only) { placeHop(c.only, c.x, c.y, ctx, c.side); continue; }
       var wH = hopWeight(c.H.owner.edge), wV = hopWeight(c.V.owner.edge);
       var first = (wH !== wV) ? (wH < wV ? c.H : c.V) : (c.H.order > c.V.order ? c.H : c.V);
       var second = (first === c.H) ? c.V : c.H;
@@ -9422,7 +9461,9 @@
       var c = found[i];
       var airs = [];
       for (var k = 0; k < 2; k += 1) {
-        var hop = hopAt(k === 0 ? c.H : c.V, c.x, c.y, []);
+        var seg = k === 0 ? c.H : c.V;
+        if (c.only && seg !== c.only) continue;
+        var hop = hopAt(seg, c.x, c.y, [], c.side);
         if (!hop) continue;
         var air = hopAir(hop);
         if (clearOfBoxes(air, ctx)) airs.push(air);
@@ -10737,6 +10778,21 @@
     // After every route exists, because a braid is a fact about two finished routes. `ctx.drawn`
     // is rebuilt from the result: the label pass tells a route's own legs from a rival's by the
     // identity of the point objects, so it has to hold the arrays the routes now carry.
+    //
+    // `orderCorridors` runs on both sides of `uncrossPairs`. Before it, so that the trades are
+    // judged against lanes already nested: a trade is kept when it lowers crossings from where the
+    // routes stand, and where two routes into one face stood in the wrong lanes that was a knot the
+    // next pass would have untied for nothing. The third held-out set's b11 showed it. Quit to
+    // title and Credits -> Title crossed twice in the gap before Title; trading their ports took
+    // that to one and was kept, and the corridors pass, which nests them with no crossing at all
+    // from the ports they had, then found the ports inverted and could do nothing. After it, as
+    // before, because a swap or a trade can leave a face's lanes out of order again.
+    //
+    // Rejected: refusing a port trade that leaves its two routes crossing. It brings back the
+    // braids the trades were added for -- pairs crossing twice over SWEEP, the review sources and
+    // both held-out sets went from 3 to 6 -- because it also refuses trades like b11's Esc / Boss
+    // defeated, which leaves that pair crossing once where it crossed twice.
+    orderCorridors(routed, ctx);
     uncrossPairs(routed, ctx);
     orderCorridors(routed, ctx);
     roomForBridges(routed, ctx);

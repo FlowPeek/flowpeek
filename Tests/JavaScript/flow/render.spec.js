@@ -219,6 +219,44 @@ function spanCrossings(da, db) {
 }
 
 /**
+ * Where a straight stretch of `dv` ends exactly ON a straight stretch of `db` because a corner arc
+ * lets go there: the turning route arrives from one side of the line and leaves on the other, so it
+ * is a crossing, though `spanCrossings` -- strict on both stretches -- reads it as a T. `beyond` is
+ * how far the turning route runs straight past the line.
+ */
+function tangentCrossings(db, dv) {
+  const spans = (d) => {
+    const out = [];
+    let at = null, start = null, fromArc = false;
+    for (const [letter, n] of commandsOf(d)) {
+      if (letter === 'M') { at = { x: n[0], y: n[1] }; start = at; fromArc = false; }
+      else if (letter === 'L') at = { x: n[0], y: n[1] };
+      else if (letter === 'A') at = { x: n[5], y: n[6] };
+      else { out.push({ span: [start, at], arcs: [fromArc, true] }); at = { x: n[2], y: n[3] }; start = at; fromArc = true; }
+    }
+    out.push({ span: [start, at], arcs: [fromArc, false] });
+    return out.filter(({ span: [a, b] }) => a && b && (a.x !== b.x || a.y !== b.y));
+  };
+  const found = [];
+  for (const { span: h } of spans(db)) {
+    for (const { span: v, arcs } of spans(dv)) {
+      const hz = h[0].y === h[1].y;
+      if (hz === (v[0].y === v[1].y)) continue;
+      const line = hz ? h[0].y : h[0].x;
+      const cross = hz ? v[0].x : v[0].y;
+      const along = (p) => (hz ? p.y : p.x);
+      const lo = Math.min(hz ? h[0].x : h[0].y, hz ? h[1].x : h[1].y);
+      const hi = Math.max(hz ? h[0].x : h[0].y, hz ? h[1].x : h[1].y);
+      if (cross <= lo || cross >= hi) continue;
+      const k = [0, 1].find((e) => arcs[e] && along(v[e]) === line);
+      if (k === undefined) continue;
+      found.push({ at: hz ? { x: cross, y: line } : { x: line, y: cross }, beyond: Math.abs(along(v[1 - k]) - line) });
+    }
+  }
+  return found;
+}
+
+/**
  * Which face of which box each connector attaches to, and where along it. The face is read from the
  * direction the stroke leaves in -- a stub runs along the face normal (dd-arch.md's port rule) --
  * so this works for a port that has sunk to a rhombus's outline as well as for one on a flat face.
@@ -459,8 +497,10 @@ describe('[Render] bridges at crossings', () => {
       const paths = edgePaths(drawn(source).svg);
       for (let i = 0; i < paths.length; i += 1) {
         for (const hop of bridges(paths[i].d)) {
+          // Or where the other's corner lets go on this run: see `tangentCrossings`.
           const crossed = paths.some((other, j) => j !== i
-            && spanCrossings(paths[i].d, other.d).some((c) => c.at.x === hop.at.x && c.at.y === hop.at.y));
+            && [...spanCrossings(paths[i].d, other.d), ...tangentCrossings(paths[i].d, other.d)]
+              .some((c) => c.at.x === hop.at.x && c.at.y === hop.at.y));
           expect(crossed, `bridge at ${hop.at.x},${hop.at.y} crosses nothing`).toBe(true);
         }
       }
@@ -533,6 +573,41 @@ describe('[Render] bridges at crossings', () => {
     expect(plain).toBe(0);
   });
 
+  it('bridges a crossing on a corner\'s tangent, on the side the turning route runs straight', () => {
+    // A route whose corner lets go exactly on another route's line crosses it -- it comes in from
+    // one side and leaves on the other -- but the crossing sits on the end of its straight, not
+    // inside it, so the strict test drew it plain, and the arc landing on the line read as a T:
+    // the third held-out set's b14, 測定データ across the camera's turn down to 自動梱包機. Asked
+    // wherever the turning route runs on a bump's height past the line, which is when a bump on the
+    // crossed run can stand clear of the arc; `turn onto a lane` RL draws one at a09c1af.
+    expect(SWEEP.filter(({ name: n }) => /^turn onto a lane /.test(n)).length).toBe(4);
+    const missed = [];
+    let tangents = 0;
+    for (const ruler of [measureText, measureFace]) {
+      for (const { name: n, source } of SWEEP) {
+        const paths = edgePaths(drawn(source, { measureText: ruler }).svg);
+        let crossed = 0;
+        for (let i = 0; i < paths.length; i += 1) {
+          for (let j = i + 1; j < paths.length; j += 1) crossed += crossings(paths[i].d, paths[j].d).length;
+        }
+        if (2 * crossed > paths.length) continue;
+        for (const crossedPath of paths) {
+          for (const turning of paths) {
+            if (turning === crossedPath) continue;
+            for (const { at, beyond } of tangentCrossings(crossedPath.d, turning.d)) {
+              if (beyond < 8) continue;
+              tangents += 1;
+              const bumped = bridges(crossedPath.d).some((b) => b.at.x === at.x && b.at.y === at.y);
+              if (!bumped) missed.push(`${ruler === measureFace ? 'face' : 'budget'} ${n}: ${turning.id} turns onto ${crossedPath.id} at ${at.x},${at.y}`);
+            }
+          }
+        }
+      }
+    }
+    expect(tangents).toBeGreaterThan(0);
+    expect(missed).toEqual([]);
+  });
+
   it('keeps a grid step of air between every bump and every node', () => {
     // The nodes are painted after the strokes, so a crest that reaches a node's border comes back
     // with its top shaved off -- and one that stops ON the border reads as part of it. A negative
@@ -544,10 +619,15 @@ describe('[Render] bridges at crossings', () => {
       for (const path of edgePaths(out.svg)) {
         for (const hop of bridges(path.d)) {
           // The bump reaches 8px off the run, on the -y side of a horizontal one and the -x side of
-          // a vertical one; its far edge is the part most likely to be swallowed.
-          const crest = hop.from.y === hop.to.y
-            ? [{ x: hop.at.x - 8, y: hop.at.y - 8 }, { x: hop.at.x + 8, y: hop.at.y - 8 }]
-            : [{ x: hop.at.x - 8, y: hop.at.y - 8 }, { x: hop.at.x - 8, y: hop.at.y + 8 }];
+          // a vertical one, or the other side where it bridges a corner's tangent (read off its
+          // sweep: 1 lifts a left-to-right arc, 0 a top-to-bottom one, towards -y and -x); its far
+          // edge is the part most likely to be swallowed.
+          const horizontal = hop.from.y === hop.to.y;
+          const forward = horizontal ? hop.to.x > hop.from.x : hop.to.y > hop.from.y;
+          const off = (forward === (hop.sweep === (horizontal ? 1 : 0))) ? -8 : 8;
+          const crest = horizontal
+            ? [{ x: hop.at.x - 8, y: hop.at.y + off }, { x: hop.at.x + 8, y: hop.at.y + off }]
+            : [{ x: hop.at.x + off, y: hop.at.y - 8 }, { x: hop.at.x + off, y: hop.at.y + 8 }];
           crests += 1;
           for (const shape of shapes) {
             expect(segmentEntersShape(crest, shape.points, -4), `crest at ${hop.at.x},${hop.at.y}`).toBe(false);

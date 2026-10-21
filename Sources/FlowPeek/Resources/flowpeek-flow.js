@@ -6612,7 +6612,7 @@
 
     for (i = 0; i < model.edges.length; i += 1) desirePorts(model.edges[i], model);
 
-    mirrorForks(faces);
+    mirrorForks(faces, model);
 
     for (i = 0; i < faces.length; i += 1) {
       var f = faces[i];
@@ -6928,7 +6928,32 @@
   // An arm travelling a corridor is not one of these: its first station is the corridor the layout
   // reserved, several ranks long, and aiming it at a mirror point instead would bend it at both ends
   // to buy symmetry with a branch that is not beside it anyway.
-  function mirrorForks(faces) {
+  //
+  // But such a corridor still LANDS on the faces the arms land on, and the mirror point must not be
+  // on its far side. A corridor comes down its lane and onto the face at that lane; an arm comes
+  // across the last gap from the apex. Where the apex stands on one side of the corridor's lane, the
+  // arm can reach a port on the other side only by crossing the corridor in that gap, and the two
+  // were decided apart: the corridor's port by `desirePorts`, the arm's by this pass, which read
+  // nothing but the two targets' runs. So an arm's reach on its target face stops a port's pitch
+  // short of every corridor landing there, on the apex's side. The third held-out set showed it
+  // three times. b12's store forks to RevenueChart and OrderDrawer, the two outermost of four
+  // targets, and the mirror sent both to the outer ends of their runs -- past MainPanel's corridors
+  // down to each, so each arm hopped one. b09's CS201 forks to CS320 and CS350, and CS350's arm was
+  // sent to the bottom of its face, below CS110's corridor arriving from below. And the sweep's
+  // `opposed answers beside a skip` drew it without a hop: Guarantee?'s "granted" was mirrored to
+  // the far corner of Pay the holding deposit, past the corridor from Request proof of paid taxes,
+  // and that corridor's last jog ran 12px along the dashed arm's run -- one line read as joining
+  // the other.
+  //
+  // Where the stopped reach leaves no distance that suits both arms, the pair is left as
+  // `desirePorts` had it, which is the rule above for boxes that cannot be mirrored, and the face's
+  // sort then orders the arm by where it heads (`isInverted`, `leanOf`). Rejected: keeping the
+  // mirror and moving the corridor's port instead. The corridor's port is under its lane, so it
+  // lands straight; moving it off its lane bends a line several ranks long to keep a symmetry the
+  // reader cannot see from the corridor's end of the drawing. A face too short to hold the arm
+  // beside the lane still moves the corridor -- `placeFace` keeps the pitch -- and that is the one
+  // cost measured: CS110's corridor in b09 now steps 12px before CS350, a bend where it had a hop.
+  function mirrorForks(faces, model) {
     for (var i = 0; i < faces.length; i += 1) {
       var f = faces[i];
       var arms = [];
@@ -6964,7 +6989,18 @@
             return { lo: at, hi: at };
           }
         }
-        return { lo: a.face.base + a.face.run.lo, hi: a.face.base + a.face.run.hi };
+        var reach = { lo: a.face.base + a.face.run.lo, hi: a.face.base + a.face.run.hi };
+        for (var c = 0; c < a.face.group.length; c += 1) {
+          var other = a.face.group[c];
+          var via = other.edge.via || [];
+          var level = model.levels.get(other.edge.level);
+          if (other === a || via.length === 0 || !level) continue;
+          var lane = viaAlong(a.face, level, other.end === 0 ? via[0] : via[via.length - 1]);
+          var lands = a.face.base + other.desire;
+          if (lane < centre) reach.lo = Math.max(reach.lo, lands + MIN_PITCH);
+          else if (lane > centre) reach.hi = Math.min(reach.hi, lands - MIN_PITCH);
+        }
+        return reach;
       };
       for (var k = 0; k + 1 < arms.length - k; k += 1) {
         var lo = arms[k];

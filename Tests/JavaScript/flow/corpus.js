@@ -194,6 +194,16 @@ const FAMILIES = {
     '  T -.-> D{Guarantee?}', '  D -.->|refused| X', '  D -.->|granted| P[Pay the holding deposit]', '  T --> P',
     '  P --> Q[Sign the lease]',
   ].join('\n'),
+  // A fork whose two outer arms land on faces that two long-edge corridors land on too, from ranks
+  // above the fork. Families above already bring two such corridors into one face -- 22 faces at
+  // 9071d73 -- but none brings a fork's mirrored arm in beside them, so nothing compared where the
+  // fork mirrors its arms with where the corridors come down; the third held-out set's b12 did, and
+  // both outer arms hopped a corridor.
+  // At 9071d73 it draws 1 hop in TD and in BT.
+  'fork beside corridors': (dir) => [
+    `flowchart ${dir}`, '  G[Gate] --> H[Hub] --> M[Mixer] --> S{Split}', '  G --> L[Left sink]', '  H --> L',
+    '  G --> R[Right sink]', '  H --> R', '  S --> L', '  S --> C[Centre]', '  S --> R',
+  ].join('\n'),
 };
 
 /**
@@ -340,7 +350,8 @@ export const TIGHT_MASKS = [];
  * families added 20, 242 until the three zone-title families added 20, 262 until the two
  * return-past families added 8, and 270 until the styled-shape family added 112 -- two per drawing, all
  * one segment, as they must be: an author's colour changes no geometry -- and 382 until the two
- * opposed-answer families added 16, one segment before `facesSibling` as well as after.
+ * opposed-answer families added 16, one segment before `facesSibling` as well as after, and 398
+ * until `fork beside corridors` added 10, one segment before the corridor-aware mirror as after.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -351,7 +362,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 398;
+export const ALIGNED_PAIRS = 408;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

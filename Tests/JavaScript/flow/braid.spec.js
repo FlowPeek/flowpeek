@@ -213,3 +213,46 @@ describe('[Braid] routes into one face take their lanes in the order of its port
     expect(found).toEqual([]);
   });
 });
+
+// A fork's arm lands on the near side of a corridor into the same face.
+//
+// `mirrorForks` sends a fork's outer arms to mirrored ports, and it read nothing but the two
+// targets' runs: where a long-edge corridor lands on the same face from the apex's side, the
+// mirrored port was past it, and the arm met the corridor in the last gap. Across the gap it is a
+// crossing -- `fork beside corridors` TD and BT drew one at 9071d73 -- and where the corridor's
+// last jog runs on the arm's own lane it is a shared stretch, which reads as one line joining the
+// other: `opposed answers beside a skip` TD and BT, where the corridor into Pay the holding
+// deposit ran 12px along "granted" under differential.mjs's face ruler. This file measures with the
+// flat budget, which sizes those boxes so the two clear each other at 9071d73 too; the overlap
+// check guards that shape here rather than reproducing it.
+function sharedEndOverlaps(source) {
+  const all = routes(source);
+  const found = [];
+  const ends = (id) => id.replace(/^L_/, '').replace(/_\d+$/, '').split('_').pop();
+  for (let i = 0; i < all.length; i += 1) {
+    for (let j = i + 1; j < all.length; j += 1) {
+      if (ends(all[i].id) !== ends(all[j].id)) continue;
+      for (const a of all[i].legs) {
+        for (const b of all[j].legs) {
+          if (a.horizontal !== b.horizontal) continue;
+          const on = a.horizontal ? a.p.y === b.p.y : a.p.x === b.p.x;
+          const k = a.horizontal ? 'x' : 'y';
+          const lo = Math.max(Math.min(a.p[k], a.q[k]), Math.min(b.p[k], b.q[k]));
+          const hi = Math.min(Math.max(a.p[k], a.q[k]), Math.max(b.p[k], b.q[k]));
+          if (on && hi > lo) found.push(`${all[i].id} along ${all[j].id} (${hi - lo}px)`);
+        }
+      }
+    }
+  }
+  return found;
+}
+
+describe('[Braid] a fork arm lands on the near side of a corridor into the same face', () => {
+  it('neither crosses the corridor nor runs along it', () => {
+    const families = SWEEP.filter(({ name }) => /^(fork beside corridors|opposed answers beside a skip) /.test(name));
+    expect(families.length).toBe(8);
+    const found = families.flatMap(({ name, source }) =>
+      [...sharedEndCrossings(source), ...sharedEndOverlaps(source)].map((b) => `${name}: ${b}`));
+    expect(found).toEqual([]);
+  });
+});

@@ -6306,6 +6306,35 @@
   // business to decline, and a decline is a route rather than a failure.
   // ===========================================================================
 
+  // How wide an EDGE label may grow before it takes a second line. Not `wrappingWidth`: that is the
+  // budget of a label inside a box, which cannot get wider and so has to get taller. An edge label
+  // stands in a gap beside its line, and there height is the expensive axis -- a taller plate is
+  // what reaches the neighbouring strokes. At the node's 160 the editorial theme wrapped 41 of the
+  // 44 labels on label-analysis.md's eight crowded sources, where Pele wraps 3.
+  //
+  // Swept at 160, 192, 208, 216, 224, 232, 240, 248, 256, 288, 320, 384, 448, 512 and no cap, over
+  // those eight sources and Scripts/differential.mjs's 175 drawings. On the eight, labels at two
+  // or more lines went 41, 29, 20, 10, 9, 4, 3, 3, 3, 2 and 0 from 320 on; placements that found a
+  // zero-penalty spot went 27, 27, 32, 32, 32 of 44, then 28 from 232 on; and the mean distance
+  // from a plate to the nearest stroke it does not own went 30.06, 26.73, 27.30, 29.87, 33.59,
+  // then 28.67 at 232 and between 27.36 and 27.90 past it. Of the 175, only the two reader-sent
+  // drawings carry a label long enough to notice, and 224 is the last setting before one of them
+  // pays for it: at 232 cand.mmd's "negotiate(adjustRate, original)" comes off two lines onto one
+  // 248px plate, the drawing goes from 1 plate over a foreign stroke to 3, and the corpus's
+  // zero-penalty count drops from 36 of 40 to 35. So 224 is where the wraps stop paying for
+  // themselves -- the clean-placement count and the clearance both peak there -- and the next step
+  // is the first one that is bought with a drawing a reader sent.
+  //
+  // What 224 costs, measured: the eight crowded sources grow from 2,469,056 to 2,822,784 px²,
+  // because the plates trade height for width (summed heights 3104 to 2788, widths 6900 to 8708);
+  // over the 175 the area moves from 12,306,336 to 12,299,168. Ownership does not suffer: the
+  // crowded plates clear by at least 12px 44 of 44 times against 43 at 160, and none is lost at
+  // any setting swept. One crowded plate -- every-edge-labelled diamond BT -- lands on a foreign
+  // stroke it cleared at 160. Rejected: going smaller to win that back. It is on that stroke at
+  // every setting from 192 to 232, and 208, the cheapest of them at 2,591,040 px², still wraps 20
+  // of 44 and stands the plates nearer foreign strokes than 160 did.
+  var EDGE_WRAP_PX = 224;
+
   function layout(db, options) {
     var opts = options || {};
     // Accepts either the projection or the raw payload it is projected from, so a caller that
@@ -6388,7 +6417,9 @@
       var edge = model.edges[i];
       var text = edge.raw.text;
       if (typeof text === "string" && text.length > 0) {
-        var shaped = shapeLabel(text, metrics, metrics.edge, wrapPX);
+        // Never narrower than a host's node budget: a theme that lets a box grow to 300px has said
+        // nothing to make the label beside it wrap sooner than the label inside it.
+        var shaped = shapeLabel(text, metrics, metrics.edge, Math.max(wrapPX, EDGE_WRAP_PX));
         edge.label = shaped;
         // The backing rect is 8px wider than the text on each side rather than 4. Half of that is
         // SKILL.md §6 rule 2 wanting the mask clear of the stroke; the other half is slack against

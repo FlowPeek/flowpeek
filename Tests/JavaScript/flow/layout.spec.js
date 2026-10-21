@@ -608,6 +608,19 @@ describe('[Layout] edges', () => {
     expect(gapTall).toBeGreaterThanOrEqual(labelled.labelHeight);
   });
 
+  it('wraps an edge label at its own budget, not at the node wrapping width', () => {
+    // A box cannot get wider, so a node label wraps at 160; an edge label sits in a gap beside its
+    // line, where height is what pushes it into the neighbouring strokes. A four-word clause that
+    // is wider than 160 stays on one line ...
+    const sentence = draw('flowchart LR\n  A[API] -->|validated customer command| Z[Event log]').edges[0];
+    expect(sentence.labelLines).toEqual(['validated customer command']);
+    expect(sentence.labelWidth).toBeGreaterThan(EDITORIAL.arrangement.wrappingWidth);
+    // ... and the budget is still a cap: past it the reader-sent `cand` label puts a 248px plate
+    // over two foreign strokes, so a label that long keeps wrapping.
+    const long = draw('flowchart TB\n  O -- "negotiate(adjustRate, original)" --> N1').edges[0];
+    expect(long.labelLines.length).toBe(2);
+  });
+
   it('gives a self-loop two distinct ports on one face', () => {
     const out = draw('flowchart TD\n  A --> B\n  B --> B');
     const loop = out.edges.find((e) => e.from === 'B' && e.to === 'B');

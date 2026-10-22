@@ -105,6 +105,17 @@ const FAMILIES = {
     `flowchart ${dir}`, '  A[Start] --> B[Load]', '  B --> C[Parse]', '  B --> X[Side]', '  C --> D[Check]',
     '  X --> D', '  D --> E[Save]', '  E -.->|again| A', '  A --> E',
   ].join('\n'),
+  // A back edge from below a zone to the zone's first row, over a populated middle: six ranks of
+  // it, with a gap down the middle a corridor clears. The third held-out set's c15 is this shape
+  // (credits -.-> start, NG+, up through Act I with four hops), and nothing here had a back edge
+  // climb a zone it is drawn at the parent level of -- inside the zone no rank lays a lane for it,
+  // so the router alone decides where it climbs (`outerLanes`). Not in LR: see BACK_OVER_A_ZONE.
+  'back edge over a zone': (dir) => [
+    `flowchart ${dir}`, '  subgraph one[Harbour]', '    A[Start] --> B[Inn]', '    B --> C{Ask?}', '    B --> W[Far side]',
+    '    W --> N', '    C -->|yes| N[Note]', '    C -->|no| D[Docks]', '    D --> E[Oil]', '    D --> F[Maren]',
+    '    F --> N', '    D --> G[Guards]', '    G --> H{Pay?}', '    H -->|yes| D', '    H -->|no| K[Cell]',
+    '    K --> N', '  end', '  N --> X[Causeway]', '  X --> Y[Island]', '  Y --> Z[Credits]', '  Z -.->|again| A',
+  ].join('\n'),
   // Decisions with three and four LABELLED answers. 'fan out' above is a four-way diamond too, but
   // with no labels it never asked whose line a label was on, and the held-out review's worst
   // drawings were exactly that question: three exits 12px apart off one tip, labels beside them.
@@ -388,6 +399,7 @@ export function generate() {
       });
     }
     for (const [family, build] of Object.entries(FAMILIES)) {
+      if (family === 'back edge over a zone' && dir === 'LR') continue;
       out.push({ name: `${family} ${dir}`, source: build(dir) });
     }
     if (dir === 'LR' || dir === 'RL') {
@@ -398,6 +410,18 @@ export function generate() {
   }
   return out;
 }
+
+/**
+ * `back edge over a zone` in all four directions, for zones.spec.js, which asserts its climb in
+ * each. SWEEP leaves LR out: drawn left to right, the back edge reaches Start's right face from
+ * below, onto the port above `A --> B`'s, and crosses it there -- at 2594afe too, with the climb
+ * still through the zone. The port order follows the root level's corridor, which runs above
+ * Start, and the lane on that side crosses `Y --> Z` at Credits' face instead, so it is the port
+ * order and not the lane, and SWEEP's "crosses no two edges that share a node" would name it.
+ */
+export const BACK_OVER_A_ZONE = DIRECTIONS.map((dir) => ({
+  name: `back edge over a zone ${dir}`, source: FAMILIES['back edge over a zone'](dir),
+}));
 
 /**
  * The hand-written specimens. ORDER IS LOAD-BEARING: render.spec.js indexes into this list, so
@@ -530,7 +554,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 474;
+export const ALIGNED_PAIRS = 481;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

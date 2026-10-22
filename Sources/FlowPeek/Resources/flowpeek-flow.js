@@ -9972,6 +9972,142 @@
     return 0;
   }
 
+  // --- an outer lane for a long back edge ----------------------------------
+  // A back edge whose climb is drawn through the drawing, moved onto the first lane outside
+  // everything that climb passes, when that crosses strictly fewer of the other routes.
+  //
+  // The router has no term for a crossing. `connect` takes the first cross-line that clears, in
+  // order of distance from the midpoint of its two stations, so a corridor past the middle of a
+  // zone is chosen whenever the zone leaves a gap in its middle wide enough to clear. In the third
+  // held-out set's c15 NG+ (credits -.-> start) belongs to the root level, where Act I is a single
+  // box, so nothing inside Act I lays a lane for it: its last leg runs from the last root dummy
+  // at x 648 to start's arrival station at x 572, and of every vertical that clears, x 684 -- 12px
+  // past Arrested by harbour guards -- is 74px from their midpoint. It climbs Act I there from
+  // y 1396 to 132 and crosses four lines. The lane 8px outside Act I's wall, x 884, clears too and
+  // crosses none, but it is 274px away and never reached. Pele draws NG+ in that margin.
+  //
+  // What moves is a stretch of the route's runs along the rank axis, every one of them onto the
+  // same lane, so the corridor the root level laid beside Act II and Act III and the climb through
+  // Act I become the one run Pele draws. The stub and the arrival stay where the layout put them
+  // (`laneRoute`), the lane has to clear at the first pass's strictness and lay no new stretch
+  // beside another route, and the canvas grows to hold it (`renderOrDecline`).
+  //
+  // Measured over the 59 held-out drawings and SWEEP, with no limit on the edge's length: 45 back
+  // edges have such a lane, and only those across three ranks or more ever cross fewer by it --
+  // c15's by 4, `back edge over a zone` by 2 -- while the 12 between neighbouring ranks cross as
+  // many or more. So the lane is taken wherever it crosses fewer, and the edge is still held to
+  // two ranks or more, so that a back edge between neighbours keeps its short route whatever the
+  // drawing round it does.
+  function outerLanes(routed, ctx) {
+    var lanes = [];
+    for (var i = 0; i < routed.length; i += 1) {
+      var r = routed[i];
+      if (!r || r.transit || r.edge.selfLoop || !r.edge.reversed) continue;
+      if (r.edge.fromRank === null || r.edge.toRank === null || Math.abs(r.edge.fromRank - r.edge.toRank) < 2) continue;
+      var key = (r.edge.direction === "TB" || r.edge.direction === "BT") ? "x" : "y";
+      var along = key === "x" ? "y" : "x";
+      var others = routed.filter(function (o) { return o && o !== r && !o.edge.selfLoop; });
+      var drawn = [];
+      for (var o = 0; o < others.length; o += 1) {
+        for (var s = 0; s + 1 < others[o].points.length; s += 1) drawn.push([others[o].points[s], others[o].points[s + 1]]);
+      }
+      var probe = Object.create(ctx);
+      probe.drawn = drawn;
+      var before = crossingsWith(r.points, others);
+      var beside = besideCount(r.points, others);
+      // Fewest crossings first, then fewest corners, then the nearest lane; over every stretch of
+      // consecutive runs along the rank axis -- k, k + 2, ... -- tried as one.
+      var best = null;
+      var runs = [];
+      for (var k = 1; k + 2 < r.points.length; k += 1) if (r.points[k][key] === r.points[k + 1][key]) runs.push(k);
+      for (var a = 0; a < runs.length; a += 1) {
+        for (var b = a; b < runs.length && runs[b] - runs[a] === 2 * (b - a); b += 1) {
+          var lo = Infinity;
+          var hi = -Infinity;
+          for (var c = a; c <= b; c += 1) {
+            lo = Math.min(lo, r.points[runs[c]][along], r.points[runs[c] + 1][along]);
+            hi = Math.max(hi, r.points[runs[c]][along], r.points[runs[c] + 1][along]);
+          }
+          for (var side = -1; side <= 1; side += 2) {
+            var lane = outerLane(lo, hi, key, side, ctx, drawn);
+            if (lane === null) continue;
+            var next = laneRoute(r.points, runs.slice(a, b + 1), lane, key, side, r.edge);
+            if (!next || !routeIsClear(next, probe, 4, r.edge) || besideCount(next, others) > beside) continue;
+            var cost = [crossingsWith(next, others), next.length, Math.abs(lane - r.points[runs[a]][key])];
+            if (cost[0] >= before || (best && !cheaper(cost, best.cost))) continue;
+            best = { points: next, cost: cost, lane: { axis: key, value: lane } };
+          }
+        }
+      }
+      if (best) {
+        r.points = best.points;
+        lanes.push(best.lane);
+      }
+    }
+    return lanes;
+  }
+
+  // Whether one list of costs, compared in order, is below another.
+  function cheaper(a, b) {
+    for (var i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return a[i] < b[i];
+    return false;
+  }
+
+  function crossingsWith(points, others) {
+    var n = 0;
+    for (var o = 0; o < others.length; o += 1) n += crossingsBetween(points, others[o].points);
+    return n;
+  }
+
+  // `points` with the runs `ks` moved onto `value` across `key`, or null when that would not move
+  // each of them outward, would turn round the leg into the stretch or the one out of it, or would
+  // shorten a stub or the arrival. The legs between two moved runs vanish, which is how two
+  // corridors become one.
+  function laneRoute(points, ks, value, key, side, edge) {
+    var out = points.map(function (p) { return { x: p.x, y: p.y }; });
+    for (var i = 0; i < ks.length; i += 1) {
+      if (side > 0 ? value <= points[ks[i]][key] : value >= points[ks[i]][key]) return null;
+      out[ks[i]][key] = value;
+      out[ks[i] + 1][key] = value;
+    }
+    var first = ks[0];
+    var last = ks[ks.length - 1] + 1;
+    var before = sign(points[first][key] - points[first - 1][key]);
+    var after = sign(points[last + 1][key] - points[last][key]);
+    if (sign(out[first][key] - out[first - 1][key]) !== before || sign(out[last + 1][key] - out[last][key]) !== after) return null;
+    var merged = mergeRoute(out);
+    var n = merged.length - 1;
+    if (Math.abs(merged[1].x - merged[0].x) + Math.abs(merged[1].y - merged[0].y) < STUB_PX + edge.start.inset) return null;
+    if (Math.abs(merged[n].x - merged[n - 1].x) + Math.abs(merged[n].y - merged[n - 1].y) < ARRIVE_PX + edge.end.inset) return null;
+    if (!legsAreDrawable(merged)) return null;
+    return merged;
+  }
+
+  // The first lane on one side (`side`, -1 or 1, along `key`) clear of every box, zone border and
+  // parallel stroke that the stretch `lo`..`hi` of the other axis passes, on the grid.
+  function outerLane(lo, hi, key, side, ctx, drawn) {
+    var along = key === "x" ? "y" : "x";
+    var size = key === "x" ? "width" : "height";
+    var length = key === "x" ? "height" : "width";
+    var at = null;
+    function take(v) { if (at === null || (side > 0 ? v > at : v < at)) at = v; }
+    function clearOf(b, clear) {
+      if (b[along] >= hi || b[along] + b[length] <= lo) return;
+      take(side > 0 ? b[key] + b[size] + clear : b[key] - clear);
+    }
+    var i;
+    for (i = 0; i < ctx.boxes.length; i += 1) clearOf(ctx.boxes[i], PASS_CLEAR_PX);
+    for (i = 0; i < ctx.rails.length; i += 1) clearOf(ctx.rails[i], ZONE_CLEAR_PX);
+    for (i = 0; i < drawn.length; i += 1) {
+      var a = drawn[i][0];
+      var b = drawn[i][1];
+      if (a[key] !== b[key] || Math.max(a[along], b[along]) <= lo || Math.min(a[along], b[along]) >= hi) continue;
+      take(a[key] + side * PASS_CLEAR_PX);
+    }
+    if (at === null) return null;
+    return (side > 0 ? Math.ceil(at / GRID) : Math.floor(at / GRID)) * GRID;
+  }
+
   function bridgeCrossings(routed, ctx) {
     var i;
     for (i = 0; i < routed.length; i += 1) {
@@ -11406,6 +11542,8 @@
       roomForBridges(routed, ctx);
       return n;
     }
+    // After the four passes, which only ever trade or slide what is there; see `outerLanes`.
+    var lanes = outerLanes(routed, ctx);
     ctx.drawn = [];
     for (i = 0; i < routed.length; i += 1) {
       if (!routed[i]) continue;
@@ -11872,7 +12010,7 @@
 
     var plates = [];
     for (i = 0; i < routed.length; i += 1) if (routed[i] && routed[i].label) plates.push(routed[i].label.rect);
-    return { svg: svg, css: css, warnings: warnings, plates: plates, struck: struck, sibling: sibling };
+    return { svg: svg, css: css, warnings: warnings, plates: plates, struck: struck, sibling: sibling, lanes: lanes };
   }
 
   // ===========================================================================
@@ -12020,6 +12158,16 @@
       grow.top = Math.max(grow.top, m - r.y);
       grow.right = Math.max(grow.right, r.x + r.width - (drawing.width - m));
       grow.bottom = Math.max(grow.bottom, r.y + r.height - (drawing.height - m));
+    }
+    // And an outer lane the same way: a back edge moved outside the drawing (`outerLanes`) keeps
+    // the margin past it that every other drawing keeps past its last mark.
+    for (k = 0; k < out.lanes.length; k += 1) {
+      var lane = out.lanes[k];
+      var near = lane.axis === "x" ? "left" : "top";
+      var far = lane.axis === "x" ? "right" : "bottom";
+      var extent = lane.axis === "x" ? drawing.width : drawing.height;
+      grow[near] = Math.max(grow[near], m - lane.value);
+      grow[far] = Math.max(grow[far], lane.value - (extent - m));
     }
     if (grow.left > 0 || grow.top > 0 || grow.right > 0 || grow.bottom > 0) {
       grow = { left: gridUp(grow.left, 0) / GRID, top: gridUp(grow.top, 0) / GRID,

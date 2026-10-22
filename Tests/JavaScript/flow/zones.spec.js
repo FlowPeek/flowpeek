@@ -22,7 +22,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SWEEP } from './corpus.js';
+import { BACK_OVER_A_ZONE, SWEEP } from './corpus.js';
 import { measureText } from './measure.js';
 
 const require = createRequire(import.meta.url);
@@ -294,4 +294,49 @@ describe('[Zones] a zone title stays at its corner, a gap clear of every line', 
     ];
     expect(found).toEqual([]);
   });
+});
+
+// A long back edge climbs outside the zone it returns into, not through the middle of it.
+//
+// The third held-out set's c15 drew NG+ (credits -.-> start) up through Act I with four hops: the
+// edge is drawn at the root level, where the zone is one box, so no rank inside the zone lays a
+// lane for it, and the router climbed the first gap that cleared. Pele draws it in the margin.
+// What is asserted is the climb -- the back edge's longest run along the rank axis -- standing
+// outside the zone's box and crossing no other route. Its arrival is not: in LR the edge comes
+// round into Start's face across Start's own exit, which is a port-side crossing of its own.
+describe('[Zones] a long back edge climbs outside a zone, not through it', () => {
+  // A hop's arc ends on its own run, so the corners are what is left once collinear points go.
+  const corners = (points) => points.filter((p, i) => i === 0 || i === points.length - 1
+    || !((points[i - 1].x === p.x && p.x === points[i + 1].x) || (points[i - 1].y === p.y && p.y === points[i + 1].y)));
+  const runsOf = (points) => { const c = corners(points); return c.slice(1).map((q, i) => [c[i], q]); };
+  const crosses = ([p, q], [r, s]) => {
+    if (p.y === q.y && r.x === s.x) {
+      return r.x > Math.min(p.x, q.x) && r.x < Math.max(p.x, q.x) && p.y > Math.min(r.y, s.y) && p.y < Math.max(r.y, s.y);
+    }
+    if (p.x === q.x && r.y === s.y) return crosses([r, s], [p, q]);
+    return false;
+  };
+
+  for (const dir of ['TD', 'LR', 'BT', 'RL']) {
+    it(`back edge over a zone ${dir}`, () => {
+      const { source } = BACK_OVER_A_ZONE.find(({ name }) => name === `back edge over a zone ${dir}`);
+      const drawing = laidOut(source);
+      const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText });
+      expect(out.reason || 'ok').toBe('ok');
+      const paths = new Map([...out.svg.matchAll(/data-id="([^"]*)" d="([^"]*)"/g)].map((m) => [m[1], skeleton(m[2])]));
+      const back = paths.get('L_Z_A_0');
+      const vertical = dir === 'TD' || dir === 'BT';
+      const along = vertical ? 'x' : 'y';
+      const climb = runsOf(back)
+        .filter(([p, q]) => p[along] === q[along])
+        .sort((a, b) => Math.abs(b[1][vertical ? 'y' : 'x'] - b[0][vertical ? 'y' : 'x']) - Math.abs(a[1][vertical ? 'y' : 'x'] - a[0][vertical ? 'y' : 'x']))[0];
+      const zone = drawing.clusters.find((c) => c.id === 'one');
+      const lo = vertical ? zone.x : zone.y;
+      const hi = lo + (vertical ? zone.width : zone.height);
+      const at = climb[0][along];
+      const hops = [...paths].filter(([id]) => id !== 'L_Z_A_0')
+        .flatMap(([id, pts]) => runsOf(pts).filter((run) => crosses(climb, run)).map(() => id));
+      expect({ outside: at < lo || at > hi, hops }).toEqual({ outside: true, hops: [] });
+    });
+  }
 });

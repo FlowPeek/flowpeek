@@ -35,7 +35,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SWEEP } from './corpus.js';
+import { STADIUM_ANSWERED_TWICE, SWEEP } from './corpus.js';
 import { measureText } from './measure.js';
 import { distanceToOutline, insideOutline, nodeOutlines, rayDepth } from './outline.js';
 
@@ -244,6 +244,35 @@ describe('[Ports] a shape that is drawn outside its box has no outline to land o
     for (const { port } of out.ports.filter((p) => p.node.id === 'B')) {
       expect(`${port.side} ${distanceToOutline(port, outline.points) < 1e-6}`).toBe(`${port.side} true`);
     }
+  });
+});
+
+describe('[Ports] a stadium is always a pill', () => {
+  // `shapeMarkup` writes a stadium as two straights and two caps of radius min(W, H). A box grown
+  // taller than it is wide has no straight and caps too small to reach their own ends, and SVG
+  // scales such a radius up until it does: the fourth held-out set's d12 drew `([Browser])` as
+  // M0,-60 L0,-60 A44,44 0 0 1 0,60 ... -- a 120px circle. Read off every path the sweep emits.
+  it('writes a positive straight run and caps whose radius is half their chord, over the sweep and d12', () => {
+    const PILL = /<g class="basic label-container outer-path"><path d="([^"]*)"/g;
+    const broken = [];
+    let pills = 0;
+    for (const { name, source } of [...SWEEP, ...STADIUM_ANSWERED_TWICE]) {
+      const out = flow.render({
+        source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText,
+      });
+      let m;
+      while ((m = PILL.exec(out.svg || '')) !== null) {
+        pills += 1;
+        // M x0,y0 L x1,y0 A r,r 0 0 1 x1,y1 ...: the top straight, then the right cap down to y1.
+        const n = m[1].match(NUMBER).map(Number);
+        const straight = n[2] - n[0];
+        const r = n[4];
+        const chord = n[10] - n[1];
+        if (!(straight > 0) || 2 * r !== chord) broken.push(`${name}: ${m[1]}`);
+      }
+    }
+    expect(pills).toBeGreaterThanOrEqual(4 * 3);
+    expect(broken).toEqual([]);
   });
 });
 

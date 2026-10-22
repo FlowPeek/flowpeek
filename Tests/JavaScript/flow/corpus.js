@@ -329,6 +329,13 @@ const FAMILIES = {
     '  Q -->|plastic| L{Clear PET?}', '  Q -->|glass| G{Broken?}', '  Q -->|can| N[Can bin]',
     '  Q -->|foam| F{Tape removed?}', '  Q -->|other| T[General waste]', '  P -->|yes| T',
   ].join('\n'),
+  // A stadium five ends arrive at and five leave. Every stadium above is a terminal with one or two
+  // links, so nothing asked what a pill does with ten.
+  'stadium with ten ends': (dir) => [
+    `flowchart ${dir}`, '  a1[Login] --> hub([Go])', '  a2[Party] --> hub', '  a3[Store] --> hub', '  a4[Settings] --> hub',
+    '  a5[Results] --> hub', '  hub --> b1[Queue]', '  hub --> b2[Friends]', '  hub --> b3[Shop]', '  hub --> b4[Profile]',
+    '  hub --> b5[Quit]',
+  ].join('\n'),
 };
 
 // Families drawn only in LR and RL, where a plate is shorter across its run than along it and so
@@ -454,6 +461,27 @@ export const BACK_OVER_A_ZONE = DIRECTIONS.map((dir) => ({
  */
 export const SEVEN_WAY_DECISION = DIRECTIONS.map((dir) => ({
   name: `seven-way decision ${dir}`, source: FAMILIES['seven-way decision'](dir),
+}));
+
+/**
+ * A stadium two labelled answers come back to beside the request it sends, drawn left to right and
+ * right to left, for ports.spec.js, which reads its pill in each. Across a horizontal level the
+ * seats for those plates grow its height, and no stadium in SWEEP carries more than one labelled
+ * end: the fourth held-out set's d12 grew `([Browser])` from 48 to 120px, past its width, where its
+ * caps no longer span their chord and SVG draws a circle. At 9536a06 Browser is 96 wide and 120
+ * tall in both, written with caps of radius 48.
+ *
+ * Not in SWEEP: held to a pill, Browser's face is 88px tall where Edge PoP's three seats ask more,
+ * and its two runs to Edge PoP step -- so SWEEP's "draws every aligned pair as one segment" would
+ * name `edge->user` and `user->edge`. At 9536a06 both run straight, into the circle. The step is
+ * the pill's price, not a port defect.
+ */
+export const STADIUM_ANSWERED_TWICE = ['LR', 'RL'].map((dir) => ({
+  name: `stadium answered twice ${dir}`,
+  source: [
+    `flowchart ${dir}`, '  user([Browser]) -->|GET /img/logo.png| edge[Edge PoP]', '  edge -->|HIT| user',
+    '  edge -->|MISS| shield[Origin shield]', '  shield -->|200| edge', '  edge -->|200, stored for max-age| user',
+  ].join('\n'),
 }));
 
 /**
@@ -589,7 +617,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 483;
+export const ALIGNED_PAIRS = 489;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

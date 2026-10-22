@@ -4515,6 +4515,19 @@
     return span;
   }
 
+  // The tallest a stadium of width `w` may be grown, in grid units: two short of its width, so its
+  // straight run is at least 8px and its caps, written at radius min(W, H) by `shapeMarkup`, span
+  // their chord exactly. Grown past its width, a pill has no straight run and caps too small to
+  // reach their ends, and SVG scales them up until they do: the fourth held-out set's d12 drew
+  // `([Browser])`, which three ends across an RL level had grown from 48 to 120px, as
+  // M0,-60 L0,-60 A44,44 0 0 1 0,60 ... -- a 120px circle. Past this height its ends share the cap.
+  //
+  // Measured against not growing it at all: the sweep's `returns past a queue`, LR and RL, then
+  // turns an arrival 12px off Closed's face, and arrival.spec.js asks 16.
+  function pillHeight(w) {
+    return w - 2;
+  }
+
   function layoutLevel(level, env) {
     var vertical = (level.dir === "TB" || level.dir === "BT");
     var children = level.children;
@@ -4669,6 +4682,7 @@
             if (tr.hi === tr.lo) break;
             if (tr.hi - tr.lo >= bp) break;
             if (bg === "circle" || bg === "doublecircle") { bc.w += 2; bc.h = bc.w; }
+            else if (bg === "stadium" && !vertical) { if (bc.h + 2 > pillHeight(bc.w)) break; bc.h += 2; }
             else if (vertical) bc.w += 2;
             else bc.h += 2;
           }
@@ -7696,8 +7710,13 @@
         // A circle is drawn at radius W whatever its height says (`shapeMarkup`), so growing one
         // axis of one and not the other would draw a shape that leaves its own box. The two round
         // families stay square; every other geometry takes the growth on the loaded axis alone.
+        //
+        // A stadium across a horizontal level takes it only up to `pillHeight`: its loaded axis is
+        // its height, and a pill no longer wide than tall is not a pill (see there).
         if (geometry === "circle" || geometry === "doublecircle") {
           if (need > node.w || need > node.h) { node.w = even(Math.max(node.w, need)); node.h = node.w; }
+        } else if (geometry === "stadium" && !vertical) {
+          node.h = Math.max(node.h, Math.min(even(need), pillHeight(node.w)));
         } else if (vertical) {
           node.w = even(Math.max(node.w, need));
         } else {

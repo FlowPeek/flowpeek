@@ -35,6 +35,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SEVEN_WAY_DECISION } from './corpus.js';
 import { measureText } from './measure.js';
 
 const require = createRequire(import.meta.url);
@@ -380,6 +381,48 @@ describe('[Fork] a decision branches where it is left', () => {
         expect(legs.length, `${label} ${node}`).toBe(2);
         expect(Math.min(...legs), `${label} ${node} shared stretch`).toBeLessThanOrEqual(28);
       }
+    }
+  });
+});
+
+describe('[Fork] the answers of a many-way decision', () => {
+  // The third held-out set's c10: 재질이 무엇인가요? sends seven labelled answers down a ladder of
+  // four lanes, and each plate took the middle of its own lane, so the answers stood at five
+  // heights and a reader hunted down the ladder for each one. Pele writes all seven in one row.
+  // The property, read off the drawing: every plate of the decision's answers is ON its own line
+  // and they all stand at one place along the rank axis.
+  it('writes every answer of a seven-way decision in one row, each on its own line', () => {
+    for (const { name, source } of SEVEN_WAY_DECISION) {
+      const svg = drawn(source).svg;
+      const vertical = / (TD|BT)$/.test(name);
+      const paths = new Map([...svg.matchAll(/data-id="(L_Q_[^"]*)" d="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+      const places = new Set();
+      const off = [];
+      let plates = 0;
+      for (const m of svg.matchAll(/data-id="(L_Q_[^"]*)" transform="translate\(([-\d.]+),([-\d.]+)\)"><rect class="background" x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"/g)) {
+        const rect = { x: +m[2] + +m[4], y: +m[3] + +m[5], w: +m[6], h: +m[7] };
+        places.add(vertical ? rect.y + rect.h / 2 : rect.x + rect.w / 2);
+        plates += 1;
+        // The straight legs: each `L` from wherever the command before it ended, corners left out.
+        const legs = [];
+        let at = null;
+        for (const [, cmd, args] of paths.get(m[1]).matchAll(/([MLQA])([^MLQA]*)/g)) {
+          const n = args.trim().split(/[\s,]+/).map(Number);
+          const to = { x: n[n.length - 2], y: n[n.length - 1] };
+          if (cmd === 'L' && at) legs.push([at, to]);
+          at = to;
+        }
+        // ON: a leg of the rank axis runs through the plate from one end to the other.
+        const on = legs.some(([a, b]) => (vertical
+          ? a.x === b.x && a.x > rect.x && a.x < rect.x + rect.w
+            && Math.min(a.y, b.y) < rect.y && Math.max(a.y, b.y) > rect.y + rect.h
+          : a.y === b.y && a.y > rect.y && a.y < rect.y + rect.h
+            && Math.min(a.x, b.x) < rect.x && Math.max(a.x, b.x) > rect.x + rect.w));
+        if (!on) off.push(m[1]);
+      }
+      expect(plates, name).toBe(7);
+      expect(`${name} rows ${[...places].sort((a, b) => a - b).join(',')}`).toBe(`${name} rows ${[...places][0]}`);
+      expect(`${name} off their lines: ${off.join(' ')}`).toBe(`${name} off their lines: `);
     }
   });
 });

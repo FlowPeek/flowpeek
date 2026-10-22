@@ -11841,6 +11841,80 @@
       });
       ctx.labelRects = platesBut(-1, -1);
     }
+    // One row per fan of answers. `alignColumns` lines up plates that already share an axis, but a
+    // fan's plates do not: each arm turns onto a lane of its own, the arms ladder outwards so the
+    // one reaching furthest turns nearest the node, and each plate takes the middle of its own
+    // longest run -- the lane, for most. So the answers of one decision stood at as many heights as
+    // the ladder has rungs, plus the arms with no lane worth a plate: the third held-out set's c10
+    // wrote 재질이 무엇인가요?'s seven answers at five heights, 700 to 908, and a reader hunts down
+    // the ladder for each one where Pele writes all seven in one row above their targets.
+    //
+    // So the labelled arms leaving one face of one node, three or more, are offered every place
+    // along the face's own axis in turn, each plate ON a run of that axis there -- the last leg,
+    // for an arm that turned. The row is kept only if EVERY plate can stand in it at no more than
+    // its seat costs now: a row with a plate missing is the stagger again, and no plate pays more,
+    // so no harm the score knows of is bought. Lowest total first, then nearest the middle of the
+    // places they all share. No route or box moves, so no drawing changes size.
+    //
+    // Rejected: spreading the stems or flattening the ladder. The stems leave 24px apart, the busy
+    // pitch, and the rungs are what keep seven arms off one another's lanes; the stagger was where
+    // the plates sat, not where the lines ran.
+    function alignFans() {
+      var fans = new Map();
+      for (var k = 0; k < routed.length; k += 1) {
+        var r = routed[k];
+        if (!r || !r.label || r.edge.selfLoop || r.points.length < 2) continue;
+        var p0 = r.points[0], p1 = r.points[1];
+        var leavesAlongY = p0.x === p1.x;
+        var key = r.edge.from + "|" + (leavesAlongY ? "y" : "x") + "|" + (leavesAlongY ? Math.sign(p1.y - p0.y) : Math.sign(p1.x - p0.x));
+        if (!fans.has(key)) fans.set(key, { horizontal: !leavesAlongY, members: [] });
+        fans.get(key).members.push(k);
+      }
+      fans.forEach(function (fan) {
+        var members = fan.members;
+        if (members.length < 3) return;
+        var labels = members.map(function (m) { return routed[m].label; });
+        var along = function (l) { return fan.horizontal ? l.x : l.y; };
+        var row = true;
+        for (var f = 0; f < labels.length; f += 1) {
+          if (!labels[f].onLine || labels[f].horizontal !== fan.horizontal || along(labels[f]) !== along(labels[0])) row = false;
+        }
+        if (row) return;
+        // The places every arm's route spans along the face's axis.
+        var lo = -Infinity, hi = Infinity;
+        for (f = 0; f < members.length; f += 1) {
+          var pts = routed[members[f]].points, mn = Infinity, mx = -Infinity;
+          for (var pi = 0; pi < pts.length; pi += 1) {
+            var v = fan.horizontal ? pts[pi].x : pts[pi].y;
+            mn = Math.min(mn, v); mx = Math.max(mx, v);
+          }
+          lo = Math.max(lo, mn); hi = Math.min(hi, mx);
+        }
+        if (!(lo < hi)) return;
+        var others = titleRects.slice();
+        for (var o = 0; o < routed.length; o += 1) {
+          if (routed[o] && routed[o].label && members.indexOf(o) < 0) others.push(routed[o].label.rect);
+        }
+        var offers = [];
+        for (var at = snap4(lo); at <= hi; at += GRID) {
+          ctx.labelRects = others.slice();
+          var seats = [], total = 0;
+          for (f = 0; f < members.length; f += 1) {
+            var rm = routed[members[f]];
+            var seat = placeEdgeLabel(rm.edge, rm.points, ctx, rm.transit, false, { horizontal: fan.horizontal, at: at });
+            if (!seat || seat.penalty > labels[f].penalty) break;
+            seats.push(seat); total += seat.penalty; ctx.labelRects.push(seat.rect);
+          }
+          if (seats.length === members.length) offers.push({ at: at, total: total, seats: seats });
+        }
+        if (!offers.length) return;
+        var offered = offers.map(function (x) { return x.at; });
+        var mid = (offered[0] + offered[offered.length - 1]) / 2;
+        offers.sort(function (x, y) { return (x.total - y.total) || (Math.abs(x.at - mid) - Math.abs(y.at - mid)) || (x.at - y.at); });
+        for (f = 0; f < members.length; f += 1) routed[members[f]].label = offers[0].seats[f];
+      });
+      ctx.labelRects = platesBut(-1, -1);
+    }
     function countOn() {
       var on = 0, all = 0;
       for (i = 0; i < routed.length; i += 1) {
@@ -11857,6 +11931,7 @@
       if (countOn().on > 0) placeLabels(false);
     }
     alignColumns();
+    alignFans();
     for (i = 0; i < routed.length; i += 1) {
       if (routed[i] && routed[i].label && routed[i].label.crowded) noteWarning(warnings, "label-crowded");
     }

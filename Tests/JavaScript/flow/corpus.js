@@ -318,6 +318,17 @@ const FAMILIES = {
     '  F -->|no| H{One-stop exemption?}', '  H -->|yes, five or fewer| N[No return needed]', '  H -->|no| G',
     '  H -->|not donating| N',
   ].join('\n'),
+  // A decision with seven labelled answers. Every decision above answers two to four ways, where
+  // the fork's mirror pairs turn at one height and their plates share it, so nothing asked where
+  // the plates of a fan with more rungs than that stand: the third held-out set's c10 wrote
+  // 재질이 무엇인가요?'s seven answers at five heights. This is c10's decision in English.
+  // At 3475b08 the seven plates stand at three places TD and BT; LR and RL already share one, and
+  // are kept out of SWEEP for a square corner they have at 3475b08 too (SEVEN_WAY_DECISION).
+  'seven-way decision': (dir) => [
+    `flowchart ${dir}`, '  Q{What is it made of?} -->|paper| P{Coated?}', '  Q -->|carton| C[Carton bin]',
+    '  Q -->|plastic| L{Clear PET?}', '  Q -->|glass| G{Broken?}', '  Q -->|can| N[Can bin]',
+    '  Q -->|foam| F{Tape removed?}', '  Q -->|other| T[General waste]', '  P -->|yes| T',
+  ].join('\n'),
 };
 
 // Families drawn only in LR and RL, where a plate is shorter across its run than along it and so
@@ -400,6 +411,7 @@ export function generate() {
     }
     for (const [family, build] of Object.entries(FAMILIES)) {
       if (family === 'back edge over a zone' && dir === 'LR') continue;
+      if (family === 'seven-way decision' && (dir === 'LR' || dir === 'RL')) continue;
       out.push({ name: `${family} ${dir}`, source: build(dir) });
     }
     if (dir === 'LR' || dir === 'RL') {
@@ -421,6 +433,17 @@ export function generate() {
  */
 export const BACK_OVER_A_ZONE = DIRECTIONS.map((dir) => ({
   name: `back edge over a zone ${dir}`, source: FAMILIES['back edge over a zone'](dir),
+}));
+
+/**
+ * `seven-way decision` in all four directions, for fork.spec.js, which asserts its row in each.
+ * SWEEP leaves LR and RL out: drawn sideways, the arm into `Broken?` takes a one-unit sidestep
+ * with no fillet half way along its run (LR: 292 -> 296 at x 576) -- at 3475b08 too, before its
+ * plates were put in a row, and no plate moves a route -- so SWEEP's "no square corner" would name
+ * it. The sidestep is the router's, not the row's.
+ */
+export const SEVEN_WAY_DECISION = DIRECTIONS.map((dir) => ({
+  name: `seven-way decision ${dir}`, source: FAMILIES['seven-way decision'](dir),
 }));
 
 /**

@@ -329,6 +329,12 @@ const FAMILIES = {
     '  Q -->|plastic| L{Clear PET?}', '  Q -->|glass| G{Broken?}', '  Q -->|can| N[Can bin]',
     '  Q -->|foam| F{Tape removed?}', '  Q -->|other| T[General waste]', '  P -->|yes| T',
   ].join('\n'),
+  // The same ten ends on a circle. Every circle above is a terminal with one or two links.
+  'circle with ten ends': (dir) => [
+    `flowchart ${dir}`, '  a1[Login] --> hub((Lobby))', '  a2[Party] --> hub', '  a3[Store] --> hub', '  a4[Settings] --> hub',
+    '  a5[Results] --> hub', '  hub --> b1[Queue]', '  hub --> b2[Friends]', '  hub --> b3[Shop]', '  hub --> b4[Profile]',
+    '  hub --> b5[Quit]',
+  ].join('\n'),
   // A stadium five ends arrive at and five leave. Every stadium above is a terminal with one or two
   // links, so nothing asked what a pill does with ten.
   'stadium with ten ends': (dir) => [
@@ -485,6 +491,28 @@ export const STADIUM_ANSWERED_TWICE = ['LR', 'RL'].map((dir) => ({
 }));
 
 /**
+ * A circle every screen leaves for and comes back to -- four labelled exits, eight returns, a dozen
+ * ends on one face -- in all four directions, for ports.spec.js, which measures the circle in each.
+ * The fourth held-out set's d01 grew `((Lobby))` until each of its 13 ends had a seat, 632x632
+ * against Pele's 66x66. At 1f3745e Lobby is 544 across TD and BT and 624 LR and RL.
+ *
+ * Not in SWEEP: neither renderer draws it clean. At 1f3745e it runs two connectors along one
+ * another and puts a mask within 8px of a stroke TD, LR and BT, crosses two edges that share a node
+ * and braids a pair -- eight checks. With its ends converged on a 96px circle it runs along and
+ * crowds a mask in all four directions, holds its busy face at 8px, and gives two plates a margin
+ * over a neighbour's line too thin to read, or none showing past them -- eleven.
+ */
+export const CIRCLE_HUB = DIRECTIONS.map((dir) => ({
+  name: `circle hub ${dir}`,
+  source: [
+    `flowchart ${dir}`, '  boot[Sign in] --> hub((Lobby))', '  hub -->|Play| q[Queue]', '  hub -->|Invite| p[Party]',
+    '  hub -->|Shop| s[Store]', '  hub -->|Settings| t[Settings]', '  p -->|leave| hub', '  s -->|back| hub',
+    '  t -->|back| hub', '  q -->|cancel| hub', '  q --> a{Accept?}', '  a -->|declined| hub', '  a -->|timeout| hub',
+    '  a -->|yes| m[Match]', '  m --> hub',
+  ].join('\n'),
+}));
+
+/**
  * The hand-written specimens. ORDER IS LOAD-BEARING: render.spec.js indexes into this list, so
  * append only.
  */
@@ -617,7 +645,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 489;
+export const ALIGNED_PAIRS = 495;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //

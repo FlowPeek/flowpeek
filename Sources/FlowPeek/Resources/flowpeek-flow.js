@@ -4528,6 +4528,25 @@
     return w - 2;
   }
 
+  // The diameter a circle needs for N ends on one face, in grid units: 8px of it for each end and
+  // one more. A circle is not grown for the busy pitch or for seats as a box is. Its landing run is
+  // half its radius either side of the crest, so every 12px of run costs it about 24px in both
+  // directions: the fourth held-out set's d01 grew `((Lobby))` for 13 ends to 632x632 against Pele's
+  // 66x66, d03 its 사용 가능 to 432 and d06 its 通知中心 to 360. Held to this, their ends converge on
+  // the crest as Pele's converge on one point: Lobby is 104, and the other two keep the size their
+  // labels give them, 88 each in WebKit.
+  //
+  // Measured, over the 80 held-out drawings (far crossings on set D, 31 at 9536a06; sets A, B and C
+  // unchanged in every variant):
+  // - no growth at all: 36, and 12 ends on Lobby's face stand 4px apart.
+  // - ends sharing seats, contiguous runs of arrivals or departures on one port: 49 at the run's
+  //   inner width, 82 at three seats -- the router parts every shared stub again, with hops.
+  // - 12px of diameter an end: 28, Lobby 160; 16px: 28, Lobby 208; 12px of LANDING RUN an end: 36,
+  //   Lobby 312. Set D's labels off their line: 35 here (32 at 9536a06), 36, 37, 36 and 32.
+  function roundSpan(N) {
+    return even(2 * (N + 1));
+  }
+
   function layoutLevel(level, env) {
     var vertical = (level.dir === "TB" || level.dir === "BT");
     var children = level.children;
@@ -4671,6 +4690,11 @@
           // And a face with two or more labelled ends grows until each has a seat (`seatGaps`): the
           // pitches `facePitches` will ask of it are only usable if the run holds them.
           bp = Math.max(bp, seatSpan(want[wi][3], !vertical));
+          if (bg === "circle" || bg === "doublecircle") {
+            var round = roundSpan(bn);
+            if (round > bc.w) { bc.w = round; bc.h = round; }
+            continue;
+          }
           if (bp === 0) continue;
           // Grown against the landing run rather than the box, because the run is what `placeFace`
           // spends: a stadium loses its two caps, and Closed sized as 8 x 24px of box still put its
@@ -7714,7 +7738,8 @@
         // A stadium across a horizontal level takes it only up to `pillHeight`: its loaded axis is
         // its height, and a pill no longer wide than tall is not a pill (see there).
         if (geometry === "circle" || geometry === "doublecircle") {
-          if (need > node.w || need > node.h) { node.w = even(Math.max(node.w, need)); node.h = node.w; }
+          // Not here: `layoutLevel` sizes a round shape by `roundSpan`, once it knows which face
+          // each end lands on.
         } else if (geometry === "stadium" && !vertical) {
           node.h = Math.max(node.h, Math.min(even(need), pillHeight(node.w)));
         } else if (vertical) {

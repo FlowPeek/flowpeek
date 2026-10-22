@@ -35,7 +35,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STADIUM_ANSWERED_TWICE, SWEEP } from './corpus.js';
+import { CIRCLE_HUB, STADIUM_ANSWERED_TWICE, SWEEP } from './corpus.js';
 import { measureText } from './measure.js';
 import { distanceToOutline, insideOutline, nodeOutlines, rayDepth } from './outline.js';
 
@@ -273,6 +273,37 @@ describe('[Ports] a stadium is always a pill', () => {
     }
     expect(pills).toBeGreaterThanOrEqual(4 * 3);
     expect(broken).toEqual([]);
+  });
+});
+
+describe('[Ports] a circle is not grown for its ends', () => {
+  // A circle's landing run is half its radius either side of the crest, so seating each end cost it
+  // twice the run in both directions: the fourth held-out set's d01 drew `((Lobby))` 632x632 for 13
+  // ends, against Pele's 66x66. It may take 8px of diameter an end on its busiest face, and no more.
+  it('holds a hub of a dozen ends to its label or 8px an end, in every direction', () => {
+    const grown = [];
+    for (const { name, source } of CIRCLE_HUB) {
+      const db = new flow.FlowDB();
+      db.clear();
+      flow.parse(source, db);
+      const laid = flow.layout(db, { measureText, theme: EDITORIAL });
+      const hub = laid.nodes.find((n) => n.id === 'hub');
+      const faces = new Map();
+      for (const edge of laid.edges) {
+        for (const [id, port] of [[edge.from, edge.start], [edge.to, edge.end]]) {
+          if (id === 'hub' && port) faces.set(port.side, (faces.get(port.side) || 0) + 1);
+        }
+      }
+      const busiest = Math.max(...faces.values());
+      const alone = new flow.FlowDB();
+      alone.clear();
+      flow.parse(`${source.split('\n')[0]}\n  hub((Lobby))`, alone);
+      const shaped = flow.layout(alone, { measureText, theme: EDITORIAL }).nodes[0].width;
+      const most = Math.max(shaped, 8 * (busiest + 1));
+      if (hub.width > most || hub.height !== hub.width) grown.push(`${name} ${hub.width}x${hub.height} against ${most}`);
+    }
+    expect(CIRCLE_HUB).toHaveLength(4);
+    expect(grown).toEqual([]);
   });
 });
 

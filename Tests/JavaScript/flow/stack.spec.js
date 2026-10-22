@@ -188,3 +188,29 @@ describe('the straight after a step', () => {
     }
   }
 });
+
+// And a face that takes a line back keeps the seats of the lines it sends.
+//
+// The third held-out set's review asked that a busy face pay its seat only in the gaps beside a
+// head and stand two leaving ends 12px apart, as a face every end leaves from does in `keyed menu`.
+// Those keys are taller than wide and seat nothing; a one-line plate is wider than tall, and two
+// exits that run on side by side out of a hub hold their plates in one column only a seat apart.
+// Measured at b4caf70 with that rule: c05's 同行评审 144 to 104, b11's Resume laid along Stage
+// clear's border, and here "right" beside its line.
+describe('a face that sends and takes back', () => {
+  const hubs = SWEEP.filter(({ name }) => /^hub that takes back what it sends (LR|RL)$/.test(name));
+  it('is checked on one hub, both horizontal directions', () => {
+    expect(hubs.length).toBe(2);
+  });
+  for (const { name, source } of hubs) {
+    for (const [ruler, measure] of [['face', measureFace], ['budget', measureText]]) {
+      it(`holds each exit's plate ON its line: ${name}, ${ruler}`, () => {
+        const out = flow.render({ source, renderID: 'fp-0', diagramType: 'flowchart-v2', theme: EDITORIAL, measureText: measure });
+        expect(out.warnings).toEqual([]);
+        const exits = fields(out.svg).flat().filter((p) => /^L_hub_[abe]_0$/.test(p.id));
+        expect(exits.length).toBe(3);
+        expect(exits.filter((p) => !p.on).map((p) => p.id)).toEqual([]);
+      });
+    }
+  }
+});

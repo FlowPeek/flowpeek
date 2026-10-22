@@ -378,6 +378,16 @@ const HORIZONTAL_FAMILIES = {
     `flowchart ${dir}`, '  hub[Hub] -->|view| ev[Events]', '  hub -->|block| ev', '  hub -->|mention| ev',
     '  hub -->|shortcut| ev', '  hub -->|retry after 1 min<br>up to 3 times| ev',
   ].join('\n'),
+  // A hub face that both sends and takes back: three labelled exits and one labelled return on one
+  // face. The seated faces above that take a line back -- `labelled fan with a return` -- keep their
+  // plates on their lines even with the exits 12px apart, so nothing asked whether two exits on a
+  // face with a head still need their seat: the third held-out set's review asked that c05's 同行评审
+  // seat only the gaps next to its head and stand its leaving ends 12px apart.
+  // Measured at b4caf70 with that rule: "right" stands 20px off its line, LR on the budget ruler.
+  'hub that takes back what it sends': (dir) => [
+    `flowchart ${dir}`, '  s[Start] --> hub[Router]', '  hub -->|left| a[Alpha]', '  hub -->|right| b[Beta]',
+    '  a --> m[Merge]', '  b --> m', '  m -->|loop| hub', '  hub -->|stop| e[End]',
+  ].join('\n'),
 };
 
 /**
@@ -566,7 +576,9 @@ export const TIGHT_MASKS = [];
  * a free lane as after, and 448 until `third route beside a two-way pair` added 8, one segment
  * before a third route was eased off a slid pair as after, and 456 until `keyed menu` added 8, one
  * segment before a face that only sends stopped growing as after, and 464 until `one tall plate on a
- * seated face` added 10, one segment before a face paid its seats gap by gap as after.
+ * seated face` added 10, one segment before a face paid its seats gap by gap as after, and 481 at b4caf70
+ * until `hub that takes back what it sends` added 2, one segment at b4caf70 and under the refused
+ * gap-beside-a-head rule alike.
  *
  * Empty, and the one entry that was here before the sweep went in is worth recording as gone. The
  * back edge `C --> A` in `graph TD` was written up as a permitted exception -- its corridor was
@@ -577,7 +589,7 @@ export const TIGHT_MASKS = [];
  */
 export const STEPPED_PAIRS = [];
 
-export const ALIGNED_PAIRS = 481;
+export const ALIGNED_PAIRS = 483;
 
 // --- what eight visual reviews left ----------------------------------------------------------
 //
